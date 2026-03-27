@@ -2,39 +2,42 @@
 
 **Repository:** [github.com/hasroonpervez/cashflow-trader](https://github.com/hasroonpervez/cashflow-trader)
 
-> A high-density Streamlit trading terminal for options cash-flow execution, upgraded with persistent state, institutional glass UI, and decision-first intelligence blocks.
+> A high-density Streamlit trading terminal for options cash-flow execution, with a **HUD-style main column** (Mission Control + ticker tape), glass UI, persistent state, and decision-first intelligence blocks.
 
 ---
 
 ## What Changed In This Release
 
+### ✅ HUD / Mission Control layout (v14.1)
+- **Main column first:** A bordered **MISSION CONTROL** bar sits directly under the sticky nav (NOC-style: switches above the “monitors”).
+- **Target ticker** `selectbox`, **Strategy** (`st.segmented_control` when available, else horizontal `radio`), **Turbo** (`mini_mode`), **option horizon**, and **scanner sort** all live in Mission Control — not buried in the sidebar.
+- **Watchlist tape:** one tap per symbol to set the active ticker; **primary** button highlights the selection. Rows show a **cached daily % change** (last vs prior session). Long lists wrap in **chunks of 8** columns so mobile stays usable.
+- **Sidebar = paperwork:** **`⚙️ System Config`** with **`Edit Watchlist Symbols`** expander (textarea, reorder, quick add, **Save & refresh main**). The sidebar block runs **first** in `main()` so `sb_scanner` is up to date before Mission Control reads it.
+- **Glass sidebar:** translucent panel with blur and cyan border; **`stSidebarNav` hidden** — use the **☰ FAB** to open settings when you need the list editor.
+- **App opens with the sidebar collapsed** (`initial_sidebar_state="collapsed"`) so you land on Mission Control without an extra tap.
+- **Live Pulse** header after a successful data load: timestamp pill so you can see the feed is fresh at a glance.
+
+### ✅ Technical chart — fragment + four Plotly panels
+- **Chart layers** (EMAs, Fib, Gann, S/R, Ichimoku, Supertrend, diamonds, gold zone line) live under **Technical Chart** inside a **`@st.fragment`** region. Toggling layers **reruns the fragment only** — it does **not** re-fetch Yahoo OHLC for the main ticker on every overlay flip.
+- Overlay preferences still persist under **`overlay_*`** in `config.json` via a merge onto the latest file-backed config (see **Persisted Keys**).
+- The **Technical Chart** section still renders **four charts**: **Price & overlays**, **Volume**, **RSI (14)**, and **MACD** (independent zoom/pan, `hovermode: x unified` per panel).
+- **Gold Zone** blends **Volume Profile POC**, **61.8% Fib** (60-bar window), **200-day SMA** when history allows, and **nearest Gann Square of 9** level (mean of available components).
+
 ### ✅ Performance & mobile
 - **`st.cache_resource`** caches Yahoo **`Ticker`** objects; OHLC still uses **`st.cache_data`** with TTL.
 - **Market Scanner** uses a **thread pool** (up to 8 workers) so watchlist symbols fetch in parallel.
 - **`load_config()`** merges **`st.secrets`** (scalar top-level keys only, for Streamlit Cloud) with **`config.json`**.
-- **`mini_mode`** (sidebar → Performance) persists in `config.json` and **skips heavy Plotly** (technical stack, volume-profile bar chart, simulator equity chart) while keeping the glance row, execution strip, quant dashboard, and scanner. With Mini mode on, the app also injects **denser main-column CSS** (tighter padding, smaller section headers and card type) so more fits on one phone screen.
+- **`mini_mode`** (**🚀 Turbo** in Mission Control) persists in `config.json` and **skips heavy Plotly** (technical stack, volume-profile bar chart, simulator equity chart) while keeping the glance row, execution strip, quant dashboard, and scanner. With Turbo on, the app injects **denser main-column CSS** (tighter padding, smaller section headers and cards) so more fits on one phone screen.
 - **CSS:** `touch-action: manipulation`, `min-height: 100dvh` on the app shell, and touch hints on the sticky nav / FAB to reduce mobile zoom/jitter.
 
-### ✅ Technical chart — four separate Plotly panels
-- The **Technical Chart** section renders **four charts** (not one tall stacked figure): **Price & overlays**, **Volume**, **RSI (14)**, and **MACD**.
-- **Price** includes candles, EMAs, Bollinger (when enabled), optional Ichimoku / Supertrend, Fibonacci / Gann / S/R levels, Gold zone, and diamond markers — with a dedicated **Overlays** legend.
-- **Volume**, **RSI**, and **MACD** each have their own figure so scales and labels stay readable.
-- Each chart uses Plotly **`hovermode: x unified`** on that panel; **zoom and pan are independent** between panels.
-- Layout APIs follow **Plotly 5/6** expectations (e.g. axis titles via `update_xaxes` / `update_yaxes`, `legend.itemwidth` ≥ 30 on Plotly 6).
-- Sidebar **Chart overlays** toggles still persist under `overlay_*` in `config.json` (see **Persisted Keys**).
-
 ### ✅ Persistent User State (Watchlist + Scan Ordering)
-- `config.json` persistence includes `watchlist`, `scanner_sort_mode`, **Strategy** (`strat_focus`, `strat_horizon`), and **Chart overlay** toggles (`overlay_*`).
-- Sidebar **Scanner Watchlist** uses a compact **textarea** (not a single-line field):
-  - paste or type symbols separated by **commas, newlines, or semicolons**,
-  - duplicates are removed; symbols are normalized to uppercase,
-  - auto-saves on change,
-  - remains persistent across refreshes/restarts.
-- Watchlist controls:
-  - **Reorder / remove** dropdown + full-width **↑ Move up**, **↓ Move down**, **✕ Remove**, **Sort A–Z** (avoids cramped 3-column buttons in the narrow sidebar),
-  - **Quick add** + **Add symbol** for a single ticker without editing the whole list,
-  - scan result order: `Custom watchlist order` vs `Highest confluence first` (horizontal radio).
-- **Streamlit-safe session updates:** programmatic list/selection changes use staging keys (`_sb_scanner_sync`, `_sb_watch_selected_sync`, `_sb_add_ticker_clear`) applied **before** the `text_area` / `selectbox` / quick-add input are created, so Streamlit does not throw `StreamlitAPIException` when reordering or adding symbols.
+- `config.json` persistence includes `watchlist`, `scanner_sort_mode`, **Strategy** (`strat_focus`, `strat_horizon`), **Turbo / mini_mode**, and **Chart overlay** toggles (`overlay_*`).
+- **Watchlist editor** (sidebar → **Edit Watchlist Symbols**):
+  - **Textarea** for symbols — **commas, newlines, or semicolons**; duplicates removed; uppercase normalization.
+  - Auto-saves with the usual **`watch_cfg`** merge; optional **Save & refresh main** forces a disk write + rerun.
+  - **Reorder:** **↑ / ↓**, **✕ Remove**, **Sort A–Z**, **Quick add** + **Add symbol**.
+- **Scanner order** (`Custom watchlist order` vs `Highest confluence first`) is controlled from **Mission Control** (main column).
+- **Streamlit-safe session updates:** staging keys **`_sb_scanner_sync`**, **`_sb_watch_selected_sync`**, **`_sb_add_ticker_clear`** are applied **before** the textarea / quick-add widgets are built, avoiding `StreamlitAPIException` on reorder/add.
 - Default bootstrap watchlist (only when config is missing/deleted):
   - `PLTR,BMNR,AAPL,AMZN,NVDA,AMD,TSLA,SPY,QQQ`
 - `config.json` stores the keys listed under **Persisted Keys** below (legacy keys from older builds are stripped on load).
@@ -44,6 +47,7 @@
   - glass cards with blur/backdrop filtering,
   - tight spacing between widgets and sections,
   - reduced visual noise and less default Streamlit chrome.
+- **Mission Control** uses the bordered main `st.container` shell with extra cyan border / depth so the HUD reads as one integrated panel above the scroll.
 - Main content width is now constrained to `max-width: 1400px` for consistent desktop scanning.
 - Card system now uses a unified treatment:
   - `background: rgba(15, 23, 42, 0.65)`
@@ -108,11 +112,10 @@
 ## Current Feature Set
 
 ### 📈 Advanced Chart & Signal Engine
-- **Four charts:** price (+ overlays), volume bars, RSI, MACD — see **Technical chart — four separate Plotly panels** above.
-- Overlays: EMAs, Bollinger, Ichimoku, Supertrend (toggle in sidebar)
-- Fibonacci + Gann + support/resistance scaffolding (toggle in sidebar)
+- **Four charts:** price (+ overlays), volume bars, RSI, MACD — see **Technical chart — fragment + four Plotly panels** above.
+- **Chart layers** toggles live under **Technical Chart** (fragment-isolated); overlays include EMAs, Bollinger, Ichimoku, Supertrend, Fibonacci, Gann, S/R, diamond markers, and Gold Zone line.
 - Market structure + confluence scoring
-- Diamond signal state and Gold Zone logic
+- Diamond signal state; **Gold Zone** = blend of POC, 61.8% Fib (60 bars), **200-day SMA** (when data allows), and nearest Gann Sq9 level
 
 ### 💰 Cash-Flow Strategy Engine
 - Covered Call analyzer
@@ -126,8 +129,8 @@
   - diamond status,
   - quant edge,
   - Gold Zone distance.
-- Watchlist is persistent, user-controlled, and reorderable.
-- Scanner output can follow custom list order or confluence rank.
+- **Mission Control** target + **watchlist tape** for fast ticker switching; full list edit in **sidebar → Edit Watchlist Symbols**.
+- Scanner output order is set in **Mission Control** (`Custom watchlist order` vs confluence-first).
 
 ### 🧠 Risk, Sentiment, and Backtesting
 - Composite fear/greed framework with VIX context
@@ -145,6 +148,7 @@
 ### Prerequisites
 - Python 3.9+
 - `pip`
+- **Streamlit ≥ 1.33** recommended (`st.fragment` for chart layers; `st.segmented_control` when your Streamlit build includes it, with radio fallback otherwise).
 
 ### Install
 ```bash
@@ -171,17 +175,17 @@ All persistent settings are stored in `config.json` via atomic writes.
 |-----|---------|
 | `watchlist` | Comma-separated scanner tickers |
 | `scanner_sort_mode` | Scanner output order preference |
-| `strat_focus` | Sidebar Strategy **Focus**: `Sell premium`, `Hybrid`, or `Growth` |
-| `strat_horizon` | Sidebar Strategy **Horizon**: `Weekly`, `30 DTE`, or `45 DTE` |
-| `overlay_ema` | EMA overlay on |
+| `strat_focus` | Mission Control **Strategy**: `Sell premium`, `Hybrid`, or `Growth` |
+| `strat_horizon` | Mission Control **Horizon**: `Weekly`, `30 DTE`, or `45 DTE` |
+| `overlay_ema` | EMA overlay on (Technical Chart → Chart layers) |
 | `overlay_fib` | Fibonacci overlay on |
 | `overlay_gann` | Gann overlay on |
 | `overlay_sr` | Support/resistance overlay on |
 | `overlay_ichi` | Ichimoku overlay on |
 | `overlay_super` | Supertrend overlay on |
 | `overlay_diamonds` | Diamond signals overlay on |
-| `overlay_gold` | Gold zone overlay on |
-| `mini_mode` | Sidebar **Mini mode** — lighter UI (no heavy Plotly blocks listed above) |
+| `overlay_gold` | Gold zone line on price chart |
+| `mini_mode` | **🚀 Turbo** in Mission Control — lighter UI (skips heavy Plotly blocks listed in Performance section) |
 
 ---
 
@@ -198,11 +202,11 @@ If you are upgrading from an older version, use this safe sequence:
    ```bash
    streamlit run app.py
    ```
-4. Open sidebar and verify Scanner Watchlist loads your saved list.
+4. Open the sidebar (**☰**), expand **Edit Watchlist Symbols**, and confirm your watchlist loaded correctly.
 
 ### About missing keys
 - Old `config.json` files without newer keys are automatically backfilled by the app’s default config merge.
-- New keys are saved automatically the next time the related sidebar input changes.
+- New keys are saved automatically the next time the related Mission Control widget, chart-layer toggle, or watchlist flow updates config.
 - No manual JSON editing is required unless you want to seed values ahead of first run.
 
 ### Optional manual seed example
@@ -242,7 +246,9 @@ Latest QA sweep performed against current `app.py` included:
 Residual manual QA recommended:
 - viewport pass at 1400/1200/992/768 widths,
 - live market/open-hours data behavior (yfinance variability),
-- sidebar watchlist: edit textarea, reorder, remove, Sort A–Z, quick add after rapid edits (confirm no `StreamlitAPIException` on session state).
+- **Mission Control:** strategy segments, Turbo, horizon, scanner sort, target selectbox sync with **ticker tape**,
+- **Sidebar:** **Edit Watchlist Symbols** — textarea, reorder, remove, Sort A–Z, quick add, **Save & refresh main** (no `StreamlitAPIException` from staging keys),
+- **Technical Chart:** flip overlay toggles and confirm charts update without a full refetch feeling (fragment rerun).
 
 ---
 

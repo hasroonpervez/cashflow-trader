@@ -261,13 +261,21 @@ iframe{border:0!important}
   min-height:0!important;margin-top:0!important;margin-bottom:0!important;
 }
 section[data-testid="stSidebar"]{
-  background:rgba(8,12,20,.72)!important;
-  backdrop-filter:blur(20px)!important;-webkit-backdrop-filter:blur(20px)!important;
-  border-right:1px solid rgba(255,255,255,.1)!important;
+  background:rgba(8,12,20,.6)!important;
+  backdrop-filter:blur(15px)!important;-webkit-backdrop-filter:blur(15px)!important;
+  border-right:1px solid rgba(0,229,255,.2)!important;
   z-index:1000006!important;
   width:min(250px,92vw)!important;min-width:240px!important;
 }
 [data-testid="stSidebarNav"]{display:none!important}
+/* Mission Control — single bordered HUD shell in main (st.container border=True) */
+.main [data-testid="stVerticalBlockBorderWrapper"]{
+  background:rgba(15,23,42,.88)!important;
+  border:1px solid rgba(0,229,255,.3)!important;
+  border-radius:12px!important;
+  box-shadow:0 4px 28px rgba(2,6,23,.5)!important;
+  margin-bottom:14px!important;
+}
 [data-testid="stSidebarUserContent"]{padding-top:100px!important}
 [data-testid="stSidebar"] h2,[data-testid="stSidebar"] h3,[data-testid="stSidebar"] h4{color:#00e5ff!important}
 [data-testid="stSidebar"] h1:not(.cf-sidebar-title){color:#00e5ff!important}
@@ -1462,22 +1470,30 @@ def calc_confluence_points(df, df_wk=None, vix_val=None):
 # ═════════════════════════════════════════════════════════════════════════
 
 def _blue_diamond_institutional_ok(sub):
-    """Skip blue diamonds into parabolic blow-offs (ATR at rolling max) or thin volume."""
+    """Filter manic blue entries: skip only true blow-offs (ATR in top ~1% of its window)
+    with weak participation. Normal trend days often sit near rolling ATR highs — those
+    were incorrectly blocked before, so blues never matched the chart while pinks could still fire."""
     if len(sub) < 22:
-        return False
-    atr = TA.atr(sub)
-    ai = float(atr.iloc[-1])
-    if pd.isna(ai) or ai <= 0:
-        return False
-    win = min(252, len(atr))
-    atr_hi = float(atr.iloc[-win:].max())
-    if ai >= atr_hi * 0.998:
         return False
     vol = float(sub["Volume"].iloc[-1])
     vma = float(sub["Volume"].iloc[-20:].mean())
     if vma <= 0:
         return False
-    return vol >= 1.2 * vma
+    vol_ok = vol >= 0.9 * vma
+
+    atr = TA.atr(sub)
+    ai = float(atr.iloc[-1])
+    if pd.isna(ai) or ai <= 0:
+        return vol_ok
+    win = min(252, len(atr))
+    atr_clean = atr.iloc[-win:].dropna()
+    if atr_clean.empty:
+        return vol_ok
+    # Rank of today's ATR in the window (1.0 = at/above everyone) — block only top-tier expansion + weak vol
+    rank = float((atr_clean <= ai).sum()) / len(atr_clean)
+    if rank >= 0.99 and vol < 1.05 * vma:
+        return False
+    return vol_ok
 
 
 def _index_pos(idx_obj):
@@ -1492,12 +1508,13 @@ def _index_pos(idx_obj):
 
 @st.cache_data(ttl=300)
 def detect_diamonds(df, df_wk=None, lookback=None):
-    """Blue Diamond: same 0–9 confluence as the UI jumps to 7+ (cross above threshold),
-    with weekly bias not bearish; **plus** ATR-not-at-extreme and volume ≥ 1.2× 20d avg.
-    Uses **point-in-time** scores via ``df.iloc[:i+1]``.
+    """Blue Diamond: point-in-time confluence **crosses** to 7+ (was <7 prior bar), weekly
+    not BEARISH-only, and a light institutional filter: participation ≥ ~0.9× 20d volume;
+    ATR blow-offs block only when ATR is in the top ~1% of its lookback window **and**
+    volume is weak (<1.05× avg).
 
-    Pink Diamond: confluence collapses or overbought fade vs prior bar, with weekly bias
-    not strongly bullish-only."""
+    Pink Diamond: confluence collapse (≤3 after ≥5) **or** RSI > 75 with fading score;
+    weekly bias can be **BULLISH** too (take-profit / de-risk in extended runs)."""
     diamonds = []
     n = len(df)
     if n < 55:
@@ -1526,10 +1543,11 @@ def detect_diamonds(df, df_wk=None, lookback=None):
                 diamonds.append({"date": df.index[i], "price": pi, "type": "blue",
                                  "score": sc, "rsi": rsi_i, "weekly": wk_bias})
 
-        # Pink: collapse or RSI exhaustion vs elevated prior score + weekly not blocking shorts
-        if ((sc <= 3 and prev_score >= 5) or (rsi_i > 75 and sc <= 4 and prev_score > 4)) and wk_bias in ("BEARISH", "MIXED", "UNKNOWN"):
-            diamonds.append({"date": df.index[i], "price": pi, "type": "pink",
-                             "score": sc, "rsi": rsi_i, "weekly": wk_bias})
+        # Pink: collapse or RSI exhaustion — allow BULLISH weeks too (fade / de-risk in extended runs)
+        if (sc <= 3 and prev_score >= 5) or (rsi_i > 75 and sc <= 4 and prev_score > 4):
+            if wk_bias in ("BEARISH", "MIXED", "UNKNOWN", "BULLISH"):
+                diamonds.append({"date": df.index[i], "price": pi, "type": "pink",
+                                 "score": sc, "rsi": rsi_i, "weekly": wk_bias})
 
         prev_score = sc
 
@@ -1949,15 +1967,16 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
     if diamonds:
         blue_d = [d for d in diamonds if d["type"] == "blue"]
         pink_d = [d for d in diamonds if d["type"] == "pink"]
+        _dm = dict(symbol="diamond", size=17, line=dict(color="rgba(248,250,252,0.95)", width=2))
         if blue_d:
             fig_p.add_trace(
                 go.Scatter(
                     x=[d["date"] for d in blue_d],
                     y=[d["price"] * 0.985 for d in blue_d],
                     mode="markers",
-                    marker=dict(symbol="diamond", size=14, color="#3b82f6", line=dict(color="#93c5fd", width=1.5)),
+                    marker={**_dm, "color": "#2563eb"},
                     name="Blue diamond",
-                    hovertemplate="<b>Blue diamond</b><br>%{x}<br>$%{customdata:.2f}<br>Buy confluence<extra></extra>",
+                    hovertemplate="<b>Blue diamond</b><br>%{x}<br>$%{customdata:.2f}<br>Buy confluence (7+ cross)<extra></extra>",
                     customdata=[d["price"] for d in blue_d],
                 )
             )
@@ -1967,7 +1986,7 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
                     x=[d["date"] for d in pink_d],
                     y=[d["price"] * 1.015 for d in pink_d],
                     mode="markers",
-                    marker=dict(symbol="diamond", size=14, color="#ec4899", line=dict(color="#f9a8d4", width=1.5)),
+                    marker={**_dm, "color": "#db2777"},
                     name="Pink diamond",
                     hovertemplate="<b>Pink diamond</b><br>%{x}<br>$%{customdata:.2f}<br>Exit / take profit<extra></extra>",
                     customdata=[d["price"] for d in pink_d],
@@ -2069,11 +2088,12 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
             else:
                 px.append(d["date"])
                 py.append(rv)
+        _dm_rsi = dict(symbol="diamond", size=15, line=dict(color="rgba(248,250,252,0.95)", width=2))
         if bx:
             fig_r.add_trace(
                 go.Scatter(
                     x=bx, y=by, mode="markers",
-                    marker=dict(symbol="diamond", size=12, color="#3b82f6", line=dict(color="#93c5fd", width=1.5)),
+                    marker={**_dm_rsi, "color": "#2563eb"},
                     name="Blue diamond", showlegend=False,
                     hovertemplate="<b>Blue diamond</b><br>%{x}<br>RSI %{y:.1f}<extra></extra>",
                 )
@@ -2082,7 +2102,7 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
             fig_r.add_trace(
                 go.Scatter(
                     x=px, y=py, mode="markers",
-                    marker=dict(symbol="diamond", size=12, color="#ec4899", line=dict(color="#f9a8d4", width=1.5)),
+                    marker={**_dm_rsi, "color": "#db2777"},
                     name="Pink diamond", showlegend=False,
                     hovertemplate="<b>Pink diamond</b><br>%{x}<br>RSI %{y:.1f}<extra></extra>",
                 )
@@ -2476,136 +2496,132 @@ def _fragment_technical_zone(
 def main():
     cfg = load_config()
 
-    # ── SIDEBAR (glass pane — branding only; controls live in main Command Bar) ──
+    if "_sb_scanner_sync" in st.session_state:
+        st.session_state["sb_scanner"] = st.session_state.pop("_sb_scanner_sync")
+    elif "sb_scanner" not in st.session_state:
+        st.session_state["sb_scanner"] = cfg.get("watchlist", DEFAULT_CONFIG["watchlist"])
+
+    # ── SIDEBAR — paperwork only (runs first so sb_scanner is committed before the main HUD)
     with st.sidebar:
-        st.markdown(
-            """<div class="cf-sidebar-brand">
-            <h1 class="cf-sidebar-title">CASHFLOW</h1>
-            <p class="cf-sidebar-subtitle">Command center · v14.1</p>
-            </div>""",
-            unsafe_allow_html=True,
-        )
-        st.caption(
-            "Ticker, strategy, watchlist, and Turbo live in the **Command Bar** in the main column. "
-            "Tap the ☰ button (bottom-left FAB) to open this panel when you need more space."
-        )
+        st.markdown("### ⚙️ System Config")
+        st.caption("CashFlow Command Center · v14.1 · open with ☰ when you need to edit the list.")
+        st.markdown("---")
+        with st.expander("Edit Watchlist Symbols", expanded=False):
+            st.caption(
+                "Paste symbols (commas or one per line). Reorder with the buttons. List saves to disk on refresh."
+            )
+            scanner_watchlist_raw = st.text_area(
+                "Watchlist symbols",
+                height=150,
+                help="Paste from a spreadsheet, type commas, or put one ticker per line.",
+                key="sb_scanner",
+                label_visibility="collapsed",
+            )
+            watch_items_sb = _parse_watchlist_string(scanner_watchlist_raw)
+            scanner_watchlist_sb = ",".join(watch_items_sb)
+
+            if watch_items_sb:
+                if "_sb_watch_selected_sync" in st.session_state:
+                    st.session_state["sb_watch_selected"] = st.session_state.pop("_sb_watch_selected_sync")
+                if st.session_state.get("sb_watch_selected") not in watch_items_sb:
+                    st.session_state["sb_watch_selected"] = watch_items_sb[0]
+                sel = st.session_state.get("sb_watch_selected")
+                st.markdown(
+                    "<div style='font-size:.68rem;color:#94a3b8;margin:0 0 6px 0'>"
+                    + " · ".join(f"<span class='mono' style='color:#cbd5e1'>{_html_mod.escape(x)}</span>" for x in watch_items_sb)
+                    + "</div>",
+                    unsafe_allow_html=True,
+                )
+                up_clicked = st.button("↑  Move up", use_container_width=True, key="sb_move_up")
+                down_clicked = st.button("↓  Move down", use_container_width=True, key="sb_move_down")
+                remove_clicked = st.button("✕  Remove symbol", use_container_width=True, key="sb_remove_ticker")
+                sort_az = st.button("Sort A–Z", use_container_width=True, key="sb_sort_az")
+
+                if up_clicked and sel in watch_items_sb:
+                    idx = watch_items_sb.index(sel)
+                    if idx > 0:
+                        watch_items_sb[idx - 1], watch_items_sb[idx] = watch_items_sb[idx], watch_items_sb[idx - 1]
+                        scanner_watchlist_sb = ",".join(watch_items_sb)
+                        st.session_state["_sb_scanner_sync"] = scanner_watchlist_sb
+                        st.session_state["_sb_watch_selected_sync"] = sel
+                        cfg = {**cfg, "watchlist": scanner_watchlist_sb, "scanner_sort_mode": cfg.get("scanner_sort_mode", DEFAULT_CONFIG["scanner_sort_mode"])}
+                        save_config(cfg)
+                        st.rerun()
+                if down_clicked and sel in watch_items_sb:
+                    idx = watch_items_sb.index(sel)
+                    if idx < len(watch_items_sb) - 1:
+                        watch_items_sb[idx + 1], watch_items_sb[idx] = watch_items_sb[idx], watch_items_sb[idx + 1]
+                        scanner_watchlist_sb = ",".join(watch_items_sb)
+                        st.session_state["_sb_scanner_sync"] = scanner_watchlist_sb
+                        st.session_state["_sb_watch_selected_sync"] = sel
+                        cfg = {**cfg, "watchlist": scanner_watchlist_sb, "scanner_sort_mode": cfg.get("scanner_sort_mode", DEFAULT_CONFIG["scanner_sort_mode"])}
+                        save_config(cfg)
+                        st.rerun()
+                if remove_clicked and sel in watch_items_sb:
+                    watch_items_sb = [t for t in watch_items_sb if t != sel]
+                    scanner_watchlist_sb = ",".join(watch_items_sb)
+                    st.session_state["_sb_scanner_sync"] = scanner_watchlist_sb
+                    if watch_items_sb:
+                        st.session_state["_sb_watch_selected_sync"] = watch_items_sb[0]
+                    cfg = {**cfg, "watchlist": scanner_watchlist_sb, "scanner_sort_mode": cfg.get("scanner_sort_mode", DEFAULT_CONFIG["scanner_sort_mode"])}
+                    save_config(cfg)
+                    st.rerun()
+                if sort_az and watch_items_sb:
+                    watch_items_sb = sorted(watch_items_sb)
+                    scanner_watchlist_sb = ",".join(watch_items_sb)
+                    st.session_state["_sb_scanner_sync"] = scanner_watchlist_sb
+                    sel2 = st.session_state.get("sb_watch_selected")
+                    if sel2 not in watch_items_sb:
+                        st.session_state["_sb_watch_selected_sync"] = watch_items_sb[0]
+                    cfg = {**cfg, "watchlist": scanner_watchlist_sb, "scanner_sort_mode": cfg.get("scanner_sort_mode", DEFAULT_CONFIG["scanner_sort_mode"])}
+                    save_config(cfg)
+                    st.rerun()
+            else:
+                st.session_state.pop("sb_watch_selected", None)
+                st.info("Add at least one symbol (e.g. PLTR, NVDA).")
+
+            st.markdown(
+                "<div style='font-size:.72rem;color:#94a3b8;margin:10px 0 2px 0;font-weight:600'>Quick add</div>",
+                unsafe_allow_html=True,
+            )
+            if "_sb_add_ticker_clear" in st.session_state:
+                st.session_state["sb_add_ticker"] = ""
+                st.session_state.pop("_sb_add_ticker_clear", None)
+            add_ticker_raw = st.text_input(
+                "Symbol",
+                placeholder="e.g. AMD — then tap Add below",
+                key="sb_add_ticker",
+                label_visibility="collapsed",
+            )
+            add_clicked = st.button("Add symbol", use_container_width=True, key="sb_add_watch")
+            add_ticker = (add_ticker_raw or "").strip().upper()
+            if add_clicked:
+                if add_ticker:
+                    if add_ticker not in watch_items_sb:
+                        watch_items_sb.append(add_ticker)
+                    scanner_watchlist_sb = ",".join(watch_items_sb)
+                    st.session_state["_sb_scanner_sync"] = scanner_watchlist_sb
+                    st.session_state["_sb_watch_selected_sync"] = add_ticker
+                    st.session_state["_sb_add_ticker_clear"] = True
+                    cfg = {**cfg, "watchlist": scanner_watchlist_sb, "scanner_sort_mode": cfg.get("scanner_sort_mode", DEFAULT_CONFIG["scanner_sort_mode"])}
+                    save_config(cfg)
+                    st.rerun()
+                else:
+                    st.toast("Enter a ticker in the box above, then tap Add symbol.")
+
+            if st.button("Save & refresh main", use_container_width=True, key="sb_save_refresh_main"):
+                w = _parse_watchlist_string(st.session_state.get("sb_scanner", ""))
+                save_config({**load_config(), "watchlist": ",".join(w)})
+                st.rerun()
+
         st.markdown("---")
         st.markdown(
             "<div style='text-align:center;color:#64748b;font-size:.65rem'>Data: Yahoo Finance &middot; Not advice</div>",
             unsafe_allow_html=True,
         )
 
-    # ── WATCHLIST EDITOR (main column — avoids sidebar hamburger on mobile) ──
-    if "_sb_scanner_sync" in st.session_state:
-        st.session_state["sb_scanner"] = st.session_state.pop("_sb_scanner_sync")
-    elif "sb_scanner" not in st.session_state:
-        st.session_state["sb_scanner"] = cfg.get("watchlist", DEFAULT_CONFIG["watchlist"])
-
-    with st.expander("Edit watchlist", expanded=False):
-        st.caption(
-            "Paste symbols (commas or one per line). Reorder with the buttons. Scanner order uses **Custom** vs **Confluence** from the Command Bar."
-        )
-        scanner_watchlist_raw = st.text_area(
-            "Watchlist symbols",
-            height=96,
-            help="Paste from a spreadsheet, type commas, or put one ticker per line. Saved automatically.",
-            key="sb_scanner",
-            label_visibility="collapsed",
-        )
-        watch_items = _parse_watchlist_string(scanner_watchlist_raw)
-        scanner_watchlist = ",".join(watch_items)
-
-        if watch_items:
-            if "_sb_watch_selected_sync" in st.session_state:
-                st.session_state["sb_watch_selected"] = st.session_state.pop("_sb_watch_selected_sync")
-            if st.session_state.get("sb_watch_selected") not in watch_items:
-                st.session_state["sb_watch_selected"] = watch_items[0]
-            sel = st.session_state.get("sb_watch_selected")
-            st.markdown(
-                "<div style='font-size:.68rem;color:#94a3b8;margin:0 0 6px 0'>"
-                + " · ".join(f"<span class='mono' style='color:#cbd5e1'>{_html_mod.escape(x)}</span>" for x in watch_items)
-                + "</div>",
-                unsafe_allow_html=True,
-            )
-            up_clicked = st.button("↑  Move up", use_container_width=True, key="sb_move_up")
-            down_clicked = st.button("↓  Move down", use_container_width=True, key="sb_move_down")
-            remove_clicked = st.button("✕  Remove symbol", use_container_width=True, key="sb_remove_ticker")
-            sort_az = st.button("Sort A–Z", use_container_width=True, key="sb_sort_az")
-
-            if up_clicked and sel in watch_items:
-                idx = watch_items.index(sel)
-                if idx > 0:
-                    watch_items[idx - 1], watch_items[idx] = watch_items[idx], watch_items[idx - 1]
-                    scanner_watchlist = ",".join(watch_items)
-                    st.session_state["_sb_scanner_sync"] = scanner_watchlist
-                    st.session_state["_sb_watch_selected_sync"] = sel
-                    cfg = {**cfg, "watchlist": scanner_watchlist, "scanner_sort_mode": cfg.get("scanner_sort_mode", DEFAULT_CONFIG["scanner_sort_mode"])}
-                    save_config(cfg)
-                    st.rerun()
-            if down_clicked and sel in watch_items:
-                idx = watch_items.index(sel)
-                if idx < len(watch_items) - 1:
-                    watch_items[idx + 1], watch_items[idx] = watch_items[idx], watch_items[idx + 1]
-                    scanner_watchlist = ",".join(watch_items)
-                    st.session_state["_sb_scanner_sync"] = scanner_watchlist
-                    st.session_state["_sb_watch_selected_sync"] = sel
-                    cfg = {**cfg, "watchlist": scanner_watchlist, "scanner_sort_mode": cfg.get("scanner_sort_mode", DEFAULT_CONFIG["scanner_sort_mode"])}
-                    save_config(cfg)
-                    st.rerun()
-            if remove_clicked and sel in watch_items:
-                watch_items = [t for t in watch_items if t != sel]
-                scanner_watchlist = ",".join(watch_items)
-                st.session_state["_sb_scanner_sync"] = scanner_watchlist
-                if watch_items:
-                    st.session_state["_sb_watch_selected_sync"] = watch_items[0]
-                cfg = {**cfg, "watchlist": scanner_watchlist, "scanner_sort_mode": cfg.get("scanner_sort_mode", DEFAULT_CONFIG["scanner_sort_mode"])}
-                save_config(cfg)
-                st.rerun()
-            if sort_az and watch_items:
-                watch_items = sorted(watch_items)
-                scanner_watchlist = ",".join(watch_items)
-                st.session_state["_sb_scanner_sync"] = scanner_watchlist
-                sel2 = st.session_state.get("sb_watch_selected")
-                if sel2 not in watch_items:
-                    st.session_state["_sb_watch_selected_sync"] = watch_items[0]
-                cfg = {**cfg, "watchlist": scanner_watchlist, "scanner_sort_mode": cfg.get("scanner_sort_mode", DEFAULT_CONFIG["scanner_sort_mode"])}
-                save_config(cfg)
-                st.rerun()
-        else:
-            st.session_state.pop("sb_watch_selected", None)
-            st.info("Add at least one symbol above (e.g. PLTR, NVDA).")
-
-        st.markdown(
-            "<div style='font-size:.72rem;color:#94a3b8;margin:10px 0 2px 0;font-weight:600'>Quick add</div>",
-            unsafe_allow_html=True,
-        )
-        if "_sb_add_ticker_clear" in st.session_state:
-            st.session_state["sb_add_ticker"] = ""
-            st.session_state.pop("_sb_add_ticker_clear", None)
-        add_ticker_raw = st.text_input(
-            "Symbol",
-            placeholder="e.g. AMD — then tap Add below",
-            key="sb_add_ticker",
-            label_visibility="collapsed",
-        )
-        add_clicked = st.button("Add symbol", use_container_width=True, key="sb_add_watch")
-        add_ticker = (add_ticker_raw or "").strip().upper()
-        if add_clicked:
-            if add_ticker:
-                if add_ticker not in watch_items:
-                    watch_items.append(add_ticker)
-                scanner_watchlist = ",".join(watch_items)
-                st.session_state["_sb_scanner_sync"] = scanner_watchlist
-                st.session_state["_sb_watch_selected_sync"] = add_ticker
-                st.session_state["_sb_add_ticker_clear"] = True
-                cfg = {**cfg, "watchlist": scanner_watchlist, "scanner_sort_mode": cfg.get("scanner_sort_mode", DEFAULT_CONFIG["scanner_sort_mode"])}
-                save_config(cfg)
-                st.rerun()
-            else:
-                st.toast("Enter a ticker in the box above, then tap Add symbol.")
-
-    # Re-parse watchlist after expander (Streamlit has run widgets)
-    scanner_watchlist_raw = st.session_state.get("sb_scanner", "")
+    # ── GLOBAL COMMAND BAR (HUD — first paint in main column, directly under sticky nav)
+    scanner_watchlist_raw = st.session_state.get("sb_scanner", cfg.get("watchlist", ""))
     watch_items = _parse_watchlist_string(scanner_watchlist_raw)
     scanner_watchlist = ",".join(watch_items)
 
@@ -2614,37 +2630,39 @@ def main():
     )
 
     with st.container(border=True):
-        st.markdown("**Command Bar** — target, strategy, and scanner sort stay in your line of sight.")
-        r1c1, r1c2, r1c3 = st.columns([1.15, 2.0, 0.95])
+        st.markdown(
+            "<div style='font-size:.75rem;color:#64748b;font-weight:700;letter-spacing:.1em;margin-bottom:8px;'>MISSION CONTROL</div>",
+            unsafe_allow_html=True,
+        )
+        r1c1, r1c2, r1c3 = st.columns([1.5, 2, 1])
         with r1c1:
-            st.caption("Target")
+            st.caption("Target ticker")
             if watch_items:
                 st.selectbox(
-                    "target",
+                    "Target Ticker",
                     watch_items,
                     key="sb_watch_selected",
                     help="Main chart, news, options, and scores use this ticker.",
                     label_visibility="collapsed",
                 )
             else:
-                st.caption("Add tickers in **Edit watchlist**")
+                st.caption("Add symbols in sidebar → **Edit Watchlist Symbols**")
         with r1c2:
-            st.caption("Strategy focus")
+            st.caption("Strategy")
             if hasattr(st, "segmented_control"):
                 st.segmented_control(
-                    "Focus",
+                    "Strategy",
                     ["Sell premium", "Hybrid", "Growth"],
                     key="sb_strat_radio",
                     label_visibility="collapsed",
                 )
             else:
                 st.radio(
-                    "Focus",
+                    "Strategy",
                     ["Sell premium", "Hybrid", "Growth"],
                     horizontal=True,
                     key="sb_strat_radio",
                     label_visibility="collapsed",
-                    help="Sell premium: income first. Growth: more directional risk.",
                 )
         with r1c3:
             st.caption("Performance")
@@ -2685,8 +2703,8 @@ def main():
                 "Custom watchlist order" if _scan_seg == "Custom order" else "Highest confluence first"
             )
         with r2c3:
-            st.caption("Tip")
-            st.caption("Chart layers live under **Technical Chart** — toggling them does not re-fetch Yahoo data.")
+            st.caption("NOC layout")
+            st.caption("Critical switches sit above the monitors; sidebar is for list maintenance only.")
 
     if watch_items:
         if "_sb_watch_selected_sync" in st.session_state:
@@ -2698,20 +2716,21 @@ def main():
         st.session_state.pop("sb_watch_selected", None)
         ticker = "PLTR"
 
-    # Watchlist tape — tap a ticker to select (same session key as Target)
+    # Clickable ticker tape (chunk rows on wide lists so columns stay usable on mobile)
     if watch_items:
         st.markdown('<p class="cf-tape-title">Watchlist tape</p>', unsafe_allow_html=True)
-        st.caption("Daily % change is approximate (last vs prior session). Selected ticker uses the cyan highlight.")
-        tape_rows = [watch_items[i : i + 8] for i in range(0, len(watch_items), 8)]
+        st.caption("Tap a symbol to switch the active ticker. Daily % is last vs prior session (cached).")
+        _TAPE_CHUNK = 8
         tape_i = 0
-        for row_tickers in tape_rows:
-            cols = st.columns(len(row_tickers))
+        for row_start in range(0, len(watch_items), _TAPE_CHUNK):
+            row_tickers = watch_items[row_start : row_start + _TAPE_CHUNK]
+            tape_cols = st.columns(len(row_tickers))
             for j, tkr in enumerate(row_tickers):
                 pct = _ticker_pct_change_1d(tkr)
                 pct_str = f"{pct:+.2f}%" if pct is not None else "—"
                 c_pct = "#10b981" if (pct is not None and pct >= 0) else ("#ef4444" if pct is not None else "#64748b")
-                is_sel = tkr == st.session_state.get("sb_watch_selected")
-                with cols[j]:
+                is_active = tkr == ticker
+                with tape_cols[j]:
                     st.markdown(
                         f"<div class='cf-tape-cell'><span style='color:{c_pct};font-size:.62rem;font-weight:800'>{_html_mod.escape(pct_str)}</span></div>",
                         unsafe_allow_html=True,
@@ -2720,7 +2739,7 @@ def main():
                         tkr,
                         key=f"cf_tape_{tape_i}",
                         use_container_width=True,
-                        type="primary" if is_sel else "secondary",
+                        type="primary" if is_active else "secondary",
                     ):
                         st.session_state["sb_watch_selected"] = tkr
                         st.rerun()
@@ -3761,7 +3780,7 @@ def main():
             else:
                 st.info("No scanner results. Check your ticker symbols.")
     else:
-        st.info("Add tickers under **Edit watchlist** (above) to use the scanner.")
+        st.info("Add tickers under **System Config → Edit Watchlist Symbols** (sidebar) to use the scanner.")
 
     # ══════════════════════════════════════════════════════════════════
     #  SECTION 8 \u2014 NEWS & MACRO
