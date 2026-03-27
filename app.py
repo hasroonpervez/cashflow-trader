@@ -1832,13 +1832,20 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
             bgcolor="rgba(15,23,42,0.94)",
             bordercolor="rgba(148,163,184,0.35)",
             borderwidth=1,
-            title=dict(text="Overlays", font=dict(size=11, color="#94a3b8")),
             traceorder="normal",
             itemwidth=28,
+            title_text="Overlays",
+            title_font=dict(size=11, color="#94a3b8"),
         ),
         hoverlabel=_chart_hoverlabel(),
-        xaxis=dict(gridcolor=_grid, zeroline=False, tickformat="%b %d<br>%Y", title=dict(text="Date", font=dict(size=11, color="#94a3b8"))),
-        yaxis=dict(gridcolor=_grid, zeroline=False, title=dict(text="Price ($)", font=dict(size=11, color="#94a3b8"))),
+    )
+    fig_p.update_xaxes(
+        gridcolor=_grid, zeroline=False, tickformat="%b %d<br>%Y",
+        title_text="Date", title_font=dict(size=11, color="#94a3b8"),
+    )
+    fig_p.update_yaxes(
+        gridcolor=_grid, zeroline=False,
+        title_text="Price ($)", title_font=dict(size=11, color="#94a3b8"),
     )
 
     vc = ["#10b981" if c >= o else "#ef4444" for c, o in zip(df["Close"], df["Open"])]
@@ -1861,8 +1868,14 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
         uirevision=uirev,
         showlegend=False,
         hoverlabel=_chart_hoverlabel(),
-        xaxis=dict(gridcolor=_grid, zeroline=False, tickformat="%b %d<br>%Y", title=dict(text="Date", font=dict(size=11, color="#94a3b8"))),
-        yaxis=dict(gridcolor=_grid, zeroline=False, title=dict(text="Shares", font=dict(size=11, color="#94a3b8"))),
+    )
+    fig_v.update_xaxes(
+        gridcolor=_grid, zeroline=False, tickformat="%b %d<br>%Y",
+        title_text="Date", title_font=dict(size=11, color="#94a3b8"),
+    )
+    fig_v.update_yaxes(
+        gridcolor=_grid, zeroline=False,
+        title_text="Shares", title_font=dict(size=11, color="#94a3b8"),
     )
 
     fig_r = go.Figure()
@@ -1884,8 +1897,14 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
         uirevision=uirev,
         showlegend=False,
         hoverlabel=_chart_hoverlabel(),
-        yaxis=dict(range=[0, 100], gridcolor=_grid, zeroline=False, title=dict(text="RSI", font=dict(size=11, color="#94a3b8"))),
-        xaxis=dict(gridcolor=_grid, zeroline=False, tickformat="%b %d<br>%Y", title=dict(text="Date", font=dict(size=11, color="#94a3b8"))),
+    )
+    fig_r.update_yaxes(
+        range=[0, 100], gridcolor=_grid, zeroline=False,
+        title_text="RSI", title_font=dict(size=11, color="#94a3b8"),
+    )
+    fig_r.update_xaxes(
+        gridcolor=_grid, zeroline=False, tickformat="%b %d<br>%Y",
+        title_text="Date", title_font=dict(size=11, color="#94a3b8"),
     )
 
     ml, sl, hist = TA.macd(df["Close"])
@@ -1922,8 +1941,14 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
             font=dict(size=10, color="#94a3b8"),
         ),
         hoverlabel=_chart_hoverlabel(),
-        xaxis=dict(gridcolor=_grid, zeroline=False, tickformat="%b %d<br>%Y", title=dict(text="Date", font=dict(size=11, color="#94a3b8"))),
-        yaxis=dict(gridcolor=_grid, zeroline=True, zerolinecolor="rgba(148,163,184,0.25)", title=dict(text="MACD", font=dict(size=11, color="#94a3b8"))),
+    )
+    fig_m.update_xaxes(
+        gridcolor=_grid, zeroline=False, tickformat="%b %d<br>%Y",
+        title_text="Date", title_font=dict(size=11, color="#94a3b8"),
+    )
+    fig_m.update_yaxes(
+        gridcolor=_grid, zeroline=True, zerolinecolor="rgba(148,163,184,0.25)",
+        title_text="MACD", title_font=dict(size=11, color="#94a3b8"),
     )
 
     return fig_p, fig_v, fig_r, fig_m
