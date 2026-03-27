@@ -1,7 +1,7 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  CASHFLOW COMMAND CENTER v14.0 — Institutional Edition                  ║
-║  Glanceable execution desk + Diamond / Gold Zone / Quant                   ║
+║  CASHFLOW COMMAND CENTER v14.0 · INSTITUTIONAL EDITION                   ║
+║  Glanceable execution desk plus Diamond, Gold Zone, and Quant            ║
 ║  Hurst · Kelly · Black Scholes engines unchanged in this release          ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 """
@@ -44,6 +44,10 @@ _LEGACY_CONFIG_KEYS = frozenset({
 # Anonymous reference only — used for Kelly / ATR example math (not user portfolio data).
 REF_NOTIONAL = 100_000.0
 RISK_PCT_EXAMPLE = 3.0
+# Kelly math can suggest aggressive fractions; UI never shows above this for portfolio-heat safety.
+KELLY_DISPLAY_CAP_PCT = 5.0
+# Warn when price is stretched vs 20-EMA (gap / blow-off; Fib & Gold Zone lag).
+EMA_EXTENSION_WARN_PCT = 10.0
 
 def _streamlit_secrets_flat():
     """Scalar top-level keys from st.secrets (Streamlit Cloud). Skips nested tables."""
@@ -160,9 +164,8 @@ st.set_page_config(page_title="CashFlow Command Center v14", page_icon="💰",
                    layout="wide", initial_sidebar_state="collapsed")
 
 
-@st.cache_resource
 def _yfinance_ticker(symbol: str):
-    """Reuse Yahoo Finance Ticker objects (connections) across cached data fetches."""
+    """Fresh ``yf.Ticker`` per call — avoids stale sessions and unbounded cached connections on large watchlists."""
     return yf.Ticker(str(symbol).upper().strip())
 
 
@@ -260,21 +263,36 @@ iframe{border:0!important}
 .main [data-testid="stVerticalBlock"] > div:has(> div[data-testid="stMarkdownContainer"] nav.sticky-nav){
   min-height:0!important;margin-top:0!important;margin-bottom:0!important;
 }
-section[data-testid="stSidebar"]{
-  background:rgba(8,12,20,.6)!important;
-  backdrop-filter:blur(15px)!important;-webkit-backdrop-filter:blur(15px)!important;
-  border-right:1px solid rgba(0,229,255,.2)!important;
-  z-index:1000006!important;
-  width:min(250px,92vw)!important;min-width:240px!important;
+/* Sidebar removed; all controls live in main HUD */
+section[data-testid="stSidebar"],
+[data-testid="stSidebar"]{
+  display:none!important;width:0!important;min-width:0!important;max-width:0!important;
+  border:none!important;overflow:hidden!important;visibility:hidden!important;
 }
 [data-testid="stSidebarNav"]{display:none!important}
-/* Mission Control — single bordered HUD shell in main (st.container border=True) */
+#sob,.cf-vip-fab{display:none!important;visibility:hidden!important;pointer-events:none!important}
+/* Mission Control: single bordered HUD shell in main (st.container border=True) */
 .main [data-testid="stVerticalBlockBorderWrapper"]{
   background:rgba(15,23,42,.88)!important;
   border:1px solid rgba(0,229,255,.3)!important;
   border-radius:12px!important;
   box-shadow:0 4px 28px rgba(2,6,23,.5)!important;
   margin-bottom:14px!important;
+}
+/* HUD row labels: high contrast on dark bg (mobile captions were washing out) */
+.main p.cf-hud-label{
+  color:#f8fafc!important;font-size:0.8rem!important;font-weight:700!important;
+  letter-spacing:0.07em!important;text-transform:uppercase!important;margin:0 0 6px 0!important;
+  line-height:1.3!important;
+}
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stWidgetLabel"] p,
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stWidgetLabel"] span,
+.main [data-testid="stVerticalBlockBorderWrapper"] label{
+  color:#f1f5f9!important;
+}
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-baseweb="radio"] label,
+.main [data-testid="stVerticalBlockBorderWrapper"] [role="radiogroup"] label{
+  color:#f8fafc!important;
 }
 [data-testid="stSidebarUserContent"]{padding-top:100px!important}
 [data-testid="stSidebar"] h2,[data-testid="stSidebar"] h3,[data-testid="stSidebar"] h4{color:#00e5ff!important}
@@ -292,7 +310,7 @@ section[data-testid="stSidebar"]{
   color:#8b9cb3!important;font-size:.72rem!important;font-weight:600!important;letter-spacing:.16em!important;
   text-transform:uppercase!important;margin:8px 0 0 0!important;line-height:1.35!important;
 }
-/* Streamlit sidebar header row (collapse / close) — no neon */
+/* Streamlit sidebar header row (collapse / close); no neon */
 [data-testid="stSidebar"] [data-testid="stVerticalBlock"] > div:first-child button,
 [data-testid="stSidebar"] button[kind="header"],
 [data-testid="stSidebar"] button[kind="headerNoPadding"]{
@@ -466,7 +484,7 @@ header{display:none!important}
   backdrop-filter:blur(15px);-webkit-backdrop-filter:blur(15px);
   border-bottom:1px solid #1e293b;
   display:flex;align-items:center;justify-content:center;gap:6px;
-  padding:0 12px 0 72px;
+  padding:0 12px;
   box-shadow:0 2px 24px rgba(0,0,0,.4);
 }
 .sticky-nav-track{
@@ -579,7 +597,7 @@ div[data-testid="stMetricValue"], .mono, .glance-value, .ticker, .price-value{
   background:linear-gradient(180deg,#22d3ee,#0ea5e9)!important;color:#fff!important;
   border-color:rgba(255,255,255,.25)!important;
 }
-/* ── Sidebar: horizontal radio groups (Scanner / Focus / Horizon) — dark, readable on all hosts ── */
+/* Sidebar style: horizontal radio groups (Scanner / Focus / Horizon); dark, readable on all hosts */
 [data-testid="stSidebar"] [data-baseweb="radio"]{
   background:#0c1220!important;border:1px solid #334155!important;border-radius:12px!important;
   padding:6px 8px!important;flex-wrap:wrap!important;gap:6px!important;
@@ -885,7 +903,11 @@ def fetch_info(ticker):
 
 @st.cache_data(ttl=300)
 def fetch_options(ticker, exp=None):
-    """Fetch options chain. Always returns ((calls_df, puts_df), exps) for stable unpacking."""
+    """Fetch options chain. Always returns ((calls_df, puts_df), exps) for stable unpacking.
+
+    When ``exp`` is None, returns empty dataframes and only the expiration list (no ``option_chain``
+    download). Call again with a concrete expiry when you need strikes. This avoids pulling the
+    nearest expiry chain twice on every dashboard load."""
     empty = (pd.DataFrame(), pd.DataFrame())
     try:
         t = _yfinance_ticker(ticker)
@@ -895,6 +917,8 @@ def fetch_options(ticker, exp=None):
         exps = [str(x) for x in list(raw_exps)]
         if not exps:
             return empty, []
+        if exp is None:
+            return empty, exps
         pick = exp if exp in exps else exps[0]
         chain = t.option_chain(pick)
         c_raw, p_raw = chain.calls, chain.puts
@@ -903,6 +927,49 @@ def fetch_options(ticker, exp=None):
         return (calls_df, puts_df), exps
     except Exception:
         return empty, []
+
+
+@st.cache_data(ttl=900)
+def compute_iv_rank_proxy(sym: str, spot: float, ref_iv_pct: float):
+    """Where ``ref_iv_pct`` sits between min/max ATM call IV sampled across visible expiries.
+
+    Yahoo does not expose a true 52-week ATM IV series per equity; this **term-structure proxy**
+    compares your reference IV (e.g. prop-desk strike) to the cheapest vs richest ATM IV across
+    listed expirations. Returns ``dict`` with ``rank`` (0–100), ``lo``, ``hi``, or ``None``."""
+    if ref_iv_pct is None or spot is None or spot <= 0:
+        return None
+    try:
+        t = _yfinance_ticker(sym)
+        exps = list(getattr(t, "options", None) or [])[:14]
+        if len(exps) < 2:
+            return None
+        samples = []
+        for exp in exps:
+            try:
+                chain = t.option_chain(exp)
+                c = chain.calls
+                if c is None or c.empty or "impliedVolatility" not in c.columns:
+                    continue
+                c = c[c["impliedVolatility"].notna() & (c["impliedVolatility"] > 0)]
+                if c.empty or "strike" not in c.columns:
+                    continue
+                ix = (pd.to_numeric(c["strike"], errors="coerce") - spot).abs().idxmin()
+                iv = float(c.loc[ix, "impliedVolatility"]) * 100.0
+                if iv > 0:
+                    samples.append(iv)
+            except Exception:
+                continue
+        if len(samples) < 2:
+            return None
+        lo, hi = min(samples), max(samples)
+        if hi <= lo + 0.25:
+            return {"rank": 50.0, "lo": lo, "hi": hi}
+        rank = (float(ref_iv_pct) - lo) / (hi - lo) * 100.0
+        rank = max(0.0, min(100.0, rank))
+        return {"rank": rank, "lo": lo, "hi": hi}
+    except Exception:
+        return None
+
 
 @st.cache_data(ttl=600)
 def fetch_news(ticker):
@@ -1229,6 +1296,9 @@ except ImportError:
 
 def bs_price(S, K, T, r, sigma, option_type="call"):
     """Black-Scholes option price. S=spot, K=strike, T=years, r=risk-free rate, sigma=IV."""
+    S, K = float(S), float(K)
+    if S <= 0 or K <= 0 or not math.isfinite(S) or not math.isfinite(K):
+        return max(0.0, S - K) if option_type == "call" else max(0.0, K - S)
     sigma = max(sigma, 0.001)
     if T <= 0:
         return max(0, S - K) if option_type == "call" else max(0, K - S)
@@ -1240,6 +1310,9 @@ def bs_price(S, K, T, r, sigma, option_type="call"):
 
 def bs_greeks(S, K, T, r, sigma, option_type="call"):
     """Calculate Delta, Gamma, Theta (per day), Vega (per 1% IV move)."""
+    S, K = float(S), float(K)
+    if S <= 0 or K <= 0 or not math.isfinite(S) or not math.isfinite(K):
+        return {"delta": 1.0 if option_type == "call" else -1.0, "gamma": 0, "theta": 0, "vega": 0}
     sigma = max(sigma, 0.001)
     if T <= 0:
         return {"delta": 1.0 if option_type == "call" else -1.0, "gamma": 0, "theta": 0, "vega": 0}
@@ -1276,6 +1349,8 @@ def kelly_criterion(win_prob_pct, win_amount, loss_amount):
         return 0.0, 0.0
     W = win_prob_pct / 100
     R = win_amount / loss_amount
+    if R < 1e-12:
+        return 0.0, 0.0
     full = W - (1 - W) / R
     half = full / 2
     return round(max(0.0, full) * 100, 1), round(max(0.0, half) * 100, 1)
@@ -1317,7 +1392,7 @@ def quant_edge_score(df, vix_val=None):
     Equal 20% weights.
     """
     sc = {}; close = df["Close"].iloc[-1]
-    # 1. TREND (30% weight — most important for CC sellers)
+    # 1. TREND (equal 20% weight in composite; important for premium sellers)
     if len(df) >= 200:
         e20, e50, e200 = [TA.ema(df["Close"], p).iloc[-1] for p in (20, 50, 200)]
         sc["trend"] = 95 if close > e20 > e50 > e200 else (75 if close > e50 > e200 else (55 if close > e200 else 25))
@@ -1330,8 +1405,9 @@ def quant_edge_score(df, vix_val=None):
     sc["volume"] = (85 if obv_s.iloc[-1] > obv_s.iloc[-20] else 35) if len(obv_s) >= 20 else 50
     # 4. VOLATILITY (ATR regime + VIX — for premium sellers, higher = better)
     if len(df) >= 20:
-        cur_atr = TA.atr(df).iloc[-1]
-        avg_atr = TA.atr(df).iloc[-60:].mean() if len(df) >= 60 else cur_atr
+        atr_s = TA.atr(df)
+        cur_atr = atr_s.iloc[-1]
+        avg_atr = atr_s.iloc[-60:].mean() if len(df) >= 60 else cur_atr
         atr_ratio = cur_atr / avg_atr if avg_atr > 0 else 1
         vol_score = min(100, max(20, 50 + (atr_ratio - 1) * 30))
         if vix_val and vix_val > 0:
@@ -1367,7 +1443,6 @@ def weekly_trend_label(df_wk):
 #  GOLD ZONE — dynamic confluence support/resistance
 # ═════════════════════════════════════════════════════════════════════════
 
-@st.cache_data(ttl=300)
 def calc_gold_zone(df, df_wk=None):
     """Gold Zone: mean of POC, Fib 61.8%, Gann Sq9, and 200-day SMA (institutional anchor).
     ``df_wk`` is accepted for API compatibility; SMA 200 replaces weekly S/R in the blend."""
@@ -1401,9 +1476,10 @@ def calc_gold_zone(df, df_wk=None):
 #  CONFLUENCE POINTS — 0-to-9 scoring (Startup.io-inspired, enhanced)
 # ═════════════════════════════════════════════════════════════════════════
 
-def _calc_confluence_points_core(df, df_wk=None, vix_val=None):
+def _calc_confluence_points_core(df, df_wk=None, vix_val=None, gold_zone_price=None):
     """Same scoring as the dashboard confluence meter — not cached.
-    Safe to call on ``df.iloc[:i+1]`` for point-in-time diamond detection."""
+    Safe to call on ``df.iloc[:i+1]`` for point-in-time diamond detection.
+    Pass ``gold_zone_price`` when the caller already computed Gold Zone on the same frame to avoid duplicate work."""
     score = 0
     breakdown = {}
     price = df["Close"].iloc[-1]
@@ -1428,7 +1504,7 @@ def _calc_confluence_points_core(df, df_wk=None, vix_val=None):
     adx_bull = adx_val > 25 and dip_val > din_val
     pts = 1 if adx_bull else 0
     score += pts
-    breakdown["ADX+DI"] = {"pts": pts, "max": 1, "detail": f"ADX {adx_val:.0f}, +DI>-DI" if adx_bull else f"ADX {adx_val:.0f}"}
+    breakdown["ADX DI"] = {"pts": pts, "max": 1, "detail": f"ADX {adx_val:.0f}, plus DI leading minus DI" if adx_bull else f"ADX {adx_val:.0f}"}
 
     obv_s = TA.obv(df)
     obv_up = obv_s.iloc[-1] > obv_s.iloc[-20] if len(obv_s) >= 20 else False
@@ -1443,7 +1519,10 @@ def _calc_confluence_points_core(df, df_wk=None, vix_val=None):
     score += pts
     breakdown["Divergence"] = {"pts": pts, "max": 1, "detail": "Bullish Div Found" if bull_div else "None"}
 
-    gold_zone, _ = calc_gold_zone(df, df_wk)
+    if gold_zone_price is None:
+        gold_zone, _ = calc_gold_zone(df, df_wk)
+    else:
+        gold_zone = gold_zone_price
     above_gz = price > gold_zone
     pts = 1 if above_gz else 0
     score += pts
@@ -1459,10 +1538,10 @@ def _calc_confluence_points_core(df, df_wk=None, vix_val=None):
 
 
 @st.cache_data(ttl=300)
-def calc_confluence_points(df, df_wk=None, vix_val=None):
+def calc_confluence_points(df, df_wk=None, vix_val=None, gold_zone_price=None):
     """Compute 0-9 bullish confluence score with per-component breakdown.
     Returns (score, max_score, breakdown_dict, bearish_score)."""
-    return _calc_confluence_points_core(df, df_wk, vix_val)
+    return _calc_confluence_points_core(df, df_wk, vix_val, gold_zone_price)
 
 
 # ═════════════════════════════════════════════════════════════════════════
@@ -1565,7 +1644,8 @@ def diamond_win_rate(df, diamonds, forward_bars=10):
 
     for d in diamonds:
         try:
-            idx = df.index.get_loc(d["date"])
+            loc = df.index.get_loc(d["date"])
+            idx = _index_pos(loc)
         except KeyError:
             continue
         if idx + forward_bars >= len(df):
@@ -1615,10 +1695,10 @@ def scan_single_ticker(tkr):
         chg_pct = (price / prev - 1) * 100
 
         qs, _ = quant_edge_score(df)
-        cp_score, cp_max, cp_bd, _ = calc_confluence_points(df, df_wk)
+        gold_zone, _ = calc_gold_zone(df, df_wk)
+        cp_score, cp_max, cp_bd, _ = calc_confluence_points(df, df_wk, gold_zone_price=gold_zone)
         diamonds = detect_diamonds(df, df_wk)
         latest_d = latest_diamond_status(diamonds)
-        gold_zone, _ = calc_gold_zone(df, df_wk)
         dist_gz = (price / gold_zone - 1) * 100 if gold_zone else 0
 
         struct, _, _ = TA.market_structure(df)
@@ -2183,7 +2263,7 @@ def _factor_checklist_labels():
     return {
         "Supertrend": "Supertrend supports buyers",
         "Ichimoku": "Price above the cloud",
-        "ADX+DI": "Strong trend with buyers in front",
+        "ADX DI": "Strong trend with buyers in front",
         "OBV": "Big money accumulation",
         "Divergence": "Bullish divergence hint",
         "Gold Zone": "Above Gold Zone",
@@ -2326,8 +2406,8 @@ def _fragment_technical_zone(
     """Charts + overlay toggles + diamond cards + gold zone copy. Reruns without refetching Yahoo data."""
     if mini_mode:
         st.info(
-            "**Mini mode:** technical charts are off to save bandwidth and CPU. "
-            "Disable **🚀 Turbo** in the Command Bar to load Plotly."
+            "**Mini mode:** We park the heavy charts so your session stays fast. "
+            "Flip **🚀 Turbo** off in Mission Control when you want the full Plotly stack."
         )
         _persist_overlay_prefs()
         return
@@ -2335,9 +2415,9 @@ def _fragment_technical_zone(
     st.markdown('<div id="charts" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
     _section(
         "Technical Chart",
-        f"{ticker} — four separate charts below (price, volume, RSI, MACD). Zoom each panel independently. "
-        "Flip chart layers below — updates here do not re-run the data feed.",
-        tip_plain="Candles: OHLC per bar. EMA / Bollinger: trend and volatility. Fib & Gann & S/R: reference levels (toggle off if busy). Diamonds: confluence signals. Gold line: Gold Zone. Volume: participation. RSI: overbought/oversold heat. MACD: momentum vs signal.",
+        f"{ticker} gets four dedicated panels: price, volume, RSI, and MACD. Zoom each one on its own. "
+        "Tweak layers below; those toggles refresh the visuals without another Yahoo pull.",
+        tip_plain="Candles show OHLC. EMA and Bollinger frame trend and volatility. Fib, Gann, and S/R are reference rails you can mute. Diamonds flag confluence. Gold line is the Gold Zone. Volume shows participation. RSI shows heat. MACD shows momentum versus its signal.",
     )
     st.markdown("##### Chart layers")
     o1, o2 = st.columns(2)
@@ -2365,13 +2445,13 @@ def _fragment_technical_zone(
         gold_zone=gold_zone_price if show_gold_zone else None,
     )
     st.plotly_chart(fig_p, use_container_width=True, config=_PLOTLY_UI_CONFIG)
-    st.markdown("---")
+    st.divider()
     st.markdown("#### Volume")
     st.plotly_chart(fig_v, use_container_width=True, config=_PLOTLY_UI_CONFIG)
-    st.markdown("---")
+    st.divider()
     st.markdown("#### RSI (14)")
     st.plotly_chart(fig_r, use_container_width=True, config=_PLOTLY_UI_CONFIG)
-    st.markdown("---")
+    st.divider()
     st.markdown("#### MACD")
     st.plotly_chart(fig_m, use_container_width=True, config=_PLOTLY_UI_CONFIG)
 
@@ -2455,14 +2535,13 @@ def _fragment_technical_zone(
             )
             for comp_name, comp_val in gold_zone_components.items():
                 dist = (comp_val / price - 1) * 100
-                st.markdown(f"- **{comp_name}**: ${comp_val:.2f} ({dist:+.1f}% from current)")
+                st.markdown(f"* **{comp_name}**: ${comp_val:.2f} ({dist:+.1f}% from spot)")
             _explain(
                 "Why the Gold Zone matters",
-                "The Gold Zone combines four of the strongest support/resistance signals into one level: "
-                "Volume Profile POC (where the most shares traded), the 61.8% Fibonacci golden ratio, "
-                "the 200-day simple moving average (institutional anchor), and the nearest Gann Square of 9 natural level. "
-                "When price is ABOVE the Gold Zone, bulls are in control. When it drops below, be cautious. "
-                "This is the single most important price level on the chart.",
+                "The Gold Zone fuses four institutional magnets into one line: Volume Profile POC where the crowd traded most, "
+                "the 61.8% Fibonacci anchor, the 200 day simple moving average, and the nearest Gann Square of 9 pivot. "
+                "Above it, buyers still own the narrative. Below it, respect the air pocket. "
+                "Treat it as the headline level on your chart.",
                 "neutral",
             )
 
@@ -2482,8 +2561,8 @@ def _fragment_technical_zone(
 
     _explain(
         "\U0001f9e0 Quick read",
-        "Hover the <strong>i</strong> icon in the section title above for the full tour. "
-        "Bottom line: green candles and a rising short EMA mean buyers lead. Diamonds and Gold Zone are your institutional style GPS.",
+        "Tap the <strong>i</strong> on any section header when you want the full story. "
+        "Green candles with a climbing short EMA say buyers are steering. Diamonds and the Gold Zone are your runway lights.",
         chart_mood,
     )
     _persist_overlay_prefs()
@@ -2501,124 +2580,117 @@ def main():
     elif "sb_scanner" not in st.session_state:
         st.session_state["sb_scanner"] = cfg.get("watchlist", DEFAULT_CONFIG["watchlist"])
 
-    # ── SIDEBAR — paperwork only (runs first so sb_scanner is committed before the main HUD)
-    with st.sidebar:
-        st.markdown("### ⚙️ System Config")
-        st.caption("CashFlow Command Center · v14.1 · open with ☰ when you need to edit the list.")
-        st.markdown("---")
-        with st.expander("Edit Watchlist Symbols", expanded=False):
-            st.caption(
-                "Paste symbols (commas or one per line). Reorder with the buttons. List saves to disk on refresh."
-            )
-            scanner_watchlist_raw = st.text_area(
-                "Watchlist symbols",
-                height=150,
-                help="Paste from a spreadsheet, type commas, or put one ticker per line.",
-                key="sb_scanner",
-                label_visibility="collapsed",
-            )
-            watch_items_sb = _parse_watchlist_string(scanner_watchlist_raw)
-            scanner_watchlist_sb = ",".join(watch_items_sb)
+    # ── Watchlist editor (must run before Mission Control so sb_scanner is committed same run)
+    _wl_expanded = bool(st.session_state.pop("_open_watchlist_editor", False))
+    st.caption("CashFlow Command Center · v14.1")
+    with st.expander("✏️ Edit Watchlist Symbols", expanded=_wl_expanded):
+        st.caption(
+            "Drop in tickers separated by commas or line breaks. Shuffle the lineup with the controls. "
+            "Everything commits when the app saves your config."
+        )
+        scanner_watchlist_raw = st.text_area(
+            "Watchlist symbols",
+            height=150,
+            help="Paste from a spreadsheet, type commas, or put one ticker per line.",
+            key="sb_scanner",
+            label_visibility="collapsed",
+        )
+        watch_items_sb = _parse_watchlist_string(scanner_watchlist_raw)
+        scanner_watchlist_sb = ",".join(watch_items_sb)
 
-            if watch_items_sb:
-                if "_sb_watch_selected_sync" in st.session_state:
-                    st.session_state["sb_watch_selected"] = st.session_state.pop("_sb_watch_selected_sync")
-                if st.session_state.get("sb_watch_selected") not in watch_items_sb:
-                    st.session_state["sb_watch_selected"] = watch_items_sb[0]
-                sel = st.session_state.get("sb_watch_selected")
-                st.markdown(
-                    "<div style='font-size:.68rem;color:#94a3b8;margin:0 0 6px 0'>"
-                    + " · ".join(f"<span class='mono' style='color:#cbd5e1'>{_html_mod.escape(x)}</span>" for x in watch_items_sb)
-                    + "</div>",
-                    unsafe_allow_html=True,
-                )
-                up_clicked = st.button("↑  Move up", use_container_width=True, key="sb_move_up")
-                down_clicked = st.button("↓  Move down", use_container_width=True, key="sb_move_down")
-                remove_clicked = st.button("✕  Remove symbol", use_container_width=True, key="sb_remove_ticker")
-                sort_az = st.button("Sort A–Z", use_container_width=True, key="sb_sort_az")
-
-                if up_clicked and sel in watch_items_sb:
-                    idx = watch_items_sb.index(sel)
-                    if idx > 0:
-                        watch_items_sb[idx - 1], watch_items_sb[idx] = watch_items_sb[idx], watch_items_sb[idx - 1]
-                        scanner_watchlist_sb = ",".join(watch_items_sb)
-                        st.session_state["_sb_scanner_sync"] = scanner_watchlist_sb
-                        st.session_state["_sb_watch_selected_sync"] = sel
-                        cfg = {**cfg, "watchlist": scanner_watchlist_sb, "scanner_sort_mode": cfg.get("scanner_sort_mode", DEFAULT_CONFIG["scanner_sort_mode"])}
-                        save_config(cfg)
-                        st.rerun()
-                if down_clicked and sel in watch_items_sb:
-                    idx = watch_items_sb.index(sel)
-                    if idx < len(watch_items_sb) - 1:
-                        watch_items_sb[idx + 1], watch_items_sb[idx] = watch_items_sb[idx], watch_items_sb[idx + 1]
-                        scanner_watchlist_sb = ",".join(watch_items_sb)
-                        st.session_state["_sb_scanner_sync"] = scanner_watchlist_sb
-                        st.session_state["_sb_watch_selected_sync"] = sel
-                        cfg = {**cfg, "watchlist": scanner_watchlist_sb, "scanner_sort_mode": cfg.get("scanner_sort_mode", DEFAULT_CONFIG["scanner_sort_mode"])}
-                        save_config(cfg)
-                        st.rerun()
-                if remove_clicked and sel in watch_items_sb:
-                    watch_items_sb = [t for t in watch_items_sb if t != sel]
-                    scanner_watchlist_sb = ",".join(watch_items_sb)
-                    st.session_state["_sb_scanner_sync"] = scanner_watchlist_sb
-                    if watch_items_sb:
-                        st.session_state["_sb_watch_selected_sync"] = watch_items_sb[0]
-                    cfg = {**cfg, "watchlist": scanner_watchlist_sb, "scanner_sort_mode": cfg.get("scanner_sort_mode", DEFAULT_CONFIG["scanner_sort_mode"])}
-                    save_config(cfg)
-                    st.rerun()
-                if sort_az and watch_items_sb:
-                    watch_items_sb = sorted(watch_items_sb)
-                    scanner_watchlist_sb = ",".join(watch_items_sb)
-                    st.session_state["_sb_scanner_sync"] = scanner_watchlist_sb
-                    sel2 = st.session_state.get("sb_watch_selected")
-                    if sel2 not in watch_items_sb:
-                        st.session_state["_sb_watch_selected_sync"] = watch_items_sb[0]
-                    cfg = {**cfg, "watchlist": scanner_watchlist_sb, "scanner_sort_mode": cfg.get("scanner_sort_mode", DEFAULT_CONFIG["scanner_sort_mode"])}
-                    save_config(cfg)
-                    st.rerun()
-            else:
-                st.session_state.pop("sb_watch_selected", None)
-                st.info("Add at least one symbol (e.g. PLTR, NVDA).")
-
+        if watch_items_sb:
+            if "_sb_watch_selected_sync" in st.session_state:
+                st.session_state["sb_watch_selected"] = st.session_state.pop("_sb_watch_selected_sync")
+            if st.session_state.get("sb_watch_selected") not in watch_items_sb:
+                st.session_state["sb_watch_selected"] = watch_items_sb[0]
+            sel = st.session_state.get("sb_watch_selected")
             st.markdown(
-                "<div style='font-size:.72rem;color:#94a3b8;margin:10px 0 2px 0;font-weight:600'>Quick add</div>",
+                "<div style='font-size:.68rem;color:#94a3b8;margin:0 0 6px 0'>"
+                + " · ".join(f"<span class='mono' style='color:#cbd5e1'>{_html_mod.escape(x)}</span>" for x in watch_items_sb)
+                + "</div>",
                 unsafe_allow_html=True,
             )
-            if "_sb_add_ticker_clear" in st.session_state:
-                st.session_state["sb_add_ticker"] = ""
-                st.session_state.pop("_sb_add_ticker_clear", None)
-            add_ticker_raw = st.text_input(
-                "Symbol",
-                placeholder="e.g. AMD — then tap Add below",
-                key="sb_add_ticker",
-                label_visibility="collapsed",
-            )
-            add_clicked = st.button("Add symbol", use_container_width=True, key="sb_add_watch")
-            add_ticker = (add_ticker_raw or "").strip().upper()
-            if add_clicked:
-                if add_ticker:
-                    if add_ticker not in watch_items_sb:
-                        watch_items_sb.append(add_ticker)
+            up_clicked = st.button("↑  Move up", use_container_width=True, key="sb_move_up")
+            down_clicked = st.button("↓  Move down", use_container_width=True, key="sb_move_down")
+            remove_clicked = st.button("✕  Remove symbol", use_container_width=True, key="sb_remove_ticker")
+            sort_az = st.button("Sort A to Z", use_container_width=True, key="sb_sort_az")
+
+            if up_clicked and sel in watch_items_sb:
+                idx = watch_items_sb.index(sel)
+                if idx > 0:
+                    watch_items_sb[idx - 1], watch_items_sb[idx] = watch_items_sb[idx], watch_items_sb[idx - 1]
                     scanner_watchlist_sb = ",".join(watch_items_sb)
                     st.session_state["_sb_scanner_sync"] = scanner_watchlist_sb
-                    st.session_state["_sb_watch_selected_sync"] = add_ticker
-                    st.session_state["_sb_add_ticker_clear"] = True
+                    st.session_state["_sb_watch_selected_sync"] = sel
                     cfg = {**cfg, "watchlist": scanner_watchlist_sb, "scanner_sort_mode": cfg.get("scanner_sort_mode", DEFAULT_CONFIG["scanner_sort_mode"])}
                     save_config(cfg)
                     st.rerun()
-                else:
-                    st.toast("Enter a ticker in the box above, then tap Add symbol.")
-
-            if st.button("Save & refresh main", use_container_width=True, key="sb_save_refresh_main"):
-                w = _parse_watchlist_string(st.session_state.get("sb_scanner", ""))
-                save_config({**load_config(), "watchlist": ",".join(w)})
+            if down_clicked and sel in watch_items_sb:
+                idx = watch_items_sb.index(sel)
+                if idx < len(watch_items_sb) - 1:
+                    watch_items_sb[idx + 1], watch_items_sb[idx] = watch_items_sb[idx], watch_items_sb[idx + 1]
+                    scanner_watchlist_sb = ",".join(watch_items_sb)
+                    st.session_state["_sb_scanner_sync"] = scanner_watchlist_sb
+                    st.session_state["_sb_watch_selected_sync"] = sel
+                    cfg = {**cfg, "watchlist": scanner_watchlist_sb, "scanner_sort_mode": cfg.get("scanner_sort_mode", DEFAULT_CONFIG["scanner_sort_mode"])}
+                    save_config(cfg)
+                    st.rerun()
+            if remove_clicked and sel in watch_items_sb:
+                watch_items_sb = [t for t in watch_items_sb if t != sel]
+                scanner_watchlist_sb = ",".join(watch_items_sb)
+                st.session_state["_sb_scanner_sync"] = scanner_watchlist_sb
+                if watch_items_sb:
+                    st.session_state["_sb_watch_selected_sync"] = watch_items_sb[0]
+                cfg = {**cfg, "watchlist": scanner_watchlist_sb, "scanner_sort_mode": cfg.get("scanner_sort_mode", DEFAULT_CONFIG["scanner_sort_mode"])}
+                save_config(cfg)
                 st.rerun()
+            if sort_az and watch_items_sb:
+                watch_items_sb = sorted(watch_items_sb)
+                scanner_watchlist_sb = ",".join(watch_items_sb)
+                st.session_state["_sb_scanner_sync"] = scanner_watchlist_sb
+                sel2 = st.session_state.get("sb_watch_selected")
+                if sel2 not in watch_items_sb:
+                    st.session_state["_sb_watch_selected_sync"] = watch_items_sb[0]
+                cfg = {**cfg, "watchlist": scanner_watchlist_sb, "scanner_sort_mode": cfg.get("scanner_sort_mode", DEFAULT_CONFIG["scanner_sort_mode"])}
+                save_config(cfg)
+                st.rerun()
+        else:
+            st.session_state.pop("sb_watch_selected", None)
+            st.info("Add at least one symbol (e.g. PLTR, NVDA).")
 
-        st.markdown("---")
         st.markdown(
-            "<div style='text-align:center;color:#64748b;font-size:.65rem'>Data: Yahoo Finance &middot; Not advice</div>",
+            "<div style='font-size:.72rem;color:#94a3b8;margin:10px 0 2px 0;font-weight:600'>Quick add</div>",
             unsafe_allow_html=True,
         )
+        if "_sb_add_ticker_clear" in st.session_state:
+            st.session_state["sb_add_ticker"] = ""
+            st.session_state.pop("_sb_add_ticker_clear", None)
+        add_ticker_raw = st.text_input(
+            "Symbol",
+            placeholder="Try AMD, then tap Add symbol",
+            key="sb_add_ticker",
+            label_visibility="collapsed",
+        )
+        add_clicked = st.button("Add symbol", use_container_width=True, key="sb_add_watch")
+        add_ticker = (add_ticker_raw or "").strip().upper()
+        if add_clicked:
+            if add_ticker:
+                if add_ticker not in watch_items_sb:
+                    watch_items_sb.append(add_ticker)
+                scanner_watchlist_sb = ",".join(watch_items_sb)
+                st.session_state["_sb_scanner_sync"] = scanner_watchlist_sb
+                st.session_state["_sb_watch_selected_sync"] = add_ticker
+                st.session_state["_sb_add_ticker_clear"] = True
+                cfg = {**cfg, "watchlist": scanner_watchlist_sb, "scanner_sort_mode": cfg.get("scanner_sort_mode", DEFAULT_CONFIG["scanner_sort_mode"])}
+                save_config(cfg)
+                st.rerun()
+            else:
+                st.toast("Enter a ticker in the box above, then tap Add symbol.")
+
+        if st.button("Save and refresh", use_container_width=True, key="sb_save_refresh_main"):
+            w = _parse_watchlist_string(st.session_state.get("sb_scanner", ""))
+            save_config({**load_config(), "watchlist": ",".join(w)})
+            st.rerun()
 
     # ── GLOBAL COMMAND BAR (HUD — first paint in main column, directly under sticky nav)
     scanner_watchlist_raw = st.session_state.get("sb_scanner", cfg.get("watchlist", ""))
@@ -2629,14 +2701,26 @@ def main():
         0 if cfg.get("scanner_sort_mode", "Custom watchlist order") == "Custom watchlist order" else 1
     )
 
+    # Must resolve sb_watch_selected before st.selectbox(..., key="sb_watch_selected") — Streamlit 1.33+
+    # forbids assigning session_state for a widget key after that widget is instantiated (e.g. tape buttons).
+    if watch_items:
+        if "_sb_watch_selected_sync" in st.session_state:
+            st.session_state["sb_watch_selected"] = st.session_state.pop("_sb_watch_selected_sync")
+        if st.session_state.get("sb_watch_selected") not in watch_items:
+            st.session_state["sb_watch_selected"] = watch_items[0]
+        ticker = st.session_state.get("sb_watch_selected", watch_items[0])
+    else:
+        st.session_state.pop("sb_watch_selected", None)
+        ticker = "PLTR"
+
     with st.container(border=True):
         st.markdown(
-            "<div style='font-size:.75rem;color:#64748b;font-weight:700;letter-spacing:.1em;margin-bottom:8px;'>MISSION CONTROL</div>",
+            "<div style='font-size:.75rem;color:#cbd5e1;font-weight:800;letter-spacing:.12em;margin-bottom:8px;'>MISSION CONTROL</div>",
             unsafe_allow_html=True,
         )
         r1c1, r1c2, r1c3 = st.columns([1.5, 2, 1])
         with r1c1:
-            st.caption("Target ticker")
+            st.markdown('<p class="cf-hud-label">Target ticker</p>', unsafe_allow_html=True)
             if watch_items:
                 st.selectbox(
                     "Target Ticker",
@@ -2646,9 +2730,13 @@ def main():
                     label_visibility="collapsed",
                 )
             else:
-                st.caption("Add symbols in sidebar → **Edit Watchlist Symbols**")
+                st.markdown(
+                    '<p class="cf-hud-label">No symbols yet</p><p style="color:#cbd5e1;font-size:0.85rem;margin:0">'
+                    "Expand <strong>✏️ Edit Watchlist Symbols</strong> up top or use the shortcut under the tape.</p>",
+                    unsafe_allow_html=True,
+                )
         with r1c2:
-            st.caption("Strategy")
+            st.markdown('<p class="cf-hud-label">Strategy</p>', unsafe_allow_html=True)
             if hasattr(st, "segmented_control"):
                 st.segmented_control(
                     "Strategy",
@@ -2665,15 +2753,15 @@ def main():
                     label_visibility="collapsed",
                 )
         with r1c3:
-            st.caption("Performance")
+            st.markdown('<p class="cf-hud-label">Performance</p>', unsafe_allow_html=True)
             st.toggle(
                 "🚀 Turbo",
                 key="sb_mini_mode",
-                help="Turbo (Mini mode): skips heavy Plotly charts — glance row, execution, quant, scanner stay on.",
+                help="Turbo keeps the desk light: no heavy Plotly stack, while glance tiles, execution strip, quant, and scanner stay live.",
             )
         r2c1, r2c2, r2c3 = st.columns([1.2, 1.2, 1.4])
         with r2c1:
-            st.caption("Option horizon")
+            st.markdown('<p class="cf-hud-label">Option horizon</p>', unsafe_allow_html=True)
             if hasattr(st, "segmented_control"):
                 st.segmented_control(
                     "Horizon",
@@ -2690,36 +2778,30 @@ def main():
                     label_visibility="collapsed",
                 )
         with r2c2:
-            st.caption("Scanner order")
+            st.markdown('<p class="cf-hud-label">Scanner order</p>', unsafe_allow_html=True)
             _scan_seg = st.radio(
                 "Scanner order",
                 ["Custom order", "Confluence first"],
                 index=_scan_idx,
                 horizontal=True,
                 key="sb_scan_radio",
-                help="Custom: follow your list order. Confluence: strongest setups first.",
+                help="Custom follows your lineup. Confluence ranks the strongest tape first.",
             )
             scanner_sort_mode = (
                 "Custom watchlist order" if _scan_seg == "Custom order" else "Highest confluence first"
             )
         with r2c3:
-            st.caption("NOC layout")
-            st.caption("Critical switches sit above the monitors; sidebar is for list maintenance only.")
-
-    if watch_items:
-        if "_sb_watch_selected_sync" in st.session_state:
-            st.session_state["sb_watch_selected"] = st.session_state.pop("_sb_watch_selected_sync")
-        if st.session_state.get("sb_watch_selected") not in watch_items:
-            st.session_state["sb_watch_selected"] = watch_items[0]
-        ticker = st.session_state.get("sb_watch_selected", watch_items[0])
-    else:
-        st.session_state.pop("sb_watch_selected", None)
-        ticker = "PLTR"
+            st.markdown('<p class="cf-hud-label">NOC layout</p>', unsafe_allow_html=True)
+            st.markdown(
+                '<p style="color:#cbd5e1;font-size:0.8rem;margin:0;line-height:1.35">'
+                "Mission Control holds the switches you touch all session. The watchlist editor lives in the expander up top.</p>",
+                unsafe_allow_html=True,
+            )
 
     # Clickable ticker tape (chunk rows on wide lists so columns stay usable on mobile)
     if watch_items:
         st.markdown('<p class="cf-tape-title">Watchlist tape</p>', unsafe_allow_html=True)
-        st.caption("Tap a symbol to switch the active ticker. Daily % is last vs prior session (cached).")
+        st.caption("Tap a symbol to promote it to the active ticker. Daily move is versus the prior session close (cached).")
         _TAPE_CHUNK = 8
         tape_i = 0
         for row_start in range(0, len(watch_items), _TAPE_CHUNK):
@@ -2727,7 +2809,7 @@ def main():
             tape_cols = st.columns(len(row_tickers))
             for j, tkr in enumerate(row_tickers):
                 pct = _ticker_pct_change_1d(tkr)
-                pct_str = f"{pct:+.2f}%" if pct is not None else "—"
+                pct_str = f"{pct:+.2f}%" if pct is not None else "n/a"
                 c_pct = "#10b981" if (pct is not None and pct >= 0) else ("#ef4444" if pct is not None else "#64748b")
                 is_active = tkr == ticker
                 with tape_cols[j]:
@@ -2741,9 +2823,20 @@ def main():
                         use_container_width=True,
                         type="primary" if is_active else "secondary",
                     ):
-                        st.session_state["sb_watch_selected"] = tkr
+                        st.session_state["_sb_watch_selected_sync"] = tkr
                         st.rerun()
                 tape_i += 1
+
+    b1, b2 = st.columns([1, 2])
+    with b1:
+        if st.button("✏️ Edit Watchlist Symbols", use_container_width=True, key="cf_open_watchlist_editor"):
+            st.session_state["_open_watchlist_editor"] = True
+            st.rerun()
+    with b2:
+        st.markdown(
+            "<div style='color:#94a3b8;font-size:0.7rem;padding-top:10px'>Data: Yahoo Finance · Not advice</div>",
+            unsafe_allow_html=True,
+        )
 
     watch_cfg = {**cfg, "watchlist": scanner_watchlist, "scanner_sort_mode": scanner_sort_mode}
     if watch_cfg != cfg:
@@ -2766,16 +2859,25 @@ def main():
     if mini_mode:
         st.markdown(_MINI_MODE_DENSITY_CSS, unsafe_allow_html=True)
 
-    # ── FETCH ──
+    # ── FETCH (parallel I/O: independent Yahoo endpoints) ──
     with st.spinner(f"Loading {ticker}..."):
-        df = fetch_stock(ticker, "1y", "1d")
-        df_wk = fetch_stock(ticker, "2y", "1wk")
-        macro = fetch_macro()
-        news = fetch_news(ticker)
-        earnings_date_raw = fetch_earnings_date(ticker)
+        with ThreadPoolExecutor(max_workers=5) as _pool:
+            _f_df = _pool.submit(fetch_stock, ticker, "1y", "1d")
+            _f_wk = _pool.submit(fetch_stock, ticker, "2y", "1wk")
+            _f_macro = _pool.submit(fetch_macro)
+            _f_news = _pool.submit(fetch_news, ticker)
+            _f_earn = _pool.submit(fetch_earnings_date, ticker)
+            df = _f_df.result()
+            df_wk = _f_wk.result()
+            macro = _f_macro.result()
+            news = _f_news.result()
+            earnings_date_raw = _f_earn.result()
 
     if df is None or df.empty:
-        st.error(f"Data feed unavailable for {ticker}. Yahoo Finance may be throttling or market is closed. Retrying on next refresh...")
+        st.error(
+            f"Data feed unavailable for {ticker}. Yahoo Finance may be throttling or the tape may be quiet. "
+            "We will try again the moment you refresh."
+        )
         st.stop()
 
     # ── HEADER — Live Pulse (timestamp after successful load) ──
@@ -2834,8 +2936,8 @@ def main():
             border:2px solid #f59e0b;border-radius:12px;padding:16px 20px;margin:0 0 16px 0'>
             <span style='font-size:1.1rem;color:#f59e0b;font-weight:700'>⚠️ EARNINGS IN {days_to_earnings} DAYS</span>
             <span style='color:#94a3b8;font-size:.9rem;display:block;margin-top:4px'>
-            Option prices are pumped up right now because earnings are coming. This is like a store raising prices before a big sale.
-            The risk of getting your shares called away is higher than normal. Auto alerts are paused until after {earnings_dt.strftime('%b %d, %Y')}.</span></div>""", unsafe_allow_html=True)
+            Implied volatility is rich because the print is close. Picture a retailer marking up tags before a holiday rush.
+            Assignment risk on short calls jumps with that backdrop. We pause auto alerts until after {earnings_dt.strftime('%b %d, %Y')}.</span></div>""", unsafe_allow_html=True)
 
     price = df["Close"].iloc[-1]
     prev = df["Close"].iloc[-2] if len(df) >= 2 else price
@@ -2854,8 +2956,15 @@ def main():
         vix_mood = "Calm tape. Premiums run thin."
     else:
         vix_mood = "VIX not loaded"
-    price_7d_df = fetch_stock(ticker, "1mo", "1d")
-    price_spark = price_7d_df["Close"].tail(7) if price_7d_df is not None and not price_7d_df.empty else df["Close"].tail(7)
+    if len(df) >= 7:
+        price_spark = df["Close"].tail(7)
+    else:
+        price_7d_df = fetch_stock(ticker, "1mo", "1d")
+        price_spark = (
+            price_7d_df["Close"].tail(7)
+            if price_7d_df is not None and not price_7d_df.empty
+            else df["Close"].tail(min(7, len(df)))
+        )
     vix_7d_df = fetch_stock("^VIX", "1mo", "1d")
     vix_spark = vix_7d_df["Close"].tail(7) if vix_7d_df is not None and not vix_7d_df.empty else pd.Series([vix_v, vix_v, vix_v, vix_v, vix_v, vix_v, vix_v])
     if days_to_earnings is not None:
@@ -2929,7 +3038,9 @@ def main():
 
     # ── DIAMOND / GOLD ZONE / CONFLUENCE ──
     gold_zone_price, gold_zone_components = calc_gold_zone(df, df_wk)
-    cp_score, cp_max, cp_breakdown, cp_bearish = calc_confluence_points(df, df_wk, vix_v)
+    cp_score, cp_max, cp_breakdown, cp_bearish = calc_confluence_points(
+        df, df_wk, vix_v, gold_zone_price=gold_zone_price
+    )
     diamonds = detect_diamonds(df, df_wk)
     latest_d = latest_diamond_status(diamonds)
     d_wr, d_avg, d_n = diamond_win_rate(df, diamonds, forward_bars=10)
@@ -2944,12 +3055,12 @@ def main():
         weekly_struct, _, _ = TA.market_structure(df_wk)
 
     qs_color = "#10b981" if qs > 70 else ("#f59e0b" if qs > 50 else "#ef4444")
-    qs_status = "PRIME SELLING ENVIRONMENT" if qs > 70 else ("DECENT SETUP" if qs > 50 else "CAUTION. WAIT FOR A BETTER ENTRY.")
+    qs_status = "PRIME SELLING ENVIRONMENT" if qs > 70 else ("DECENT SETUP" if qs > 50 else "STAND DOWN. WAIT FOR A CLEANER ENTRY.")
 
     # ── EARLY OPTIONS FETCH (populates BLUF with specific strikes) ──
     rfr = macro.get("10Y Yield", {}).get("price", 4.5) / 100
     bluf_cc, bluf_csp, bluf_exp, bluf_dte = None, None, None, 0
-    opt_pair, opt_exps = fetch_options(ticker)
+    _, opt_exps = fetch_options(ticker)
     if opt_exps:
         bluf_exp = opt_exps[min(2, len(opt_exps) - 1)]
         bluf_dte = max(1, (datetime.strptime(bluf_exp, "%Y-%m-%d") - datetime.now()).days)
@@ -2973,15 +3084,15 @@ def main():
     elif fg < 35:
         action_strat = "SELL CASH SECURED PUTS"
         action_plain = (
-            f"The market is scared right now (fear score: {fg:.0f}). Buyers pay more for protection. "
-            f"Sell cash-secured puts below the price. If assigned, you buy {ticker} at your strike."
+            f"The tape is defensive (fear score {fg:.0f}). Protection costs more, which pays you to sell it. "
+            f"Sell cash secured puts under spot. Assignment simply means you own {ticker} at the strike you chose."
         )
     elif struct != "BEARISH":
         action_strat = "BULL PUT SPREAD"
-        action_plain = "Define-risk credit spread: collect premium with a capped max loss."
+        action_plain = "Defined risk credit spread: bank the credit while the broker caps the worst case."
     else:
         action_strat = "BEAR CALL SPREAD"
-        action_plain = "Define-risk credit spread when the tape is heavy — cap upside risk."
+        action_plain = "Defined risk credit spread when sellers control the tape; you cap upside risk on the structure."
 
     # ── RECOMMENDED TRADE (optimal strike from options engine) ──
     master_kind, master_b = None, None
@@ -3035,7 +3146,7 @@ def main():
             f"<div style='font-size:.72rem;font-weight:800;color:#00e5ff;letter-spacing:.2em;margin-bottom:8px'>PRIMARY MISSION OBJECTIVE</div>"
             f"<p style='color:#e2e8f0;font-size:1.05rem;line-height:1.55;margin:0 0 14px 0;font-weight:600'>{headline}</p>"
             f"<div class='strike-big' style='margin:8px 0 6px 0'>${_html_mod.escape(strike_s)}</div>"
-            f"<div style='color:#94a3b8;font-size:.88rem;margin-bottom:12px'>Prop desk optimal strike · IV {master_b['iv']:.1f}% · dte {dte_m}</div>"
+            f"<div style='color:#94a3b8;font-size:.88rem;margin-bottom:12px'>Desk optimal strike · IV {master_b['iv']:.1f}% · DTE {dte_m}</div>"
             f"<div style='font-size:.75rem;font-weight:700;color:#a5f3fc;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px'>Broker checklist</div>"
             f"<div class='rh-stepper'>{stepper}</div>"
             f"<p style='color:#64748b;font-size:.78rem;margin:14px 0 0 0'>Quotes can lag. Confirm credit in the app before you send the order.</p>"
@@ -3045,16 +3156,22 @@ def main():
         master_html = (
             "<div class='trade-master'>"
             "<div style='font-size:.72rem;font-weight:800;color:#00e5ff;letter-spacing:.2em;margin-bottom:8px'>PRIMARY MISSION OBJECTIVE</div>"
-            "<p style='color:#e2e8f0;font-size:1rem;margin:0'>Options chain is offline right now. Retry after the market opens or scroll to Cash Flow Strategies.</p>"
+            "<p style='color:#e2e8f0;font-size:1rem;margin:0'>Options chain is offline. Retry when the pit is open or jump to Cash Flow Strategies.</p>"
             "</div>"
         )
     else:
         master_html = (
             "<div class='trade-master'>"
             "<div style='font-size:.72rem;font-weight:800;color:#00e5ff;letter-spacing:.2em;margin-bottom:8px'>PRIMARY MISSION OBJECTIVE</div>"
-            "<p style='color:#e2e8f0;font-size:1rem;margin:0'>No liquid optimal strike passed our filters yet. Open Cash Flow Strategies and pick an expiration manually.</p>"
+            "<p style='color:#e2e8f0;font-size:1rem;margin:0'>No liquid optimal strike cleared our filters yet. Open Cash Flow Strategies and choose an expiration by hand.</p>"
             "</div>"
         )
+
+    ema_dist_pct = None
+    if len(df) >= 20:
+        _e20 = TA.ema(df["Close"], 20).iloc[-1]
+        if not pd.isna(_e20) and float(_e20) > 0:
+            ema_dist_pct = abs(price / float(_e20) - 1.0) * 100.0
 
     # Build diamond status badge HTML
     d_badge_html = ""
@@ -3065,6 +3182,39 @@ def main():
             d_badge_html = f"<span class='diamond-badge badge-pink'>💎 PINK DIAMOND: TAKE PROFIT</span>"
     else:
         d_badge_html = "<span class='diamond-badge badge-none'>◇ No Active Diamond</span>"
+
+    ref_iv_bluf = None
+    if bluf_cc and bluf_cc.get("iv"):
+        ref_iv_bluf = float(bluf_cc["iv"])
+    elif bluf_csp and bluf_csp.get("iv"):
+        ref_iv_bluf = float(bluf_csp["iv"])
+    iv_rank_info = compute_iv_rank_proxy(ticker, price, ref_iv_bluf) if ref_iv_bluf else None
+    ext_warn_html = ""
+    if ema_dist_pct is not None and ema_dist_pct > EMA_EXTENSION_WARN_PCT:
+        ext_warn_html = (
+            f"<div style='margin-top:10px;padding:8px 12px;border-radius:8px;border:1px solid rgba(245,158,11,.45);"
+            f"background:rgba(245,158,11,.12);font-size:.76rem;color:#fde68a;line-height:1.45'>"
+            f"<strong>Caution: Extended.</strong> Price sits <strong>{ema_dist_pct:.1f}%</strong> away from the 20 day EMA. "
+            f"After violent gaps, Gold Zone and Fib anchors can lag even while confluence still reflects the old range.</div>"
+        )
+    iv_row_html = ""
+    if iv_rank_info is not None and ref_iv_bluf:
+        rnk = iv_rank_info["rank"]
+        lo, hi = iv_rank_info["lo"], iv_rank_info["hi"]
+        rk_color = "#f59e0b" if rnk > 70 else ("#34d399" if rnk < 25 else "#94a3b8")
+        iv_row_html = (
+            f"<div style='margin-top:8px;padding:8px 12px;border-radius:8px;border:1px solid rgba(34,211,238,.35);"
+            f"background:rgba(6,182,212,.1);font-size:.74rem;color:#cbd5e1;line-height:1.45'>"
+            f"<span style='color:{rk_color};font-weight:800;font-family:JetBrains Mono,monospace'>{rnk:.0f}</span> "
+            f"<span style='color:#94a3b8'>IV rank (term-structure proxy)</span> · "
+            f"ref <strong>{ref_iv_bluf:.1f}%</strong> vs ATM curve from <span class='mono'>{lo:.1f}%</span> to <span class='mono'>{hi:.1f}%</span> "
+            f"across listed expiries. <span style='color:#64748b'>This is a term structure proxy, not a full 52 week IV history.</span></div>"
+        )
+    elif ref_iv_bluf:
+        iv_row_html = (
+            "<div style='margin-top:8px;font-size:.72rem;color:#64748b'>IV rank proxy unavailable (need 2+ expiries with IV).</div>"
+        )
+    bluf_context_strip = ext_warn_html + iv_row_html
 
     # Confluence bar segments HTML
     cp_bar_html = ""
@@ -3094,6 +3244,7 @@ def main():
                 <div style='margin-top:8px'>{d_badge_html}</div>
             </div>
         </div>
+        {bluf_context_strip}
         <div style='display:flex;gap:16px;flex-wrap:wrap;margin-top:14px;border-top:1px solid rgba(255,255,255,.06);padding-top:12px'>
             <div style='flex:1;min-width:250px'>
                 <div style='font-size:.7rem;color:{"#eab308" if show_gold_glance else "#64748b"};text-transform:uppercase;letter-spacing:.1em;margin-bottom:4px'>⬥ GOLD ZONE</div>
@@ -3149,7 +3300,7 @@ def main():
                     <div class='earn-col earn-good'>
                         <h4>THE GOOD (THE CATALYST)</h4>
                         <ul>
-                            <li><strong>Hyper-Growth:</strong> Q4 2025 revenue grew 70% Y/Y to $1.41B. U.S. Commercial surged 137%.</li>
+                            <li><strong>Hyper Growth:</strong> Q4 2025 revenue grew 70% Y/Y to $1.41B. U.S. Commercial surged 137%.</li>
                             <li><strong>Rule of 40:</strong> Palantir is operating at an elite Rule of 40 score of 127%.</li>
                             <li><strong>2026 Guidance:</strong> Management guided to roughly 61% Y/Y growth with a $7.2B target.</li>
                             <li><strong>Profitability:</strong> GAAP Net Income reached $609M (43% margin); FCF hit $791M.</li>
@@ -3164,10 +3315,10 @@ def main():
                     <div class='earn-col earn-bad'>
                         <h4>THE BAD (THE RISK)</h4>
                         <ul>
-                            <li><strong>Valuation:</strong> Trading at about 125x-248x P/E, priced for near-perfection.</li>
+                            <li><strong>Valuation:</strong> Trading near 125x to 248x P/E, priced for near perfection.</li>
                             <li><strong>International Lag:</strong> U.S. commercial +137% vs international commercial +2%.</li>
-                            <li><strong>SBC &amp; Dilution:</strong> Heavy stock-based compensation remains a key bear argument.</li>
-                            <li><strong>Upcoming Print:</strong> {countdown_txt}. Street EPS projection is $0.26-$0.29.</li>
+                            <li><strong>SBC &amp; Dilution:</strong> Heavy stock based compensation remains a key bear argument.</li>
+                            <li><strong>Upcoming Print:</strong> {countdown_txt}. Street EPS projection is $0.26 to $0.29.</li>
                         </ul>
                     </div>
                     """,
@@ -3214,8 +3365,8 @@ def main():
     #  SECTION 2 \u2014 SETUP ANALYSIS
     # ══════════════════════════════════════════════════════════════════
     st.markdown('<div id="setup" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
-    _section("Setup Analysis", "Is the stock trending up, down, or sideways? Here is the answer and what to do about it.",
-             tip_plain="This block tells you trend state fast. Trending up means lean into premium selling with room above price. Sideways means harvest both sides carefully. Downtrend means tighten risk and reduce size.")
+    _section("Setup Analysis", "Trend, range, or fade: here is the read and how to play it without guessing.",
+             tip_plain="This block is your bias clock. Uptrends reward measured premium sales with air above price. Ranges invite two sided discipline. Downtrends demand smaller size and wider buffers.")
     sa_left, sa_right = st.columns(2)
     with sa_left:
         cls = "sb" if struct == "BULLISH" else ("sr" if struct == "BEARISH" else "sn")
@@ -3298,17 +3449,19 @@ def main():
             ang, sp = TA.gann_angles(df)
             st.markdown(f"**Swing Low:** ${sp:.2f}")
             for n_g, p_v in ang.items():
-                st.markdown(f"- **{n_g}** -> ${p_v:.2f} ({(p_v / price - 1) * 100:+.1f}%)")
+                st.markdown(f"* **{n_g}** maps to ${p_v:.2f} ({(p_v / price - 1) * 100:+.1f}%)")
         if st.checkbox("Gann Time Cycles", key="exp_3"):
             for cyc in TA.gann_time_cycles(df):
-                st.markdown(f"- **{cyc['cycle']}-bar** -> {cyc['date'].strftime('%Y-%m-%d')} ({cyc['status']})")
+                st.markdown(
+                    f"* **{cyc['cycle']} bar cycle** lands {cyc['date'].strftime('%Y-%m-%d')} ({cyc['status']})"
+                )
 
     # ══════════════════════════════════════════════════════════════════
     #  SECTION 3 \u2014 QUANT DASHBOARD (two-column: metric + explanation)
     # ══════════════════════════════════════════════════════════════════
     st.markdown('<div id="quant-dashboard" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
-    _section("Quant Dashboard", "Every number explained in plain English. What it means. What to do.",
-             tip_plain="Use this as your instrument panel. Green bars confirm edge. Weak bars mean do less. Confluence and Gold Zone are the two numbers to trust first.")
+    _section("Quant Dashboard", "Every dial translated into English. Meaning first. Action second.",
+             tip_plain="Treat this like an aircraft panel. Strong green bars confirm edge. Thin readings mean throttle back. Confluence and Gold Zone still own the headline.")
     rv2 = TA.rsi2(df["Close"]).iloc[-1] if len(df) > 5 else 50
     adx_v, dip, din = TA.adx(df)
     cci_v = TA.cci(df).iloc[-1]
@@ -3319,7 +3472,7 @@ def main():
     # RSI
     il, ir = st.columns([1, 2])
     with il:
-        st.markdown(f"<div class='tc' style='text-align:center'><div style='font-size:.7rem;color:#64748b;text-transform:uppercase'>RSI (14)</div><div class='mono' style='font-size:1.5rem;color:{'#ef4444' if rsi_v > 70 else ('#10b981' if rsi_v < 30 else '#e2e8f0')}'>{rsi_v:.1f}</div><div style='font-size:.7rem;color:#64748b;margin-top:6px'>RSI-2: {rv2:.1f}</div></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='tc' style='text-align:center'><div style='font-size:.7rem;color:#64748b;text-transform:uppercase'>RSI (14)</div><div class='mono' style='font-size:1.5rem;color:{'#ef4444' if rsi_v > 70 else ('#10b981' if rsi_v < 30 else '#e2e8f0')}'>{rsi_v:.1f}</div><div style='font-size:.7rem;color:#64748b;margin-top:6px'>RSI 2 bar: {rv2:.1f}</div></div>", unsafe_allow_html=True)
     with ir:
         if rsi_v > 70:
             _explain("RSI: Stock is Overheated", f"RSI is {rsi_v:.0f}. The stock ran up too fast. Think of a product flying off shelves after a viral review. Buyers are overpaying right now. This is the ideal time to sell Covered Calls and collect cash at peak excitement.", "bear")
@@ -3341,9 +3494,9 @@ def main():
     # ADX
     il, ir = st.columns([1, 2])
     with il:
-        st.markdown(f"<div class='tc' style='text-align:center'><div style='font-size:.7rem;color:#64748b;text-transform:uppercase'>ADX</div><div class='mono' style='font-size:1.5rem;color:{'#10b981' if an > 25 else '#f59e0b'}'>{an:.1f}</div><div style='font-size:.7rem;color:#64748b;margin-top:6px'>+DI: {dip.iloc[-1]:.1f} | -DI: {din.iloc[-1]:.1f}</div></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='tc' style='text-align:center'><div style='font-size:.7rem;color:#64748b;text-transform:uppercase'>ADX</div><div class='mono' style='font-size:1.5rem;color:{'#10b981' if an > 25 else '#f59e0b'}'>{an:.1f}</div><div style='font-size:.7rem;color:#64748b;margin-top:6px'>Plus DI {dip.iloc[-1]:.1f} · Minus DI {din.iloc[-1]:.1f}</div></div>", unsafe_allow_html=True)
     with ir:
-        di_w = "Buyers (+DI)" if dip.iloc[-1] > din.iloc[-1] else "Sellers ( DI)"
+        di_w = "Buyers via plus DI" if dip.iloc[-1] > din.iloc[-1] else "Sellers via minus DI"
         if an > 25:
             _explain("ADX: Strong Trend Detected", f"ADX is {an:.0f}. That is above 25 which means a strong trend is happening. The winner right now is: {di_w}. Think of a business with a clear growth direction. Sell your options in the direction of the trend for the safest play.", "bull" if dip.iloc[-1] > din.iloc[-1] else "bear")
         else:
@@ -3356,7 +3509,15 @@ def main():
         st.markdown(f"<div class='tc' style='text-align:center'><div style='font-size:.7rem;color:#64748b;text-transform:uppercase'>CCI (20)</div><div class='mono' style='font-size:1.5rem;color:{'#ef4444' if not pd.isna(cci_v) and cci_v > 100 else ('#10b981' if not pd.isna(cci_v) and cci_v < -100 else '#e2e8f0')}'>{cci_v:.0f}</div></div>", unsafe_allow_html=True)
         st.markdown(f"<div class='tc' style='text-align:center;margin-top:8px'><div style='font-size:.7rem;color:#64748b;text-transform:uppercase'>Supertrend</div><div class='mono' style='font-size:1.2rem;color:{'#10b981' if stb else '#ef4444'}'>{'BULLISH' if stb else 'BEARISH'}</div><div style='font-size:.7rem;color:#64748b;margin-top:6px'>${st_l.iloc[-1]:.2f}</div></div>", unsafe_allow_html=True)
     with ir:
-        cci_txt = f"CCI is {cci_v:.0f}. " + ("That is above +100. The stock is trading way above its average price. Buyers are overheating. Great time to sell calls and collect premium. " if not pd.isna(cci_v) and cci_v > 100 else ("That is below  100. The stock has been beaten down below its average price. Sellers went too far. Look for put selling opportunities. " if not pd.isna(cci_v) and cci_v < -100 else "That is in the normal zone. No extreme to exploit right now. "))
+        cci_txt = f"CCI is {cci_v:.0f}. " + (
+            "That is above positive 100. The stock is stretched versus its average. Great moment to lean on call sales. "
+            if not pd.isna(cci_v) and cci_v > 100
+            else (
+                "That is below negative 100. The stock washed out under its average. Sellers overdid it. Look at put sales for income. "
+                if not pd.isna(cci_v) and cci_v < -100
+                else "That is in the neutral pocket. No extreme edge to harvest yet. "
+            )
+        )
         st_price = st_l.iloc[-1]
         st_txt = f"The Supertrend is your price floor. It is BULLISH at ${st_price:.2f}. As long as the stock stays above this green line, your shares are safe." if stb else f"The Supertrend is BEARISH at ${st_price:.2f}. It is acting as a falling ceiling above the price. The trend is down. Be defensive and protect your shares."
         _explain("CCI and Supertrend", cci_txt + st_txt, "bull" if stb else "bear")
@@ -3398,15 +3559,15 @@ def main():
                 margin=dict(l=60, r=20, t=20, b=40), yaxis_title="Price", xaxis_title="Volume", font=dict(family="JetBrains Mono", color="#94a3b8"))
             st.plotly_chart(fig_vp, use_container_width=True, config=_PLOTLY_UI_CONFIG)
         else:
-            st.caption(f"Volume POC (mini mode): **${poc['mid']:.2f}** — full chart hidden.")
+            st.caption(f"Volume POC (mini mode): **${poc['mid']:.2f}**. Full profile chart stays parked while Turbo is on.")
         _explain("\U0001f9e0 Volume Profile", f"The Point of Control (POC) is ${poc['mid']:.2f}. This is the most traded price. Think of it as the price point where your store sees the most customers. The stock is pulled toward this price like a magnet. Use it to pick your option strike prices.", "neutral")
 
     # ══════════════════════════════════════════════════════════════════
     #  SECTION 4 \u2014 CASH-FLOW STRATEGIES
     # ══════════════════════════════════════════════════════════════════
     st.markdown('<div id="strategies" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
-    _section("Cash Flow Strategies", f"Exactly which options to sell for {ticker} at ${price:.2f}. Copy strikes into your broker.",
-             tip_plain="Pick the top optimal strike first. Covered calls are for owned shares. Cash secured puts are for cash income with possible entry. Spreads cap risk when you need tighter control.")
+    _section("Cash Flow Strategies", f"Concrete strikes for {ticker} at ${price:.2f}. Lift them straight into your ticket.",
+             tip_plain="Start with the optimal line the desk highlights. Covered calls need stock on hand. Cash secured puts monetize patience. Spreads are for when you want a hard loss ceiling.")
     st.markdown(
         f"<div class='tc'><div style='text-align:center'><span style='color:#64748b;font-size:.8rem'>ANALYZING</span><br>"
         f"<span style='font-size:1.4rem;font-weight:700;color:#e2e8f0'>{_html_mod.escape(ticker)} @ ${price:.2f}</span></div></div>",
@@ -3454,7 +3615,7 @@ def main():
                 "<strong>Theta is your daily paycheck.</strong> Every day that passes, the option loses value. That lost value goes straight into your pocket. Time is literally paying you. "
                 "<strong>OI is how busy the market is.</strong> Higher OI means more traders are active. That means you get better prices when you sell. We filter out anything below 100 OI to protect you.", "neutral")
 
-            st.markdown("---")
+            st.divider()
             sp1, sp2 = st.columns(2)
             with sp1:
                 st.markdown("#### Bull Put Spread")
@@ -3474,12 +3635,11 @@ def main():
                 "<strong>POP</strong> is your Probability of Profit. <strong>ML</strong> is your Max Loss, the absolute worst case. <strong>Cr</strong> is the cash you receive today. "
                 "A 75% POP means you win roughly 3 out of every 4 times you make this trade.", "neutral")
 
-            # ── DIAMOND-TRIGGERED OPTIONS SUGGESTIONS ──
             if latest_d and (df.index[-1] - latest_d["date"]).days <= 5:
-                st.markdown("---")
+                st.divider()
                 if latest_d["type"] == "blue":
                     st.markdown(f"""<div class='diamond-blue'>
-                        <div style='font-size:1rem;font-weight:700;margin-bottom:8px'>🔷 BLUE DIAMOND AUTO-SUGGESTIONS</div>
+                        <div style='font-size:1rem;font-weight:700;margin-bottom:8px'>🔷 BLUE DIAMOND AUTO SUGGESTIONS</div>
                         <div style='color:#94a3b8;font-size:.85rem;margin-bottom:10px'>
                             A Blue Diamond fired {(df.index[-1] - latest_d['date']).days} day(s) ago at ${latest_d['price']:.2f} with confluence {latest_d['score']}/9.
                             Historical probability of profit: <strong style='color:#10b981'>{d_wr:.0f}%</strong> ({d_n} signals backtested).
@@ -3528,7 +3688,7 @@ def main():
                         "Wait for the next Blue Diamond before entering again aggressively.", "bear")
 
             # Greeks, EV & Vol Skew
-            st.markdown("---")
+            st.divider()
             st.markdown("#### Greeks, Expected Value & Volatility Skew")
             gk1, gk2, gk3 = st.columns(3)
             with gk1:
@@ -3553,7 +3713,7 @@ def main():
                     ec = "#10b981" if ev_ps > 0 else "#ef4444"
                     ev_lines.append(f"Put Spread: <strong style='color:{ec}'>${ev_ps:+.0f}</strong> (POP {b0['pop']:.0f}%)")
                 joined = "<br>".join(ev_lines) if ev_lines else "N/A"
-                st.markdown(f"<div class='tc'><div style='font-size:.7rem;color:#64748b;text-transform:uppercase'>EXPECTED VALUE</div><div style='margin-top:8px;color:#94a3b8;font-size:.85rem'>{joined}</div><div style='color:#64748b;font-size:.75rem;margin-top:6px'>Positive = edge. Negative = avoid.</div></div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='tc'><div style='font-size:.7rem;color:#64748b;text-transform:uppercase'>EXPECTED VALUE</div><div style='margin-top:8px;color:#94a3b8;font-size:.85rem'>{joined}</div><div style='color:#64748b;font-size:.75rem;margin-top:6px'>Positive means edge. Negative means walk away.</div></div>", unsafe_allow_html=True)
             with gk3:
                 skew, p_iv, c_iv = calc_vol_skew(price, calls, puts)
                 if skew is not None:
@@ -3576,8 +3736,8 @@ def main():
     #  SECTION 5 \u2014 PSYCHOLOGY & RISK MANAGEMENT
     # ══════════════════════════════════════════════════════════════════
     st.markdown('<div id="risk" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
-    _section("Psychology and Risk Management", "How scared or greedy is the market? How much should you bet? Your safety rules live here.",
-             tip_plain="This keeps you safe. Fear and Greed tells pricing pressure. Kelly and ATR tell max size. If signals conflict, size down and wait for cleaner alignment.")
+    _section("Psychology and Risk Management", "Sentiment, sizing, guardrails. The stuff that keeps pros solvent.",
+             tip_plain="Fear and Greed shows how the crowd is priced. Kelly and ATR frame responsible size. When stories disagree, shrink the bet and wait for a cleaner tape.")
     p1, p2 = st.columns(2)
     with p1:
         gc = "#10b981" if fg < 30 else ("#f59e0b" if fg < 60 else "#ef4444")
@@ -3625,17 +3785,26 @@ def main():
             k_full, k_half = kelly_criterion(k_pop, k_win, k_loss)
             k_source = f"CSP ${bluf_csp['strike']:.0f}"
         if k_half > 0:
-            k_dollars = REF_NOTIONAL * k_half / 100
-            kc = "#10b981" if k_half <= RISK_PCT_EXAMPLE * 5 else "#f59e0b"
+            k_cap = KELLY_DISPLAY_CAP_PCT
+            k_show = min(k_half, k_cap)
+            k_dollars = REF_NOTIONAL * k_show / 100
+            capped_note = (
+                f" Half Kelly math landed at {k_half:.1f}%; <strong>we cap the headline at {k_cap:.0f}%</strong> for portfolio heat. Never treat Kelly as a target allocation."
+                if k_half > k_cap
+                else ""
+            )
+            kc = "#10b981" if k_show <= RISK_PCT_EXAMPLE * 2 else "#f59e0b"
             st.markdown(
-                f"<div class='tc'><div style='font-size:.75rem;color:#64748b'>KELLY CRITERION (HALF-KELLY)</div>"
-                f"<div class='mono' style='font-size:1.3rem;color:{kc}'>{k_half:.1f}% = ${k_dollars:,.0f}</div>"
-                f"<div style='font-size:.7rem;color:#64748b;margin-top:4px'>Full Kelly: {k_full:.1f}% | Source: {k_source}</div></div>",
+                f"<div class='tc'><div style='font-size:.75rem;color:#64748b'>KELLY HALF MODE · UI CAP</div>"
+                f"<div class='mono' style='font-size:1.3rem;color:{kc}'>{k_show:.1f}% = ${k_dollars:,.0f}</div>"
+                f"<div style='font-size:.7rem;color:#64748b;margin-top:4px'>Raw half Kelly {k_half:.1f}% · full Kelly {k_full:.1f}% · {k_source}. "
+                f"Display max {k_cap:.0f}% for risk hygiene.{capped_note}</div></div>",
                 unsafe_allow_html=True)
             _explain("Kelly Criterion in plain English",
-                f"The Kelly formula suggests about {k_full:.1f}% of a reference portfolio for this edge. "
-                f"We show <strong>Half Kelly ({k_half:.1f}%)</strong> for safety — on a <strong>${REF_NOTIONAL:,.0f}</strong> illustrative account that is <strong>${k_dollars:,.0f}</strong>. "
-                "Scale to your own capital and risk rules; this app does not store your balances.", "neutral")
+                f"The Kelly formula can suggest large fractions; here we show <strong>Half Kelly</strong> then <strong>cap the headline at {k_cap:.0f}%</strong> "
+                f"so the desk view stays conservative (raw half-Kelly was {k_half:.1f}%). "
+                f"On a <strong>${REF_NOTIONAL:,.0f}</strong> illustrative reference, the capped line is <strong>${k_dollars:,.0f}</strong>. "
+                "Scale to your own capital; Kelly is a theoretical optimum, not an order size.", "neutral")
         else:
             st.markdown("<div class='tc'><div style='font-size:.75rem;color:#64748b'>KELLY CRITERION</div>"
                 "<div style='color:#94a3b8;font-size:.85rem;margin-top:6px'>Not enough data yet. No liquid option strikes available to calculate your optimal bet size.</div></div>",
@@ -3653,9 +3822,11 @@ def main():
     #  SECTION 6 \u2014 PREMIUM SIMULATOR
     # ══════════════════════════════════════════════════════════════════
     st.markdown('<div id="simulator" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
-    _section("Premium Simulator", "What if you had been selling covered calls for the past year? See the proof right here.",
-             tip_plain="Stress test before placing real orders. Change OTM, hold days, and IV assumptions. Prefer settings that stay robust across market moods.")
-    st.warning("This uses estimated premiums based on historical volatility. It is not exact. Think of it as a dress rehearsal. Real results will vary.")
+    _section("Premium Simulator", "Replay a year of covered calls with your assumptions before you commit capital.",
+             tip_plain="Dial OTM, hold time, and IV multiplier. Hunt for settings that still look sane in both calm and chaotic tapes.")
+    st.warning(
+        "Premiums here are modeled from historical volatility. They are illustrative, not a promise. Treat the run as a dress rehearsal; live fills will differ."
+    )
     bc1, bc2, bc3, bc4 = st.columns(4)
     bt_otm = bc1.slider("OTM%", 2, 15, 5, key="sim_otm") / 100
     bt_hold = bc2.slider("Hold (d)", 7, 45, 30, key="sim_hold")
@@ -3680,7 +3851,9 @@ def main():
                     font=dict(family="JetBrains Mono", color="#94a3b8"))
                 st.plotly_chart(fig_b, use_container_width=True, config=_PLOTLY_UI_CONFIG)
             else:
-                st.caption(f"Mini mode: cumulative return chart hidden. Final cum ret **{br['cum'].iloc[-1]:.1f}%** over {len(br)} trades.")
+                st.caption(
+                    f"Mini mode parks the cumulative return chart. Modeled cumulative return landed at **{br['cum'].iloc[-1]:.1f}%** across {len(br)} trades."
+                )
             wr = (br["profit"] > 0).mean() * 100
             _explain("\U0001f9e0 What does this backtest tell me?",
                 f"Over {len(br)} simulated trades, selling {bt_otm * 100:.0f}% out of the money covered calls every {bt_hold} days would have made roughly <strong>${tp:,.0f}</strong> in premium cash. "
@@ -3692,8 +3865,8 @@ def main():
     #  SECTION 7 — MARKET SCANNER (multi-ticker diamond & confluence scan)
     # ══════════════════════════════════════════════════════════════════
     st.markdown('<div id="scanner" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
-    _section("🔎 Market Scanner", "Scan your entire watchlist for Diamond Signals, Confluence Points, and Gold Zone proximity in one view.",
-             tip_plain="Find the best ticker quickly. Start with highest confluence and active Blue Diamond. If no clean setup appears, do nothing and preserve capital.")
+    _section("🔎 Market Scanner", "One pass across the list for Diamonds, confluence stacks, and Gold Zone distance.",
+             tip_plain="Sort mentally by confluence, then hunt for a live Blue Diamond. If nothing clears the bar, flat is a position.")
 
     watchlist_tickers = [t.strip().upper() for t in scanner_watchlist.split(",") if t.strip()]
     if watchlist_tickers:
@@ -3780,14 +3953,14 @@ def main():
             else:
                 st.info("No scanner results. Check your ticker symbols.")
     else:
-        st.info("Add tickers under **System Config → Edit Watchlist Symbols** (sidebar) to use the scanner.")
+        st.info("Add tickers under **✏️ Edit Watchlist Symbols** (top of page) to use the scanner.")
 
     # ══════════════════════════════════════════════════════════════════
     #  SECTION 8 \u2014 NEWS & MACRO
     # ══════════════════════════════════════════════════════════════════
     st.markdown('<div id="news" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
-    _section("News and Market Conditions", f"Latest headlines and big picture forces affecting {ticker} right now",
-             tip_plain="News explains sudden moves and premium spikes. Read macro with price action. If headline risk is high near earnings, keep strikes safer and reduce size.")
+    _section("News and Market Conditions", f"Headlines plus macro crosswinds for {ticker} while the tape is open.",
+             tip_plain="Stories explain gaps and IV pops. Always read news through price. When headline risk stacks near earnings, favor safer strikes and lighter size.")
     n1, n2 = st.columns([3, 2])
     with n1:
         st.markdown(f"#### {ticker} News")
@@ -3807,13 +3980,13 @@ def main():
     #  SECTION 9 \u2014 QUICK REFERENCE GUIDE (always visible)
     # ══════════════════════════════════════════════════════════════════
     st.markdown('<div id="guide" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
-    _section("Quick Reference Guide", "Every tool and strategy on this page explained like you are five. Bookmark this section.",
-             tip_plain="Use this glossary when a metric feels unclear. Fast clarity prevents bad clicks and overtrading.")
+    _section("Quick Reference Guide", "Plain language glossary for every signal on this desk. Keep it open during live markets.",
+             tip_plain="Reach for this when a label feels fuzzy. Clarity beats impulse every session.")
     edu = [
         ("Blue Diamond Signal", "A Blue Diamond appears when 7 or more out of 9 confluence factors align bullish at the same time. Think of it as every traffic light on your route turning green simultaneously. It means Supertrend, Ichimoku, ADX, OBV, Structure, and Gold Zone all agree: this is a high probability buy zone. Buy on Blue Diamonds."),
         ("Pink Diamond Signal", "A Pink Diamond appears when bullish confluence collapses or momentum exhausts (RSI > 75 with weak confluence). Think of it as your dashboard warning lights all turning on. It means the easy money in this move is done. Take profits, sell aggressive covered calls, or tighten your stops. Sell on Pink Diamonds."),
         ("Gold Zone", "The Gold Zone is a single dynamic price level calculated from Volume Profile POC, the 61.8% Fibonacci golden ratio, the 200-day simple moving average, and the nearest Gann Square of 9 level. When the stock is above the Gold Zone, bulls are in control. Below it, bears have the edge. Use the Gold Zone as your anchor for all strike selection."),
-        ("Confluence Points (0-9)", "The Confluence score checks 9 independent bullish factors: Supertrend direction (2pts), Ichimoku cloud position (2pts), ADX trend strength (1pt), OBV accumulation (1pt), bullish divergences (1pt), position vs Gold Zone (1pt), and market structure (1pt). Scores of 7+ trigger Blue Diamonds. Scores below 4 signal caution."),
+        ("Confluence Points (0 to 9)", "The Confluence score checks nine independent bullish factors: Supertrend direction (2pts), Ichimoku cloud position (2pts), ADX trend strength (1pt), OBV accumulation (1pt), bullish divergences (1pt), position versus Gold Zone (1pt), and market structure (1pt). Scores of 7 or higher trigger Blue Diamonds. Scores below 4 signal caution."),
         ("Covered Call", "You own 100 shares. You sell 1 call above the current price. You collect cash today. If the stock stays below that price, you keep the cash AND you keep your shares. Target: 1 to 3 percent per month in pure cash income."),
         ("Cash Secured Put and The Wheel", "You sell a put and hold cash to buy shares if needed. If you get assigned, you sell Covered Calls on those new shares. When shares get called away, you sell puts again. This is the cash flow loop. Repeat forever."),
         ("Credit Spreads", "You sell one option and collect cash. Then you buy a cheaper one further away to cap your worst case loss. Bull Put Spread means you are bullish. Bear Call Spread means you are bearish. Uses less money than Cash Secured Puts."),
@@ -3825,7 +3998,7 @@ def main():
         ("OBV (On Balance Volume)", "OBV tracks what the big money is doing. Rising OBV means institutions are quietly buying. Think of wholesale customers stocking up. Falling OBV means they are selling. If OBV disagrees with the price, a reversal may be coming."),
         ("Fibonacci Retracement", "After a big move, stocks pull back to key levels before continuing: 38.2%, 50%, and 61.8%. The 61.8% level is the golden ratio. It is the most watched level on Wall Street. Set your put strikes near these levels for the safest entries."),
         ("Volatility Skew", "When put options cost much more than call options, big institutions are buying crash insurance. That means premiums are fat for you to sell. But it also means the smart money is nervous. Collect the cash but stay aware."),
-        ("Expected Value", "EV is your long term profit per trade. The formula: (Win percent times your gain) minus (Loss percent times your loss). Positive EV means you have a real edge. Negative EV means walk away."),
+        ("Expected Value", "EV is your long run profit per trade. Multiply win rate by gain, then subtract loss rate times loss. Positive EV means a real edge. Negative EV means pass."),
         ("Gann Square of 9", "These are natural support and resistance levels calculated from mathematical spirals. Stocks tend to stop or bounce at these prices. Use them to pick smarter strike prices for your options."),
         ("Quant Edge Score", "Your overall score from 0 to 100. It checks five things: Trend, Momentum, Volume, Volatility, and Structure. Above 70 means prime conditions to sell options. Below 40 means wait for a better setup."),
         ("Market Scanner", "The Scanner checks your entire watchlist in seconds. It calculates Confluence Points, Diamond Status, Gold Zone distance, and Quant Edge for every ticker. Sort by confluence to find the strongest setups across all your stocks. Tickers with 7+ confluence and a Blue Diamond are your best opportunities."),
