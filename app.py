@@ -1696,10 +1696,32 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
     fig.add_trace(go.Scatter(x=df.index,y=sl,line=dict(color="#f59e0b",width=1),name="Signal"), row=4, col=1)
     hc = ["#10b981" if v>=0 else "#ef4444" for v in hist]
     fig.add_trace(go.Bar(x=df.index,y=hist,marker_color=hc,name="Hist",opacity=.6), row=4, col=1)
-    fig.update_layout(template="plotly_dark",paper_bgcolor="#080c14",plot_bgcolor="#080c14",
-        font=dict(family="JetBrains Mono, monospace",size=11,color="#94a3b8"),
-        height=800,margin=dict(l=60,r=56,t=52,b=20),xaxis_rangeslider_visible=False,
-        showlegend=True,legend=dict(orientation="h",yanchor="bottom",y=1.08,xanchor="left",x=0,font=dict(size=10),bgcolor="rgba(0,0,0,0)"))
+    _legend_font = dict(
+        size=12,
+        color="#f1f5f9",
+        family="Inter, system-ui, -apple-system, sans-serif",
+    )
+    fig.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="#080c14",
+        plot_bgcolor="#080c14",
+        font=dict(family="JetBrains Mono, monospace", size=11, color="#cbd5e1"),
+        height=800,
+        margin=dict(l=60, r=56, t=90, b=20),
+        xaxis_rangeslider_visible=False,
+        showlegend=True,
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="left",
+            x=0,
+            font=_legend_font,
+            bgcolor="rgba(15,23,42,0.92)",
+            bordercolor="rgba(148,163,184,0.4)",
+            borderwidth=1,
+        ),
+    )
     for i in range(1,5):
         fig.update_xaxes(gridcolor="#1e293b",zeroline=False,row=i,col=1)
         fig.update_yaxes(gridcolor="#1e293b",zeroline=False,row=i,col=1)
