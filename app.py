@@ -1833,7 +1833,7 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
             bordercolor="rgba(148,163,184,0.35)",
             borderwidth=1,
             traceorder="normal",
-            itemwidth=28,
+            itemwidth=30,
             title_text="Overlays",
             title_font=dict(size=11, color="#94a3b8"),
         ),

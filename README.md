@@ -8,6 +8,14 @@
 
 ## What Changed In This Release
 
+### ✅ Technical chart — four separate Plotly panels
+- The **Technical Chart** section renders **four charts** (not one tall stacked figure): **Price & overlays**, **Volume**, **RSI (14)**, and **MACD**.
+- **Price** includes candles, EMAs, Bollinger (when enabled), optional Ichimoku / Supertrend, Fibonacci / Gann / S/R levels, Gold zone, and diamond markers — with a dedicated **Overlays** legend.
+- **Volume**, **RSI**, and **MACD** each have their own figure so scales and labels stay readable.
+- Each chart uses Plotly **`hovermode: x unified`** on that panel; **zoom and pan are independent** between panels.
+- Layout APIs follow **Plotly 5/6** expectations (e.g. axis titles via `update_xaxes` / `update_yaxes`, `legend.itemwidth` ≥ 30 on Plotly 6).
+- Sidebar **Chart overlays** toggles still persist under `overlay_*` in `config.json` (see **Persisted Keys**).
+
 ### ✅ Persistent User State (Watchlist + Scan Ordering)
 - `config.json` persistence includes `watchlist`, `scanner_sort_mode`, **Strategy** (`strat_focus`, `strat_horizon`), and **Chart overlay** toggles (`overlay_*`).
 - Sidebar **Scanner Watchlist** uses a compact **textarea** (not a single-line field):
@@ -93,11 +101,11 @@
 ## Current Feature Set
 
 ### 📈 Advanced Chart & Signal Engine
-- Candlesticks + overlays (EMAs, Bollinger, Ichimoku, Supertrend)
-- Fibonacci + Gann + support/resistance scaffolding
+- **Four charts:** price (+ overlays), volume bars, RSI, MACD — see **Technical chart — four separate Plotly panels** above.
+- Overlays: EMAs, Bollinger, Ichimoku, Supertrend (toggle in sidebar)
+- Fibonacci + Gann + support/resistance scaffolding (toggle in sidebar)
 - Market structure + confluence scoring
 - Diamond signal state and Gold Zone logic
-- RSI, MACD, volume/flow context
 
 ### 💰 Cash-Flow Strategy Engine
 - Covered Call analyzer
@@ -216,8 +224,8 @@ If you want to prefill watchlist before launch:
 Latest QA sweep performed against current `app.py` included:
 
 - Lint diagnostics: no issues reported on `app.py`.
-- Python compile smoke check:
-  - `python3 -m compileall -b app.py` (pass)
+- Python syntax parse: `python3 -c "import ast; ast.parse(open('app.py').read())"` (pass).
+- **Plotly 6:** chart layout uses validators-safe patterns (axis `title_text` / `title_font`, `legend.itemwidth` ≥ 30, `hoverlabel.font` as nested `font` dict).
 - Runtime boot smoke check (headless Streamlit):
   - app starts successfully and serves local URL
   - no startup exceptions observed.
