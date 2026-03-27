@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Local env (never commit secrets)
+.env
+.env.*
+
+# Optional: keep personal portfolio config local (uncomment if you prefer)
+# config.json
