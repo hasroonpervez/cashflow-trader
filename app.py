@@ -300,9 +300,11 @@ section[data-testid="stSidebar"],
   color:#f8fafc!important;
   -webkit-text-fill-color:#f8fafc!important;
 }
-/* st.segmented_control: Base Web button group (NOT [data-baseweb="radio"]); force readable pills */
+/* st.segmented_control → frontend data-testid is stButtonGroup (Streamlit ≥1.39); keep stSegmentedControl for older builds */
 .main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"],
-.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] > div{
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stButtonGroup"],
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] > div,
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stButtonGroup"] > div{
   background:#0c1220!important;
   border:1px solid #334155!important;
   border-radius:12px!important;
@@ -310,7 +312,9 @@ section[data-testid="stSidebar"],
   gap:6px!important;
 }
 .main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] button,
-.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] [data-baseweb="button"]{
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stButtonGroup"] button,
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] [data-baseweb="button"],
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stButtonGroup"] [data-baseweb="button"]{
   color:#e2e8f0!important;
   -webkit-text-fill-color:#e2e8f0!important;
   background:#1e293b!important;
@@ -320,31 +324,42 @@ section[data-testid="stSidebar"],
   font-size:0.78rem!important;
 }
 .main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] button p,
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stButtonGroup"] button p,
 .main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] button span,
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stButtonGroup"] button span,
 .main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] [data-baseweb="button"] p,
-.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] [data-baseweb="button"] span{
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stButtonGroup"] [data-baseweb="button"] p,
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] [data-baseweb="button"] span,
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stButtonGroup"] [data-baseweb="button"] span{
   color:#e2e8f0!important;
   -webkit-text-fill-color:#e2e8f0!important;
 }
 .main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] button[aria-pressed="true"],
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stButtonGroup"] button[aria-pressed="true"],
 .main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] button[aria-checked="true"],
-.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] [data-baseweb="button"][aria-pressed="true"]{
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stButtonGroup"] button[aria-checked="true"],
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] [data-baseweb="button"][aria-pressed="true"],
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stButtonGroup"] [data-baseweb="button"][aria-pressed="true"]{
   background:linear-gradient(180deg,#22d3ee,#0ea5e9)!important;
   color:#fff!important;
   -webkit-text-fill-color:#fff!important;
   border-color:rgba(255,255,255,.28)!important;
 }
 .main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] button[aria-pressed="true"] p,
-.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] button[aria-pressed="true"] span{
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stButtonGroup"] button[aria-pressed="true"] p,
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] button[aria-pressed="true"] span,
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stButtonGroup"] button[aria-pressed="true"] span{
   color:#fff!important;
   -webkit-text-fill-color:#fff!important;
 }
 /* Base Web v12+ role="radio" segments inside Mission Control (some Streamlit builds) */
-.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] [role="radio"]{
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] [role="radio"],
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stButtonGroup"] [role="radio"]{
   background:#1e293b!important;color:#f1f5f9!important;border:1px solid #475569!important;
   border-radius:10px!important;padding:8px 10px!important;font-weight:600!important;font-size:0.76rem!important;
 }
-.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] [role="radio"][aria-checked="true"]{
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] [role="radio"][aria-checked="true"],
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stButtonGroup"] [role="radio"][aria-checked="true"]{
   background:linear-gradient(180deg,#22d3ee,#0ea5e9)!important;color:#fff!important;
   border-color:rgba(255,255,255,.25)!important;
 }
@@ -352,14 +367,20 @@ section[data-testid="stSidebar"],
 .main [data-testid="stVerticalBlockBorderWrapper"] div[class*="st-key-sb_strat_radio"] button,
 .main [data-testid="stVerticalBlockBorderWrapper"] div[class*="st-key-sb_horizon_radio"] button,
 .main [data-testid="stVerticalBlockBorderWrapper"] div[class*="st-key-sb_strat_radio"] [data-baseweb="button"],
-.main [data-testid="stVerticalBlockBorderWrapper"] div[class*="st-key-sb_horizon_radio"] [data-baseweb="button"]{
+.main [data-testid="stVerticalBlockBorderWrapper"] div[class*="st-key-sb_horizon_radio"] [data-baseweb="button"],
+.main div[class*="st-key-sb_strat_radio"] [data-testid="stButtonGroup"] button,
+.main div[class*="st-key-sb_horizon_radio"] [data-testid="stButtonGroup"] button,
+.main div[class*="st-key-sb_strat_radio"] [data-testid="stButtonGroup"] [data-baseweb="button"],
+.main div[class*="st-key-sb_horizon_radio"] [data-testid="stButtonGroup"] [data-baseweb="button"]{
   color:#e2e8f0!important;
   -webkit-text-fill-color:#e2e8f0!important;
   background:#1e293b!important;
   border:1px solid #475569!important;
 }
 .main [data-testid="stVerticalBlockBorderWrapper"] div[class*="st-key-sb_strat_radio"] button[aria-pressed="true"],
-.main [data-testid="stVerticalBlockBorderWrapper"] div[class*="st-key-sb_horizon_radio"] button[aria-pressed="true"]{
+.main [data-testid="stVerticalBlockBorderWrapper"] div[class*="st-key-sb_horizon_radio"] button[aria-pressed="true"],
+.main div[class*="st-key-sb_strat_radio"] [data-testid="stButtonGroup"] button[aria-pressed="true"],
+.main div[class*="st-key-sb_horizon_radio"] [data-testid="stButtonGroup"] button[aria-pressed="true"]{
   background:linear-gradient(180deg,#22d3ee,#0ea5e9)!important;
   color:#fff!important;
   -webkit-text-fill-color:#fff!important;
@@ -1519,17 +1540,29 @@ def quant_edge_score(df, vix_val=None):
 
 def weekly_trend_label(df_wk):
     """Weekly bias using MACD(12,26,9) and EMA(20) on weekly closes."""
-    if df_wk is None or len(df_wk) < 26:
+    try:
+        if df_wk is None:
+            return "UNKNOWN", "#64748b"
+        if not isinstance(df_wk, pd.DataFrame):
+            return "UNKNOWN", "#64748b"
+        if len(df_wk) < 26:
+            return "UNKNOWN", "#64748b"
+        if "Close" not in df_wk.columns:
+            return "UNKNOWN", "#64748b"
+        close = pd.to_numeric(df_wk["Close"], errors="coerce").dropna()
+        if len(close) < 26:
+            return "UNKNOWN", "#64748b"
+        ml, sl, _ = TA.macd(close, 12, 26, 9)
+        e20 = TA.ema(close, 20).iloc[-1]
+        above_ema = close.iloc[-1] > e20
+        macd_bull = ml.iloc[-1] > sl.iloc[-1]
+        if above_ema and macd_bull:
+            return "BULLISH", "#10b981"
+        if not above_ema and not macd_bull:
+            return "BEARISH", "#ef4444"
+        return "MIXED", "#f59e0b"
+    except Exception:
         return "UNKNOWN", "#64748b"
-    ml, sl, _ = TA.macd(df_wk["Close"], 12, 26, 9)
-    e20 = TA.ema(df_wk["Close"], 20).iloc[-1]
-    above_ema = df_wk["Close"].iloc[-1] > e20
-    macd_bull = ml.iloc[-1] > sl.iloc[-1]
-    if above_ema and macd_bull:
-        return "BULLISH", "#10b981"
-    if not above_ema and not macd_bull:
-        return "BEARISH", "#ef4444"
-    return "MIXED", "#f59e0b"
 
 
 # ═════════════════════════════════════════════════════════════════════════
@@ -1680,10 +1713,9 @@ def _index_pos(idx_obj):
 
 @st.cache_data(ttl=300)
 def detect_diamonds(df, df_wk=None, lookback=None):
-    """Blue Diamond: point-in-time confluence **crosses** to 7+ (was <7 prior bar), weekly
-    not BEARISH-only, and a light institutional filter: participation ≥ ~0.9× 20d volume;
-    ATR blow-offs block only when ATR is in the top ~1% of its lookback window **and**
-    volume is weak (<1.05× avg).
+    """Blue Diamond: point-in-time confluence **crosses** to 7+ (was <7 prior bar), **daily
+    structure BULLISH**, weekly trend **not BEARISH** (daily + weekly not fighting), plus
+    institutional filters (participation, ATR blow-off guard).
 
     Pink Diamond: confluence collapse (≤3 after ≥5) **or** RSI > 75 with fading score;
     weekly bias can be **BULLISH** too (take-profit / de-risk in extended runs)."""
@@ -1705,12 +1737,13 @@ def detect_diamonds(df, df_wk=None, lookback=None):
     for i in range(start, n):
         sub = df.iloc[: i + 1]
         sc, _, _, _ = _calc_confluence_points_core(sub, df_wk, None)
+        struct_i, _, _ = TA.market_structure(sub)
 
         rsi_i = float(rsi_series.iloc[i]) if not pd.isna(rsi_series.iloc[i]) else 50.0
         pi = float(df["Close"].iloc[i])
 
-        # Blue: 7+ confluence cross + institutional filters (ATR / volume)
-        if sc >= 7 and prev_score < 7 and wk_bias in ("BULLISH", "MIXED", "UNKNOWN"):
+        # Blue: 7+ cross + daily BULLISH structure + weekly not bearish (multi-TF agreement)
+        if sc >= 7 and prev_score < 7 and struct_i == "BULLISH" and wk_bias != "BEARISH":
             if _blue_diamond_institutional_ok(sub):
                 diamonds.append({"date": df.index[i], "price": pi, "type": "blue",
                                  "score": sc, "rsi": rsi_i, "weekly": wk_bias})
@@ -1795,7 +1828,7 @@ def scan_single_ticker(tkr):
         dist_gz = (price / gold_zone - 1) * 100 if gold_zone else 0
 
         struct, _, _ = TA.market_structure(df)
-        wk_lbl, _ = weekly_trend_label(df_wk) if df_wk is not None and len(df_wk) >= 26 else ("N/A", "#64748b")
+        wk_lbl, _ = weekly_trend_label(df_wk)
 
         d_status = "None"
         d_class = "badge-none"
@@ -2167,7 +2200,7 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
                     name="Blue diamond",
                     legendgroup="diamond_blue",
                     hovertemplate="<b>Blue diamond</b><br>Same marker as on chart when a buy signal fires.<br>"
-                    "Fires on <b>7+ confluence cross up</b> (weekly not bearish-only).<br>"
+                    "Fires on <b>7+ confluence cross up</b> with <b>daily BULLISH structure</b> and weekly trend <b>not BEARISH</b>.<br>"
                     "<i>No blue diamond in loaded history yet.</i><extra></extra>",
                 )
             )
@@ -2398,6 +2431,78 @@ def _factor_checklist_labels():
     }
 
 
+def _confluence_why_trade_plain(cp_breakdown):
+    """One-line copy for Recommended Trade tooltip — same 7 headline rows as Diamond checklist."""
+    if not cp_breakdown:
+        return (
+            "Confluence data not loaded — this strike is from the options desk math and regime text, "
+            "not the live 7-factor checklist."
+        )
+    flabels = _factor_checklist_labels()
+    greens = [nice for k, nice in flabels.items() if cp_breakdown.get(k, {}).get("pts", 0) > 0]
+    passed = len(greens)
+    if passed == 0:
+        return (
+            "0/7 headline factors green on the Diamond checklist — size smaller; this is a premium-selling "
+            "suggestion from structure and fear-greed, not a full confluence entry."
+        )
+    tail = ", ".join(greens[:5])
+    if len(greens) > 5:
+        tail += ", …"
+    return f"{passed}/7 headline factors green: {tail}. Same checklist as Blue Diamond context."
+
+
+def _iv_rank_pill_html(ticker, price, ref_iv_pct=None, *, stub=None):
+    """Recommended Trade card: always show an IV rank pill — numeric proxy, or a clear stub."""
+    pill_open = (
+        "<div style='display:inline-flex;align-items:center;flex-wrap:wrap;gap:8px;margin:4px 0 12px 0;"
+        "padding:6px 14px;border-radius:999px;border:1px solid rgba(34,211,238,.45);"
+        "background:rgba(6,182,212,.12)'>"
+    )
+    label = "<span style='font-size:.72rem;font-weight:700;color:#a5f3fc;letter-spacing:.07em'>IV RANK (PROXY)</span>"
+    if stub == "offline":
+        return (
+            pill_open
+            + "<span class='mono' style='font-weight:800;color:#64748b;font-size:1.05rem'>—</span>"
+            + label
+            + "<span style='font-size:.68rem;color:#64748b'>chain offline</span></div>"
+        )
+    if stub == "no_strike":
+        return (
+            pill_open
+            + "<span class='mono' style='font-weight:800;color:#64748b;font-size:1.05rem'>—</span>"
+            + label
+            + "<span style='font-size:.68rem;color:#64748b'>no desk strike yet</span></div>"
+        )
+    try:
+        ref = float(ref_iv_pct) if ref_iv_pct is not None else 0.0
+    except (TypeError, ValueError):
+        ref = 0.0
+    if ref <= 0 or price is None or float(price) <= 0:
+        return (
+            pill_open
+            + "<span class='mono' style='font-weight:800;color:#64748b;font-size:1.05rem'>—</span>"
+            + label
+            + "<span style='font-size:.68rem;color:#64748b'>no reference IV</span></div>"
+        )
+    info = compute_iv_rank_proxy(ticker, float(price), ref)
+    if info is not None:
+        rnk = info["rank"]
+        rk_color = "#fbbf24" if rnk > 70 else ("#34d399" if rnk < 25 else "#94a3b8")
+        return (
+            pill_open
+            + f"<span class='mono' style='font-weight:800;color:{rk_color};font-size:1.08rem'>{rnk:.0f}</span>"
+            + label
+            + "<span style='font-size:.68rem;color:#64748b'>vs listed expiries</span></div>"
+        )
+    return (
+        pill_open
+        + "<span class='mono' style='font-weight:800;color:#64748b;font-size:1.05rem'>—</span>"
+        + label
+        + "<span style='font-size:.68rem;color:#64748b'>curve too thin to rank</span></div>"
+    )
+
+
 def _explain(title, body, mood="neutral"):
     """Render an explanation card with color-coded border."""
     colors = {"bull": ("#10b981", "rgba(16,185,129,.08)"),
@@ -2532,9 +2637,33 @@ def _fragment_technical_zone(
 ):
     """Charts + overlay toggles + diamond cards + gold zone copy. Reruns without refetching Yahoo data."""
     if mini_mode:
-        st.info(
-            "**Mini mode:** We park the heavy charts so your session stays fast. "
-            "Flip **🚀 Turbo** off in Mission Control when you want the full Plotly stack."
+        mini_cp = sum(v.get("pts", 0) for v in (cp_breakdown or {}).values())
+        gz_pct = ((price / gold_zone_price - 1) * 100) if gold_zone_price else 0.0
+        dia_line = "No active Diamond"
+        if latest_d is not None and len(df) > 0:
+            try:
+                age = (df.index[-1] - latest_d["date"]).days
+                if age <= 5:
+                    d_emoji = "🔷" if latest_d["type"] == "blue" else "💎"
+                    d_name = "Blue" if latest_d["type"] == "blue" else "Pink"
+                    dia_line = f"{d_emoji} {d_name} Diamond · {latest_d['score']}/9 · {age}d ago"
+            except Exception:
+                pass
+        st.markdown(
+            f"<div class='glass-card' style='margin-bottom:12px'>"
+            f"<div style='font-size:.72rem;font-weight:800;color:#00e5ff;letter-spacing:.12em;margin-bottom:10px'>"
+            f"TURBO · TECHNICAL SUMMARY</div>"
+            f"<div class='mono' style='font-size:1.35rem;font-weight:800;color:#e2e8f0;margin-bottom:6px'>"
+            f"{_html_mod.escape(ticker)} ${price:.2f}</div>"
+            f"<div style='font-size:.85rem;color:#94a3b8;line-height:1.55'>"
+            f"<strong style='color:#cbd5e1'>Structure:</strong> {struct} · "
+            f"<strong style='color:#cbd5e1'>Confluence:</strong> {mini_cp}/9 · "
+            f"<strong style='color:#cbd5e1'>Gold Zone:</strong> ${gold_zone_price:.2f} ({gz_pct:+.1f}% from spot)<br>"
+            f"<strong style='color:#cbd5e1'>Diamond:</strong> {dia_line}</div>"
+            f"<p style='color:#64748b;font-size:.78rem;margin:12px 0 0 0'>"
+            f"Heavy Plotly charts are parked. Turn <strong>Turbo mode</strong> off in Mission Control for the full stack.</p>"
+            f"</div>",
+            unsafe_allow_html=True,
         )
         _persist_overlay_prefs()
         return
@@ -2710,7 +2839,7 @@ def main():
     # ── Watchlist editor (must run before Mission Control so sb_scanner is committed same run)
     _wl_expanded = bool(st.session_state.pop("_open_watchlist_editor", False))
     st.caption("CashFlow Command Center · v14.1")
-    with st.expander("✏️ Edit Watchlist Symbols", expanded=_wl_expanded):
+    with st.expander("Edit watchlist symbols", expanded=_wl_expanded):
         st.caption(
             "Drop in tickers separated by commas or line breaks. Shuffle the lineup with the controls. "
             "Everything commits when the app saves your config."
@@ -2737,9 +2866,9 @@ def main():
                 + "</div>",
                 unsafe_allow_html=True,
             )
-            up_clicked = st.button("↑  Move up", use_container_width=True, key="sb_move_up")
-            down_clicked = st.button("↓  Move down", use_container_width=True, key="sb_move_down")
-            remove_clicked = st.button("✕  Remove symbol", use_container_width=True, key="sb_remove_ticker")
+            up_clicked = st.button("Move up", use_container_width=True, key="sb_move_up")
+            down_clicked = st.button("Move down", use_container_width=True, key="sb_move_down")
+            remove_clicked = st.button("Remove symbol", use_container_width=True, key="sb_remove_ticker")
             sort_az = st.button("Sort A to Z", use_container_width=True, key="sb_sort_az")
 
             if up_clicked and sel in watch_items_sb:
@@ -2859,7 +2988,7 @@ def main():
             else:
                 st.markdown(
                     '<p class="cf-hud-label">No symbols yet</p><p style="color:#cbd5e1;font-size:0.85rem;margin:0">'
-                    "Expand <strong>✏️ Edit Watchlist Symbols</strong> up top or use the shortcut under the tape.</p>",
+                    "Expand <strong>Edit watchlist symbols</strong> up top or use the shortcut under the tape.</p>",
                     unsafe_allow_html=True,
                 )
         with r1c2:
@@ -2882,9 +3011,9 @@ def main():
         with r1c3:
             st.markdown('<p class="cf-hud-label">Performance</p>', unsafe_allow_html=True)
             st.toggle(
-                "🚀 Turbo",
+                "Turbo mode",
                 key="sb_mini_mode",
-                help="Turbo keeps the desk light: no heavy Plotly stack, while glance tiles, execution strip, quant, and scanner stay live.",
+                help="Skips heavy Plotly charts; glance row, execution strip, quant, and scanner stay live. Toggle off for the full chart stack.",
             )
         r2c1, r2c2, r2c3 = st.columns([1.2, 1.2, 1.4])
         with r2c1:
@@ -2956,7 +3085,7 @@ def main():
 
     b1, b2 = st.columns([1, 2])
     with b1:
-        if st.button("✏️ Edit Watchlist Symbols", use_container_width=True, key="cf_open_watchlist_editor"):
+        if st.button("Open watchlist editor", use_container_width=True, key="cf_open_watchlist_editor"):
             st.session_state["_open_watchlist_editor"] = True
             st.rerun()
     with b2:
@@ -3187,18 +3316,38 @@ def main():
     # ── EARLY OPTIONS FETCH (populates BLUF with specific strikes) ──
     rfr = macro.get("10Y Yield", {}).get("price", 4.5) / 100
     bluf_cc, bluf_csp, bluf_exp, bluf_dte = None, None, None, 0
-    _, opt_exps = fetch_options(ticker)
-    if opt_exps:
-        bluf_exp = opt_exps[min(2, len(opt_exps) - 1)]
-        bluf_dte = max(1, (datetime.strptime(bluf_exp, "%Y-%m-%d") - datetime.now()).days)
-        bluf_opt, _ = fetch_options(ticker, bluf_exp)
-        bluf_calls, bluf_puts = bluf_opt
-        cc_list = Opt.covered_calls(price, bluf_calls, bluf_dte, rfr)
-        csp_list = Opt.cash_secured_puts(price, bluf_puts, bluf_dte, rfr)
-        if cc_list:
-            bluf_cc = next((c for c in cc_list if c.get("optimal")), cc_list[0])
-        if csp_list:
-            bluf_csp = next((c for c in csp_list if c.get("optimal")), csp_list[0])
+    opt_exps = []
+    try:
+        _, opt_exps = fetch_options(ticker)
+        if opt_exps:
+            bluf_exp = opt_exps[min(2, len(opt_exps) - 1)]
+            try:
+                bluf_dte = max(1, (datetime.strptime(str(bluf_exp)[:10], "%Y-%m-%d") - datetime.now()).days)
+            except Exception:
+                bluf_exp, bluf_dte = None, 0
+            if bluf_exp:
+                bluf_opt, _ = fetch_options(ticker, bluf_exp)
+                bluf_calls, bluf_puts = bluf_opt if isinstance(bluf_opt, (tuple, list)) and len(bluf_opt) == 2 else (pd.DataFrame(), pd.DataFrame())
+                cc_list = Opt.covered_calls(price, bluf_calls, bluf_dte, rfr)
+                csp_list = Opt.cash_secured_puts(price, bluf_puts, bluf_dte, rfr)
+                if cc_list:
+                    bluf_cc = next((c for c in cc_list if c.get("optimal")), cc_list[0])
+                if csp_list:
+                    bluf_csp = next((c for c in csp_list if c.get("optimal")), csp_list[0])
+    except Exception:
+        opt_exps, bluf_cc, bluf_csp, bluf_exp, bluf_dte = [], None, None, None, 0
+
+    ref_iv_bluf = None
+    if bluf_cc and bluf_cc.get("iv"):
+        try:
+            ref_iv_bluf = float(bluf_cc["iv"])
+        except (TypeError, ValueError):
+            ref_iv_bluf = None
+    elif bluf_csp and bluf_csp.get("iv"):
+        try:
+            ref_iv_bluf = float(bluf_csp["iv"])
+        except (TypeError, ValueError):
+            ref_iv_bluf = None
 
     # ── DETERMINE BEST STRATEGY (example contract counts — no personal position data) ──
     nc = 1
@@ -3221,6 +3370,8 @@ def main():
         action_strat = "BEAR CALL SPREAD"
         action_plain = "Defined risk credit spread when sellers control the tape; you cap upside risk on the structure."
 
+    why_trade_tip = _html_mod.escape(_confluence_why_trade_plain(cp_breakdown))
+
     # ── RECOMMENDED TRADE (optimal strike from options engine) ──
     master_kind, master_b = None, None
     if opt_exps and bluf_exp:
@@ -3236,62 +3387,91 @@ def main():
 
     master_html = ""
     if master_kind and master_b and bluf_exp:
-        exp_disp = datetime.strptime(bluf_exp, "%Y-%m-%d").strftime("%B %d").upper()
-        dte_m = max(1, (datetime.strptime(bluf_exp, "%Y-%m-%d") - datetime.now()).days)
-        pop_pct = int(min(92, max(55, round((1.0 - abs(master_b["delta"])) * 100))))
+        try:
+            exp_dt = datetime.strptime(str(bluf_exp)[:10], "%Y-%m-%d")
+            exp_disp = exp_dt.strftime("%B %d").upper()
+            dte_m = max(1, (exp_dt - datetime.now()).days)
+        except Exception:
+            exp_disp = str(bluf_exp).upper()[:18]
+            dte_m = max(1, int(bluf_dte or 30))
+        _mstrike = float(master_b.get("strike") or 0)
+        _mdelta = float(master_b.get("delta") or 0)
+        _mprem = float(master_b.get("prem_100") or 0)
+        _miv = float(master_b.get("iv") or 0)
+        pop_pct = int(min(92, max(55, round((1.0 - abs(_mdelta)) * 100))))
         tk_esc = _html_mod.escape(ticker)
+        _ref_rank_iv = _miv if _miv > 0 else ref_iv_bluf
+        iv_badge_html = _iv_rank_pill_html(ticker, price, _ref_rank_iv)
         if master_kind == "cc":
             n_c = nc
-            prem_tot = master_b["prem_100"] * n_c
+            prem_tot = _mprem * n_c
             headline = (
-                f"SELL {n_c}x {tk_esc} ${master_b['strike']:.0f} CALLS EXP {exp_disp}. "
+                f"SELL {n_c}x {tk_esc} ${_mstrike:.0f} CALLS EXP {exp_disp}. "
                 f"COLLECT ${prem_tot:,.0f} CASH TODAY. {pop_pct} PERCENT PROBABILITY OF KEEPING SHARES."
             )
             rh_steps = [
                 f"In your broker app, open {ticker} and go to options.",
                 f"Choose expiration {bluf_exp} ({dte_m} days out).",
-                f"Sell {n_c}x ${master_b['strike']:.0f} call(s) near mid, then confirm the order.",
+                f"Sell {n_c}x ${_mstrike:.0f} call(s) near mid, then confirm the order.",
             ]
         else:
-            prem_tot = master_b["prem_100"]
+            prem_tot = _mprem
             headline = (
-                f"SELL 1x {tk_esc} ${master_b['strike']:.0f} PUTS EXP {exp_disp}. "
+                f"SELL 1x {tk_esc} ${_mstrike:.0f} PUTS EXP {exp_disp}. "
                 f"COLLECT ${prem_tot:,.0f} CASH TODAY. {pop_pct} PERCENT ODDS OPTION EXPIRES WORTHLESS IF PRICE STAYS ABOVE THE STRIKE."
             )
             rh_steps = [
                 f"In your broker app, open {ticker} and go to options.",
                 f"Choose expiration {bluf_exp} ({dte_m} days out).",
-                f"Sell 1x ${master_b['strike']:.0f} put near mid, then confirm the order.",
+                f"Sell 1x ${_mstrike:.0f} put near mid, then confirm the order.",
             ]
         stepper = "".join(
             f"<div class='rh-step'><div class='num'>{i}.</div><div class='txt'>{_html_mod.escape(s)}</div></div>"
             for i, s in enumerate(rh_steps, start=1)
         )
-        strike_s = f"{master_b['strike']:.0f}"
+        strike_s = f"{_mstrike:.0f}"
+        iv_line = f"IV {_miv:.1f}% · " if _miv > 0 else ""
+        title_row = (
+            f"<div style='display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:8px'>"
+            f"<div style='font-size:.72rem;font-weight:800;color:#00e5ff;letter-spacing:.2em'>PRIMARY MISSION OBJECTIVE</div>"
+            f"<span class='cf-tip' tabindex='0' style='font-size:.62rem;padding:3px 9px'>Why this trade?"
+            f"<span class='cf-tiptext'>{why_trade_tip}</span></span></div>"
+        )
         master_html = (
             f"<div class='trade-master'>"
-            f"<div style='font-size:.72rem;font-weight:800;color:#00e5ff;letter-spacing:.2em;margin-bottom:8px'>PRIMARY MISSION OBJECTIVE</div>"
+            f"{title_row}"
+            f"{iv_badge_html}"
             f"<p style='color:#e2e8f0;font-size:1.05rem;line-height:1.55;margin:0 0 14px 0;font-weight:600'>{headline}</p>"
             f"<div class='strike-big' style='margin:8px 0 6px 0'>${_html_mod.escape(strike_s)}</div>"
-            f"<div style='color:#94a3b8;font-size:.88rem;margin-bottom:12px'>Desk optimal strike · IV {master_b['iv']:.1f}% · DTE {dte_m}</div>"
+            f"<div style='color:#94a3b8;font-size:.88rem;margin-bottom:12px'>Desk optimal strike · {iv_line}DTE {dte_m}</div>"
             f"<div style='font-size:.75rem;font-weight:700;color:#a5f3fc;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px'>Broker checklist</div>"
             f"<div class='rh-stepper'>{stepper}</div>"
             f"<p style='color:#64748b;font-size:.78rem;margin:14px 0 0 0'>Quotes can lag. Confirm credit in the app before you send the order.</p>"
             f"</div>"
         )
     elif not opt_exps:
+        _iv_off = _iv_rank_pill_html(ticker, price, None, stub="offline")
         master_html = (
-            "<div class='trade-master'>"
-            "<div style='font-size:.72rem;font-weight:800;color:#00e5ff;letter-spacing:.2em;margin-bottom:8px'>PRIMARY MISSION OBJECTIVE</div>"
-            "<p style='color:#e2e8f0;font-size:1rem;margin:0'>Options chain is offline. Retry when the pit is open or jump to Cash Flow Strategies.</p>"
-            "</div>"
+            f"<div class='trade-master'>"
+            f"<div style='display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:8px'>"
+            f"<div style='font-size:.72rem;font-weight:800;color:#00e5ff;letter-spacing:.2em'>PRIMARY MISSION OBJECTIVE</div>"
+            f"<span class='cf-tip' tabindex='0' style='font-size:.62rem;padding:3px 9px'>Why this trade?"
+            f"<span class='cf-tiptext'>{why_trade_tip}</span></span></div>"
+            f"{_iv_off}"
+            f"<p style='color:#e2e8f0;font-size:1rem;margin:0'>Options chain is offline. Retry when the pit is open or jump to Cash Flow Strategies.</p>"
+            f"</div>"
         )
     else:
+        _iv_ns = _iv_rank_pill_html(ticker, price, ref_iv_bluf, stub="no_strike" if not ref_iv_bluf else None)
         master_html = (
-            "<div class='trade-master'>"
-            "<div style='font-size:.72rem;font-weight:800;color:#00e5ff;letter-spacing:.2em;margin-bottom:8px'>PRIMARY MISSION OBJECTIVE</div>"
-            "<p style='color:#e2e8f0;font-size:1rem;margin:0'>No liquid optimal strike cleared our filters yet. Open Cash Flow Strategies and choose an expiration by hand.</p>"
-            "</div>"
+            f"<div class='trade-master'>"
+            f"<div style='display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:8px'>"
+            f"<div style='font-size:.72rem;font-weight:800;color:#00e5ff;letter-spacing:.2em'>PRIMARY MISSION OBJECTIVE</div>"
+            f"<span class='cf-tip' tabindex='0' style='font-size:.62rem;padding:3px 9px'>Why this trade?"
+            f"<span class='cf-tiptext'>{why_trade_tip}</span></span></div>"
+            f"{_iv_ns}"
+            f"<p style='color:#e2e8f0;font-size:1rem;margin:0'>No liquid optimal strike cleared our filters yet. Open Cash Flow Strategies and choose an expiration by hand.</p>"
+            f"</div>"
         )
 
     ema_dist_pct = None
@@ -3310,11 +3490,6 @@ def main():
     else:
         d_badge_html = "<span class='diamond-badge badge-none'>◇ No Active Diamond</span>"
 
-    ref_iv_bluf = None
-    if bluf_cc and bluf_cc.get("iv"):
-        ref_iv_bluf = float(bluf_cc["iv"])
-    elif bluf_csp and bluf_csp.get("iv"):
-        ref_iv_bluf = float(bluf_csp["iv"])
     iv_rank_info = compute_iv_rank_proxy(ticker, price, ref_iv_bluf) if ref_iv_bluf else None
     ext_warn_html = ""
     if ema_dist_pct is not None and ema_dist_pct > EMA_EXTENSION_WARN_PCT:
@@ -4080,7 +4255,7 @@ def main():
             else:
                 st.info("No scanner results. Check your ticker symbols.")
     else:
-        st.info("Add tickers under **✏️ Edit Watchlist Symbols** (top of page) to use the scanner.")
+        st.info("Add tickers under **Edit watchlist symbols** (top of page) to use the scanner.")
 
     # ══════════════════════════════════════════════════════════════════
     #  SECTION 8 \u2014 NEWS & MACRO
@@ -4110,7 +4285,7 @@ def main():
     _section("Quick Reference Guide", "Plain language glossary for every signal on this desk. Keep it open during live markets.",
              tip_plain="Reach for this when a label feels fuzzy. Clarity beats impulse every session.")
     edu = [
-        ("Blue Diamond Signal", "A Blue Diamond appears when 7 or more out of 9 confluence factors align bullish at the same time. Think of it as every traffic light on your route turning green simultaneously. It means Supertrend, Ichimoku, ADX, OBV, Structure, and Gold Zone all agree: this is a high probability buy zone. Buy on Blue Diamonds."),
+        ("Blue Diamond Signal", "A Blue Diamond appears when confluence crosses up to 7+ out of 9, <strong>daily market structure is BULLISH</strong>, and the <strong>weekly MACD/EMA bias is not BEARISH</strong> (multi-timeframe agreement). Institutional volume/ATR filters still apply. Buy on Blue Diamonds."),
         ("Pink Diamond Signal", "A Pink Diamond appears when bullish confluence collapses or momentum exhausts (RSI > 75 with weak confluence). Think of it as your dashboard warning lights all turning on. It means the easy money in this move is done. Take profits, sell aggressive covered calls, or tighten your stops. Sell on Pink Diamonds."),
         ("Gold Zone", "The Gold Zone is a single dynamic price level calculated from Volume Profile POC, the 61.8% Fibonacci golden ratio, the 200-day simple moving average, and the nearest Gann Square of 9 level. When the stock is above the Gold Zone, bulls are in control. Below it, bears have the edge. Use the Gold Zone as your anchor for all strike selection."),
         ("Confluence Points (0 to 9)", "The Confluence score checks nine independent bullish factors: Supertrend direction (2pts), Ichimoku cloud position (2pts), ADX trend strength (1pt), OBV accumulation (1pt), bullish divergences (1pt), position versus Gold Zone (1pt), and market structure (1pt). Scores of 7 or higher trigger Blue Diamonds. Scores below 4 signal caution."),

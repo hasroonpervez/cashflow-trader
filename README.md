@@ -8,11 +8,20 @@
 
 ## What Changed In This Release
 
-### ✅ HUD / Mission Control layout (v14.1+)
+### ✅ Execution strip & signal logic (v14.1)
+- **Recommended Trade** (Primary Mission Objective): **`_iv_rank_pill_html`** always renders an **IV RANK (PROXY)** pill — numeric rank when `compute_iv_rank_proxy` succeeds, or clear stubs (**chain offline**, **no desk strike yet**, **no reference IV**, **curve too thin**). Desk reference IV is parsed once after the early options fetch and reused for the mission card and the BLUF IV row.
+- **“Why this trade?”** (`cf-tip`) uses **`_confluence_why_trade_plain`**, the same **7 headline confluence checklist** as Diamond cards (Supertrend, Ichimoku, ADX, OBV, Divergence, Gold Zone, Structure), including when the chain or strike line is empty.
+- **Blue Diamond** now requires **multi-timeframe agreement**: confluence must **cross up to 7+**, **daily market structure must be BULLISH** on that bar, and the **weekly MACD/EMA bias must not be BEARISH** (weekly bias is still evaluated from the current weekly frame; daily structure is evaluated per bar in the scan). Chart legend hovers and the Quick Reference glossary match this definition.
+- **Weekly trend label** (`weekly_trend_label`) is **hardened**: requires a **`pandas.DataFrame`**, validates **`Close`**, length, numeric coercion, and try/except so the main desk and **Market Scanner** never throw on thin, malformed, or non-frame weekly inputs.
+- **Streamlit widget labels (ASCII):** Mission Control **Turbo** toggle reads **`Turbo mode`** (no emoji in the widget label). Watchlist UI uses **`Edit watchlist symbols`** (expander), **`Open watchlist editor`** (tape shortcut), and plain **Move up / Move down / Remove symbol** buttons — stable explicit `key=` values are unchanged (`sb_mini_mode`, `sb_strat_radio`, etc.) so `config.json` and sessions stay compatible.
+- **Early options / BLUF path** is wrapped in defensive parsing: safe expiry strings, tuple unpacking, and fallbacks so missing or quiet option chains do not crash the page.
+- **Mission Control segments:** Streamlit’s `st.segmented_control` renders as **`data-testid="stButtonGroup"`** on current builds; HUD CSS styles **`stButtonGroup` and legacy `stSegmentedControl`** so unselected pills stay **dark with readable text** (not default light fills).
+
+### ✅ HUD / Mission Control layout (v14.0+)
 - **Main column first:** A bordered **MISSION CONTROL** bar sits directly under the sticky nav (NOC-style: switches above the “monitors”).
 - **Target ticker** `selectbox`, **Strategy** (`st.segmented_control` when available, else horizontal `radio`), **Turbo** (`mini_mode`), **option horizon**, and **scanner sort** all live in Mission Control.
 - **Watchlist tape:** one tap per symbol to set the active ticker; **primary** button highlights the selection. Rows show a **cached daily % change** (last vs prior session). Long lists wrap in **chunks of 8** columns so mobile stays usable. Tape taps use a **staging key** (`_sb_watch_selected_sync`) so `session_state` stays compatible with Streamlit 1.33+ (no mutating the selectbox key after the widget exists).
-- **No sidebar workflow:** The Streamlit sidebar is **hidden in CSS**; all list editing is in the **main column**. **`✏️ Edit Watchlist Symbols`** is a **`st.expander` at the top of main** (it runs **before** Mission Control so `sb_scanner` is current on the same run). A second **✏️ Edit Watchlist Symbols** button under the tape sets `_open_watchlist_editor` and reruns once to expand the editor. Footer line: **Data: Yahoo Finance · Not advice**.
+- **No sidebar workflow:** The Streamlit sidebar is **hidden in CSS**; all list editing is in the **main column**. **`Edit watchlist symbols`** is a **`st.expander` at the top of main** (it runs **before** Mission Control so `sb_scanner` is current on the same run). **`Open watchlist editor`** under the tape sets `_open_watchlist_editor` and reruns once to expand the editor. Footer line: **Data: Yahoo Finance · Not advice**.
 - **High-contrast HUD labels:** Mission Control row titles use a dedicated **`cf-hud-label`** style so **Strategy**, **Option horizon**, and similar fields stay readable on dark backgrounds (including segmented controls).
 - **Sticky nav** still jumps to Execution, Charts, Setup, Quant, Strategies, Risk, Scanner, News, Guide (`initial_sidebar_state="collapsed"` remains for hosts that still mount an empty sidebar region).
 - **Live Pulse** header after a successful data load: timestamp pill so you can see the feed is fresh at a glance.
@@ -33,15 +42,15 @@
 - **Quant Edge:** ATR is computed **once** per score (single `TA.atr(df)` series) for the volatility pillar.
 - **Market Scanner** uses a **thread pool** (up to 8 workers) so watchlist symbols fetch in parallel.
 - **`load_config()`** merges **`st.secrets`** (scalar top-level keys only, for Streamlit Cloud) with **`config.json`**.
-- **`mini_mode`** (**🚀 Turbo** in Mission Control) persists in `config.json` and **skips heavy Plotly** (technical stack, volume-profile bar chart, simulator equity chart) while keeping the glance row, execution strip, quant dashboard, and scanner. With Turbo on, the app injects **denser main-column CSS** (tighter padding, smaller section headers and cards) so more fits on one phone screen.
+- **`mini_mode`** (**Turbo mode** toggle in Mission Control) persists in `config.json` and **skips heavy Plotly** (`build_chart` and the four technical panels, volume-profile bar chart, simulator equity chart) while keeping the glance row, execution strip, quant dashboard, and scanner. The **`@st.fragment` technical zone returns immediately** in Turbo mode — it does **not** call `build_chart`. It shows a **Turbo · Technical Summary** card: **price**, **structure**, **confluence score**, **Gold Zone** distance, and **Diamond** status. With Turbo on, the app injects **denser main-column CSS** (tighter padding, smaller section headers and cards) so more fits on one phone screen.
 - **CSS:** `touch-action: manipulation`, `min-height: 100dvh` on the app shell, and touch hints on the sticky nav to reduce mobile zoom/jitter.
 
 ### ✅ Persistent User State (Watchlist + Scan Ordering)
 - `config.json` persistence includes `watchlist`, `scanner_sort_mode`, **Strategy** (`strat_focus`, `strat_horizon`), **Turbo / mini_mode**, and **Chart overlay** toggles (`overlay_*`).
-- **Watchlist editor** (main column → **✏️ Edit Watchlist Symbols** expander):
+- **Watchlist editor** (main column → **Edit watchlist symbols** expander):
   - **Textarea** for symbols — **commas, newlines, or semicolons**; duplicates removed; uppercase normalization.
   - Auto-saves with the usual **`watch_cfg`** merge; **Save and refresh** forces a disk write + rerun.
-  - **Reorder:** **↑ / ↓**, **✕ Remove**, **Sort A to Z**, **Quick add** + **Add symbol**.
+  - **Reorder:** **Move up**, **Move down**, **Remove symbol**, **Sort A to Z**, **Quick add** + **Add symbol**.
 - **Scanner order** (`Custom watchlist order` vs `Highest confluence first`) is controlled from **Mission Control** (main column).
 - **Streamlit-safe session updates:** staging keys **`_sb_scanner_sync`**, **`_sb_watch_selected_sync`**, **`_sb_add_ticker_clear`**, **`_open_watchlist_editor`** are applied **before** widgets that own those values are built, avoiding `StreamlitAPIException` on reorder, add, or tape taps.
 - Default bootstrap watchlist (only when config is missing/deleted):
@@ -83,9 +92,10 @@
 - Layout stays single-row on desktop and wraps cleanly on narrower widths.
 
 ### ✅ Mission Card / Execution UX
-- “Action Required” presentation was upgraded to a **Primary Mission Objective** card.
+- “Action Required” presentation was upgraded to a **Primary Mission Objective** card (left column of the **execution shell**), paired with the **BLUF** context column (quant edge, confluence bar, weekly trend, Gold Zone, IV rank strip).
 - Card now uses a softer pulsating cyan glow (`box-shadow` pulse) for less visual fatigue.
-- Robinhood execution instructions use a centered horizontal **1 → 2 → 3 ghost stepper** with cyan focus glow on hover.
+- Broker-style steps use a centered horizontal **1 → 2 → 3 ghost stepper** with cyan focus glow on hover.
+- v14.1 adds an **always-on IV rank pill** on the mission card and **Why this trade?** (`cf-tip`) tied to the **7-factor** checklist; offline, empty-chain, or no-strike states still show both pill stubs and the tip.
 
 ### ✅ New PLTR Earnings Intelligence Section
 - Added dedicated **Strategic Intelligence earnings drawer** (custom-styled expander) with dual-column catalyst/risk framing.
@@ -120,14 +130,14 @@
 ### 📈 Advanced Chart & Signal Engine
 - **Four charts:** price (+ overlays), volume bars, RSI, MACD — see **Technical chart — fragment + four Plotly panels** above.
 - **Chart layers** toggles live under **Technical Chart** (fragment-isolated); overlays include EMAs, Bollinger, Ichimoku, Supertrend, Fibonacci, Gann, S/R, diamond markers, and Gold Zone line.
-- Market structure + confluence scoring
-- Diamond signal state; **Gold Zone** = blend of POC, 61.8% Fib (60 bars), **200-day SMA** (when data allows), and nearest Gann Sq9 level
+- Market structure + confluence scoring (0–9) with per-factor breakdown
+- **Blue / Pink Diamond** signals; **Blue** requires a **7+ confluence cross**, **BULLISH daily structure** on that bar, **weekly bias ≠ BEARISH**, plus volume/ATR institutional filters. **Gold Zone** = blend of POC, 61.8% Fib (60 bars), **200-day SMA** (when data allows), and nearest Gann Sq9 level
 
 ### 💰 Cash-Flow Strategy Engine
 - Covered Call analyzer
 - Cash-Secured Put analyzer
 - Credit spread scoring
-- Single “mission objective” execution recommendation
+- Single **Primary Mission Objective** execution recommendation with **always-visible IV rank (proxy) pill** and **Why this trade?** tooltip (confluence checklist)
 
 ### 📊 Scanner + Multi-Ticker Workflow
 - Batch scan watchlist for:
@@ -154,7 +164,7 @@
 ### Prerequisites
 - Python 3.9+
 - `pip`
-- **Streamlit ≥ 1.33** recommended (`st.fragment` for chart layers; `st.segmented_control` when your Streamlit build includes it, with radio fallback otherwise).
+- **Streamlit ≥ 1.33** recommended (`st.fragment` for chart layers). **`st.segmented_control`** (Streamlit 1.39+ on many installs) maps to a **button group** in the DOM; the app styles both that widget and horizontal radios for Mission Control. Use **≥ 1.39** if you rely on segmented controls; older builds fall back to horizontal `st.radio`.
 
 ### Install
 ```bash
@@ -191,7 +201,7 @@ All persistent settings are stored in `config.json` via atomic writes.
 | `overlay_super` | Supertrend overlay on |
 | `overlay_diamonds` | Diamond signals overlay on |
 | `overlay_gold` | Gold zone line on price chart |
-| `mini_mode` | **🚀 Turbo** in Mission Control — lighter UI (skips heavy Plotly blocks listed in Performance section) |
+| `mini_mode` | **🚀 Turbo** in Mission Control — lighter UI (skips heavy Plotly blocks; shows **Turbo · Technical Summary** instead of the four-chart stack) |
 
 ---
 
@@ -208,7 +218,7 @@ If you are upgrading from an older version, use this safe sequence:
    ```bash
    streamlit run app.py
    ```
-4. Expand **✏️ Edit Watchlist Symbols** at the top of the page (or tap the button under the watchlist tape) and confirm your watchlist loaded correctly.
+4. Expand **Edit watchlist symbols** at the top of the page (or use **Open watchlist editor** under the tape) and confirm your watchlist loaded correctly.
 
 ### About missing keys
 - Old `config.json` files without newer keys are automatically backfilled by the app’s default config merge.
@@ -252,7 +262,9 @@ Latest QA sweep performed against current `app.py` included:
 Residual manual QA recommended:
 - viewport pass at 1400/1200/992/768 widths,
 - live market/open-hours data behavior (yfinance variability),
-- **Mission Control:** strategy segments, Turbo, horizon, scanner sort, target selectbox sync with **ticker tape** (no `StreamlitAPIException` when tapping tape symbols),
+- **Mission Control:** Strategy / Option horizon segments readable on dark HUD (unselected pills not white-on-white), Turbo, horizon, scanner sort, target selectbox sync with **ticker tape** (no `StreamlitAPIException` when tapping tape symbols),
+- **Execution strip:** IV rank pill always visible (number or stub); **Why this trade?** tooltip matches confluence checklist copy,
+- **Turbo mode:** Technical **fragment** shows summary card only — confirm **`build_chart` is not invoked** (no four-chart Plotly stack),
 - **Watchlist editor:** textarea, reorder, remove, Sort A to Z, quick add, **Save and refresh**; bottom button opens the expander on rerun,
 - **Technical Chart:** flip overlay toggles and confirm charts update without a full refetch feeling (fragment rerun).
 
