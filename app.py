@@ -19,11 +19,23 @@ from pathlib import Path
 warnings.filterwarnings("ignore")
 
 # ─────────────────────────────────────────────────────────────────────────
-# CONFIG PERSISTENCE — watchlist + scanner prefs only (no secrets / portfolio)
+# CONFIG PERSISTENCE — watchlist, scanner, Strategy, chart overlays (no secrets / portfolio)
 # ─────────────────────────────────────────────────────────────────────────
 CONFIG_PATH = Path(__file__).parent / "config.json"
-DEFAULT_CONFIG = {"watchlist": "PLTR,BMNR,AAPL,AMZN,NVDA,AMD,TSLA,SPY,QQQ",
-                  "scanner_sort_mode": "Custom watchlist order"}
+DEFAULT_CONFIG = {
+    "watchlist": "PLTR,BMNR,AAPL,AMZN,NVDA,AMD,TSLA,SPY,QQQ",
+    "scanner_sort_mode": "Custom watchlist order",
+    "strat_focus": "Hybrid",
+    "strat_horizon": "30 DTE",
+    "overlay_ema": True,
+    "overlay_fib": True,
+    "overlay_gann": True,
+    "overlay_sr": True,
+    "overlay_ichi": False,
+    "overlay_super": False,
+    "overlay_diamonds": True,
+    "overlay_gold": True,
+}
 _LEGACY_CONFIG_KEYS = frozenset({
     "acct", "pltr_sh", "pltr_cost", "max_risk",
     "whatsapp_phone", "whatsapp_apikey", "alert_threshold", "last_alert_date",
@@ -54,6 +66,31 @@ def save_config(cfg):
         os.replace(temp_path, CONFIG_PATH)
     except Exception:
         pass
+
+
+def _hydrate_sidebar_prefs(cfg):
+    """Load Strategy / Chart overlay widget state from config when session has no value yet."""
+    if "sb_strat_radio" not in st.session_state:
+        opts = ("Sell premium", "Hybrid", "Growth")
+        v = cfg.get("strat_focus", DEFAULT_CONFIG["strat_focus"])
+        st.session_state["sb_strat_radio"] = v if v in opts else DEFAULT_CONFIG["strat_focus"]
+    if "sb_horizon_radio" not in st.session_state:
+        opts = ("Weekly", "30 DTE", "45 DTE")
+        v = cfg.get("strat_horizon", DEFAULT_CONFIG["strat_horizon"])
+        st.session_state["sb_horizon_radio"] = v if v in opts else DEFAULT_CONFIG["strat_horizon"]
+    for wkey, ckey, default in (
+        ("sb_ema", "overlay_ema", True),
+        ("sb_fib", "overlay_fib", True),
+        ("sb_gann", "overlay_gann", True),
+        ("sb_sr", "overlay_sr", True),
+        ("sb_ichi", "overlay_ichi", False),
+        ("sb_super", "overlay_super", False),
+        ("sb_diamonds", "overlay_diamonds", True),
+        ("sb_gold_zone", "overlay_gold", True),
+    ):
+        if wkey not in st.session_state:
+            st.session_state[wkey] = bool(cfg.get(ckey, default))
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # RETRY WRAPPER — handles yfinance throttling gracefully
@@ -2019,16 +2056,17 @@ def main():
             save_config(watch_cfg)
             cfg = watch_cfg
 
+        _hydrate_sidebar_prefs(cfg)
+
         st.markdown("---")
         st.markdown("#### Strategy")
         st.markdown(
-            '<p class="cf-widget-hint">Pick how you think about trades and the typical option window.</p>',
+            '<p class="cf-widget-hint">Pick how you think about trades and the typical option window. Saved automatically.</p>',
             unsafe_allow_html=True,
         )
         strat_mode = st.radio(
             "Focus",
             ["Sell premium", "Hybrid", "Growth"],
-            index=1,
             horizontal=True,
             key="sb_strat_radio",
             help="Sell premium: income first. Growth: more directional risk.",
@@ -2036,7 +2074,6 @@ def main():
         horizon = st.radio(
             "Horizon",
             ["Weekly", "30 DTE", "45 DTE"],
-            index=1,
             horizontal=True,
             key="sb_horizon_radio",
             help="Rough target days-to-expiration for planning.",
@@ -2044,7 +2081,7 @@ def main():
         st.markdown("---")
         st.markdown("#### Chart overlays")
         st.markdown(
-            '<p class="cf-widget-hint">Flip layers on or off — the chart updates immediately.</p>',
+            '<p class="cf-widget-hint">Flip layers on or off — saved automatically for your next visit.</p>',
             unsafe_allow_html=True,
         )
         o1, o2 = st.columns(2)
@@ -2058,6 +2095,23 @@ def main():
             show_sr = st.toggle("S/R levels", value=True, key="sb_sr")
             show_super = st.toggle("Supertrend", value=False, key="sb_super")
             show_gold_zone = st.toggle("Gold zone", value=True, key="sb_gold_zone")
+
+        prefs_cfg = {
+            **cfg,
+            "strat_focus": st.session_state.get("sb_strat_radio", DEFAULT_CONFIG["strat_focus"]),
+            "strat_horizon": st.session_state.get("sb_horizon_radio", DEFAULT_CONFIG["strat_horizon"]),
+            "overlay_ema": bool(st.session_state.get("sb_ema", cfg.get("overlay_ema", True))),
+            "overlay_fib": bool(st.session_state.get("sb_fib", cfg.get("overlay_fib", True))),
+            "overlay_gann": bool(st.session_state.get("sb_gann", cfg.get("overlay_gann", True))),
+            "overlay_sr": bool(st.session_state.get("sb_sr", cfg.get("overlay_sr", True))),
+            "overlay_ichi": bool(st.session_state.get("sb_ichi", cfg.get("overlay_ichi", False))),
+            "overlay_super": bool(st.session_state.get("sb_super", cfg.get("overlay_super", False))),
+            "overlay_diamonds": bool(st.session_state.get("sb_diamonds", cfg.get("overlay_diamonds", True))),
+            "overlay_gold": bool(st.session_state.get("sb_gold_zone", cfg.get("overlay_gold", True))),
+        }
+        if prefs_cfg != cfg:
+            save_config(prefs_cfg)
+            cfg = prefs_cfg
 
         st.markdown("---")
         st.markdown("<div style='text-align:center;color:#64748b;font-size:.65rem'>Data: Yahoo Finance &middot; Not advice</div>", unsafe_allow_html=True)

@@ -9,7 +9,7 @@
 ## What Changed In This Release
 
 ### ✅ Persistent User State (Watchlist + Scan Ordering)
-- `config.json` persistence includes `watchlist` and `scanner_sort_mode`.
+- `config.json` persistence includes `watchlist`, `scanner_sort_mode`, **Strategy** (`strat_focus`, `strat_horizon`), and **Chart overlay** toggles (`overlay_*`).
 - Sidebar **Scanner Watchlist** uses a compact **textarea** (not a single-line field):
   - paste or type symbols separated by **commas, newlines, or semicolons**,
   - duplicates are removed; symbols are normalized to uppercase,
@@ -22,7 +22,7 @@
 - **Streamlit-safe session updates:** programmatic list/selection changes use staging keys (`_sb_scanner_sync`, `_sb_watch_selected_sync`, `_sb_add_ticker_clear`) applied **before** the `text_area` / `selectbox` / quick-add input are created, so Streamlit does not throw `StreamlitAPIException` when reordering or adding symbols.
 - Default bootstrap watchlist (only when config is missing/deleted):
   - `PLTR,BMNR,AAPL,AMZN,NVDA,AMD,TSLA,SPY,QQQ`
-- `config.json` only stores **watchlist** and **scanner_sort_mode** (legacy keys from older builds are ignored on load).
+- `config.json` stores the keys listed under **Persisted Keys** below (legacy keys from older builds are stripped on load).
 
 ### ✅ Institutional Glass UI Infrastructure
 - Global CSS architecture moved to a **high-density terminal aesthetic**:
@@ -156,6 +156,16 @@ All persistent settings are stored in `config.json` via atomic writes.
 |-----|---------|
 | `watchlist` | Comma-separated scanner tickers |
 | `scanner_sort_mode` | Scanner output order preference |
+| `strat_focus` | Sidebar Strategy **Focus**: `Sell premium`, `Hybrid`, or `Growth` |
+| `strat_horizon` | Sidebar Strategy **Horizon**: `Weekly`, `30 DTE`, or `45 DTE` |
+| `overlay_ema` | EMA overlay on |
+| `overlay_fib` | Fibonacci overlay on |
+| `overlay_gann` | Gann overlay on |
+| `overlay_sr` | Support/resistance overlay on |
+| `overlay_ichi` | Ichimoku overlay on |
+| `overlay_super` | Supertrend overlay on |
+| `overlay_diamonds` | Diamond signals overlay on |
+| `overlay_gold` | Gold zone overlay on |
 
 ---
 
@@ -175,7 +185,7 @@ If you are upgrading from an older version, use this safe sequence:
 4. Open sidebar and verify Scanner Watchlist loads your saved list.
 
 ### About missing keys
-- Old `config.json` files without newer keys (such as `watchlist` and `scanner_sort_mode`) are automatically backfilled by the app’s default config merge.
+- Old `config.json` files without newer keys are automatically backfilled by the app’s default config merge.
 - New keys are saved automatically the next time the related sidebar input changes.
 - No manual JSON editing is required unless you want to seed values ahead of first run.
 
@@ -185,7 +195,17 @@ If you want to prefill watchlist before launch:
 ```json
 {
   "watchlist": "PLTR,BMNR,AAPL,AMZN,NVDA,AMD,TSLA,SPY,QQQ",
-  "scanner_sort_mode": "Custom watchlist order"
+  "scanner_sort_mode": "Custom watchlist order",
+  "strat_focus": "Hybrid",
+  "strat_horizon": "30 DTE",
+  "overlay_ema": true,
+  "overlay_fib": true,
+  "overlay_gann": true,
+  "overlay_sr": true,
+  "overlay_ichi": false,
+  "overlay_super": false,
+  "overlay_diamonds": true,
+  "overlay_gold": true
 }
 ```
 
