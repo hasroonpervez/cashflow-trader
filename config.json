@@ -1,12 +1,4 @@
 {
-  "acct": 100000,
-  "pltr_sh": 670,
-  "pltr_cost": 147.23,
-  "max_risk": 3,
-  "whatsapp_phone": "3143266122",
-  "whatsapp_apikey": "8186573",
-  "alert_threshold": 80,
-  "last_alert_date": "",
   "watchlist": "BMNR,PLTR,NVDA,TSLA,AAPL,AMD,AMZN,SOFI,SPY,QQQ,SOXX",
   "scanner_sort_mode": "Custom watchlist order"
 }

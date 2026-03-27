@@ -18,14 +18,11 @@
 - Watchlist controls:
   - **Reorder / remove** dropdown + full-width **↑ Move up**, **↓ Move down**, **✕ Remove**, **Sort A–Z** (avoids cramped 3-column buttons in the narrow sidebar),
   - **Quick add** + **Add symbol** for a single ticker without editing the whole list,
-  - scan result order: `Custom watchlist order` vs `Highest confluence first` (horizontal radio).
+  - scan result order: `Custom watchlist order` vs `Highest confluence first` (segmented control).
 - **Streamlit-safe session updates:** programmatic list/selection changes use staging keys (`_sb_scanner_sync`, `_sb_watch_selected_sync`, `_sb_add_ticker_clear`) applied **before** the `text_area` / `selectbox` / quick-add input are created, so Streamlit does not throw `StreamlitAPIException` when reordering or adding symbols.
 - Default bootstrap watchlist (only when config is missing/deleted):
   - `PLTR,BMNR,AAPL,AMZN,NVDA,AMD,TSLA,SPY,QQQ`
-- Existing persisted fields are still supported:
-  - `pltr_sh`, `pltr_cost`, `max_risk`
-  - `whatsapp_phone`, `whatsapp_apikey`, `alert_threshold`
-  - `last_alert_date`
+- `config.json` only stores **watchlist** and **scanner_sort_mode** (legacy keys from older builds are ignored on load).
 
 ### ✅ Institutional Glass UI Infrastructure
 - Global CSS architecture moved to a **high-density terminal aesthetic**:
@@ -157,14 +154,6 @@ All persistent settings are stored in `config.json` via atomic writes.
 ### Persisted Keys
 | Key | Purpose |
 |-----|---------|
-| `acct` | Account baseline value |
-| `pltr_sh` | PLTR share count |
-| `pltr_cost` | PLTR average cost basis |
-| `max_risk` | Max risk per trade (%) |
-| `whatsapp_phone` | CallMeBot destination |
-| `whatsapp_apikey` | CallMeBot auth key |
-| `alert_threshold` | Quant Edge alert trigger |
-| `last_alert_date` | Last alert date state |
 | `watchlist` | Comma-separated scanner tickers |
 | `scanner_sort_mode` | Scanner output order preference |
 
@@ -183,10 +172,7 @@ If you are upgrading from an older version, use this safe sequence:
    ```bash
    streamlit run app.py
    ```
-4. Open sidebar and verify:
-   - portfolio values are present,
-   - WhatsApp fields are preserved,
-   - Scanner Watchlist loads your saved list.
+4. Open sidebar and verify Scanner Watchlist loads your saved list.
 
 ### About missing keys
 - Old `config.json` files without newer keys (such as `watchlist` and `scanner_sort_mode`) are automatically backfilled by the app’s default config merge.

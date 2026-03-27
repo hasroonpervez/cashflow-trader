@@ -14,22 +14,20 @@ import yfinance as yf
 from datetime import datetime, timedelta
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-import math, warnings, json, time, os, threading
+import math, warnings, json, time, os
 from pathlib import Path
-try:
-    import urllib.request
-    import urllib.parse
-except ImportError:
-    pass
 warnings.filterwarnings("ignore")
 
 # ─────────────────────────────────────────────────────────────────────────
-# CONFIG PERSISTENCE — alerts + watchlist (no personal portfolio in shared deploys)
+# CONFIG PERSISTENCE — watchlist + scanner prefs only (no secrets / portfolio)
 # ─────────────────────────────────────────────────────────────────────────
 CONFIG_PATH = Path(__file__).parent / "config.json"
-DEFAULT_CONFIG = {"whatsapp_phone": "", "whatsapp_apikey": "", "alert_threshold": 80,
-                  "last_alert_date": "", "watchlist": "PLTR,BMNR,AAPL,AMZN,NVDA,AMD,TSLA,SPY,QQQ",
+DEFAULT_CONFIG = {"watchlist": "PLTR,BMNR,AAPL,AMZN,NVDA,AMD,TSLA,SPY,QQQ",
                   "scanner_sort_mode": "Custom watchlist order"}
+_LEGACY_CONFIG_KEYS = frozenset({
+    "acct", "pltr_sh", "pltr_cost", "max_risk",
+    "whatsapp_phone", "whatsapp_apikey", "alert_threshold", "last_alert_date",
+})
 # Anonymous reference only — used for Kelly / ATR example math (not user portfolio data).
 REF_NOTIONAL = 100_000.0
 RISK_PCT_EXAMPLE = 3.0
@@ -40,7 +38,7 @@ def load_config():
             with open(CONFIG_PATH) as f:
                 saved = json.load(f)
             merged = {**DEFAULT_CONFIG, **saved}
-            for k in ("acct", "pltr_sh", "pltr_cost", "max_risk"):
+            for k in _LEGACY_CONFIG_KEYS:
                 merged.pop(k, None)
             return merged
     except Exception:
@@ -72,23 +70,6 @@ def retry_fetch(fn, retries=3, delay=2):
         if attempt < retries - 1:
             time.sleep(delay * (attempt + 1))
     return None
-
-# ─────────────────────────────────────────────────────────────────────────
-# ALERT HOOK — CallMeBot WhatsApp (non-blocking background thread)
-# ─────────────────────────────────────────────────────────────────────────
-def send_whatsapp_alert(phone, apikey, message):
-    """Non-blocking WhatsApp alert via CallMeBot — fires on background thread."""
-    if not phone or not apikey:
-        return False
-    def _fire():
-        try:
-            encoded = urllib.parse.quote(message)
-            url = f"https://api.callmebot.com/whatsapp.php?phone={phone}&text={encoded}&apikey={apikey}"
-            urllib.request.urlopen(url, timeout=10)
-        except Exception:
-            pass
-    threading.Thread(target=_fire, daemon=True).start()
-    return True
 
 st.set_page_config(page_title="CashFlow Command Center v14", page_icon="💰",
                    layout="wide", initial_sidebar_state="expanded")
@@ -132,9 +113,32 @@ iframe{border:0!important}
 }
 section[data-testid="stSidebar"]{background:var(--bg1)!important;border-right:1px solid var(--bdr)!important;z-index:1000006!important}
 [data-testid="stSidebarUserContent"]{padding-top:100px!important}
-[data-testid="stSidebar"] h1,[data-testid="stSidebar"] h2,[data-testid="stSidebar"] h3,[data-testid="stSidebar"] h4{color:#00e5ff!important}
-[data-testid="stSidebar"] label{color:#ffffff!important;font-weight:600!important}
-[data-testid="stSidebar"] .stMarkdown p,[data-testid="stSidebar"] span{color:#e2e8f0!important}
+[data-testid="stSidebar"] h2,[data-testid="stSidebar"] h3,[data-testid="stSidebar"] h4{color:#00e5ff!important}
+[data-testid="stSidebar"] h1:not(.cf-sidebar-title){color:#00e5ff!important}
+[data-testid="stSidebar"] label{color:#cbd5e1!important;font-weight:600!important}
+[data-testid="stSidebar"] .stMarkdown p:not(.cf-sidebar-subtitle),[data-testid="stSidebar"] span:not(.cf-sidebar-subtitle){color:#e2e8f0!important}
+[data-testid="stSidebar"] .cf-sidebar-brand{padding:4px 2px 8px 2px!important;text-align:center!important}
+[data-testid="stSidebar"] .cf-sidebar-title{
+  font-size:1.5rem!important;font-weight:800!important;margin:0!important;line-height:1.15!important;
+  background:linear-gradient(135deg,#34d399,#38bdf8)!important;
+  -webkit-background-clip:text!important;-webkit-text-fill-color:transparent!important;
+  background-clip:text!important;letter-spacing:-.02em!important;
+}
+[data-testid="stSidebar"] .cf-sidebar-subtitle{
+  color:#8b9cb3!important;font-size:.72rem!important;font-weight:600!important;letter-spacing:.16em!important;
+  text-transform:uppercase!important;margin:8px 0 0 0!important;line-height:1.35!important;
+}
+/* Streamlit sidebar header row (collapse / close) — no neon */
+[data-testid="stSidebar"] [data-testid="stVerticalBlock"] > div:first-child button,
+[data-testid="stSidebar"] button[kind="header"],
+[data-testid="stSidebar"] button[kind="headerNoPadding"]{
+  background:rgba(30,41,59,.88)!important;color:#cbd5e1!important;
+  border:1px solid rgba(100,116,139,.45)!important;border-radius:10px!important;
+  box-shadow:none!important;
+}
+[data-testid="stSidebar"] [data-testid="stVerticalBlock"] > div:first-child button:hover{
+  background:rgba(51,65,85,.9)!important;color:#f1f5f9!important;border-color:rgba(148,163,184,.5)!important;
+}
 /* Sidebar watchlist: stop cramped 3-col buttons from breaking words mid-label */
 [data-testid="stSidebar"] .stButton > button{
   white-space:nowrap!important;text-align:center!important;
@@ -287,8 +291,8 @@ header{display:none!important}
 [data-testid="stAppHeader"]{display:none!important}
 [data-testid^="stHeader"]{display:none!important}
 @keyframes sobg{
-  0%,100%{box-shadow:0 0 20px rgba(0,229,255,.6)}
-  50%{box-shadow:0 0 35px rgba(0,229,255,1),0 0 70px rgba(0,229,255,.35)}
+  0%,100%{box-shadow:0 2px 10px rgba(0,229,255,.2)}
+  50%{box-shadow:0 4px 14px rgba(0,229,255,.35)}
 }
 .sticky-nav{
   position:fixed;top:0;left:0;width:100%;height:var(--nav-h);
@@ -308,18 +312,18 @@ header{display:none!important}
 }
 .cf-vip-fab{
   position:fixed!important;top:80px!important;left:20px!important;z-index:1000008!important;
-  width:56px!important;height:56px!important;margin:0!important;padding:0!important;border-radius:50%!important;
-  border:2px solid rgba(255,255,255,.4)!important;
-  background:#00e5ff!important;color:#080c14!important;font-size:22px!important;font-weight:800!important;line-height:1!important;
+  width:52px!important;height:52px!important;margin:0!important;padding:0!important;border-radius:12px!important;
+  border:1px solid rgba(100,116,139,.45)!important;
+  background:rgba(15,23,42,.92)!important;color:#e2e8f0!important;font-size:20px!important;font-weight:700!important;line-height:1!important;
   cursor:pointer!important;display:flex!important;align-items:center!important;justify-content:center!important;
-  box-shadow:0 0 22px rgba(0,229,255,.65)!important;animation:sobg 2s ease-in-out infinite;
-  transition:transform .15s,background .15s,box-shadow .15s!important;
+  box-shadow:0 2px 12px rgba(0,0,0,.35)!important;animation:none!important;
+  transition:transform .15s,background .15s,border-color .15s,box-shadow .15s!important;
   font-family:'Inter',system-ui,sans-serif!important;
   -webkit-appearance:none!important;appearance:none!important;
 }
 .cf-vip-fab:hover{
-  background:#00b8d4!important;transform:scale(1.08)!important;animation:none!important;
-  box-shadow:0 0 36px rgba(0,229,255,.9)!important;
+  background:rgba(30,41,59,.95)!important;color:#fff!important;transform:scale(1.04)!important;
+  border-color:rgba(0,229,255,.45)!important;box-shadow:0 4px 18px rgba(0,229,255,.2)!important;
 }
 .sticky-nav-track a{
   pointer-events:auto!important;z-index:100000!important;
@@ -392,30 +396,46 @@ div[data-testid="stMetricValue"], .mono, .glance-value, .ticker, .price-value{
 .earn-meta{margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.08);display:flex;gap:12px;flex-wrap:wrap}
 .earn-pill{padding:6px 10px;border-radius:999px;border:1px solid rgba(0,229,255,.35);background:rgba(2,6,23,.66);color:#cbd5e1;font-size:.82rem}
 @media(max-width:900px){.earnings-intel-grid{grid-template-columns:1fr}}
-/* ── Sidebar: segmented control = sliding pill (scanner / focus / horizon) ── */
+/* ── Sidebar: segmented control = sliding pill (force dark theme; no light-on-light) ── */
 [data-testid="stSidebar"] [data-baseweb="segmented-control"]{
   width:100%!important;max-width:100%!important;
-  background:linear-gradient(180deg,rgba(15,23,42,.96),rgba(8,12,20,.99))!important;
-  border:1px solid rgba(0,229,255,.28)!important;border-radius:12px!important;padding:5px!important;
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 8px 28px rgba(2,6,23,.55)!important;
+  background:#0c1220!important;
+  border:1px solid rgba(51,65,85,.85)!important;border-radius:12px!important;padding:4px!important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.04)!important;
   min-height:44px!important;
 }
 [data-testid="stSidebar"] [data-baseweb="segmented-control"] [role="button"]{
-  border-radius:9px!important;padding:8px 10px!important;min-height:36px!important;
-  font-weight:600!important;font-size:.76rem!important;letter-spacing:.02em!important;
-  border:none!important;transition:background .18s ease,color .18s ease,box-shadow .18s ease!important;
-  flex:1 1 0!important;justify-content:center!important;
+  border-radius:8px!important;padding:8px 8px!important;min-height:36px!important;
+  font-weight:600!important;font-size:.74rem!important;letter-spacing:.01em!important;
+  border:1px solid transparent!important;transition:background .15s ease,color .15s ease!important;
+  flex:1 1 0!important;justify-content:center!important;outline:none!important;
+  box-shadow:none!important;
+}
+[data-testid="stSidebar"] [data-baseweb="segmented-control"] [role="button"] *{
+  color:inherit!important;background:transparent!important;
 }
 [data-testid="stSidebar"] [data-baseweb="segmented-control"] [role="button"][aria-selected="true"]{
-  background:linear-gradient(135deg,rgba(0,229,255,.38),rgba(6,182,212,.2))!important;
+  background:linear-gradient(180deg,#22d3ee,#0ea5e9)!important;
+  color:#f8fafc!important;border-color:rgba(255,255,255,.12)!important;
+  box-shadow:0 1px 0 rgba(255,255,255,.2) inset,0 4px 14px rgba(14,165,233,.35)!important;
+}
+[data-testid="stSidebar"] [data-baseweb="segmented-control"] [role="button"][aria-selected="true"] *{
   color:#f8fafc!important;
-  box-shadow:0 0 0 1px rgba(0,229,255,.5),0 4px 20px rgba(0,229,255,.25)!important;
 }
 [data-testid="stSidebar"] [data-baseweb="segmented-control"] [role="button"][aria-selected="false"]{
-  color:#94a3b8!important;background:transparent!important;
+  color:#cbd5e1!important;background:rgba(15,23,42,.4)!important;
+}
+[data-testid="stSidebar"] [data-baseweb="segmented-control"] [role="button"][aria-selected="false"] *{
+  color:#cbd5e1!important;
 }
 [data-testid="stSidebar"] [data-baseweb="segmented-control"] [role="button"][aria-selected="false"]:hover{
-  color:#e2e8f0!important;background:rgba(148,163,184,.08)!important;
+  color:#f1f5f9!important;background:rgba(51,65,85,.65)!important;
+}
+[data-testid="stSidebar"] [data-baseweb="segmented-control"] [role="button"][aria-selected="false"]:hover *{
+  color:#f1f5f9!important;
+}
+[data-testid="stSidebar"] [data-baseweb="segmented-control"] [role="button"]:focus-visible{
+  box-shadow:0 0 0 2px rgba(34,211,238,.45)!important;
 }
 /* ── Sidebar: sliders (Quant Edge threshold) ── */
 [data-testid="stSidebar"] [data-baseweb="slider"] [data-baseweb="thumb"]{
@@ -1816,11 +1836,13 @@ def main():
 
     # ── SIDEBAR ──
     with st.sidebar:
-        st.markdown("""<div style='text-align:center;padding:20px 0'>
-            <h1 style='font-size:1.5rem;background:linear-gradient(135deg,#10b981,#3b82f6);
-            -webkit-background-clip:text;-webkit-text-fill-color:transparent;font-weight:800;margin-bottom:4px'>CASHFLOW</h1>
-            <p style='color:#64748b;font-size:.65rem;letter-spacing:.15em;text-transform:uppercase'>
-            COMMAND CENTER v14.0</p></div>""", unsafe_allow_html=True)
+        st.markdown(
+            """<div class="cf-sidebar-brand">
+            <h1 class="cf-sidebar-title">CASHFLOW</h1>
+            <p class="cf-sidebar-subtitle">Command center · v14</p>
+            </div>""",
+            unsafe_allow_html=True,
+        )
         st.markdown("---")
         st.markdown("#### \U0001f50e Stock & watchlist")
         st.caption(
@@ -2008,33 +2030,6 @@ def main():
             show_sr = st.toggle("S/R levels", value=True, key="sb_sr")
             show_super = st.toggle("Supertrend", value=False, key="sb_super")
             show_gold_zone = st.toggle("Gold zone", value=True, key="sb_gold_zone")
-
-        st.markdown("---")
-
-        # Alert settings
-        st.markdown("#### WhatsApp Alerts")
-        wa_phone = st.text_input("WhatsApp Number", value=cfg.get("whatsapp_phone", ""),
-                                  help="Your number with country code, no + (e.g. 13143266122)", key="sb_wa_phone")
-        wa_apikey = st.text_input("WhatsApp API Key", value=cfg.get("whatsapp_apikey", ""),
-                                   help="Your CallMeBot API key (e.g. 8186573)", key="sb_wa_apikey")
-        st.markdown(
-            '<p class="cf-widget-hint">Drag to set when WhatsApp should fire (if configured below).</p>',
-            unsafe_allow_html=True,
-        )
-        alert_thresh = st.slider(
-            "Alert when Quant Edge ≥",
-            50,
-            95,
-            cfg.get("alert_threshold", 80),
-            help="Send alert when the score crosses this threshold.",
-            key="sb_alert_thresh",
-        )
-
-        # Persist alert settings
-        alert_cfg = {**cfg, "whatsapp_phone": wa_phone, "whatsapp_apikey": wa_apikey, "alert_threshold": alert_thresh}
-        if alert_cfg != cfg:
-            save_config(alert_cfg)
-            cfg = alert_cfg
 
         st.markdown("---")
         st.markdown("<div style='text-align:center;color:#64748b;font-size:.65rem'>Data: Yahoo Finance &middot; Not advice</div>", unsafe_allow_html=True)
@@ -2442,21 +2437,6 @@ def main():
     hi_al = [a for a in al if a["p"] == "HIGH"]
     if hi_al:
         st.markdown(f"<div class='ac'>\U0001f514 <strong>{len(al)} Alert{'s' if len(al) > 1 else ''}</strong>: {hi_al[0]['m']}{'<em> +' + str(len(al) - 1) + ' more</em>' if len(al) > 1 else ''}</div>", unsafe_allow_html=True)
-
-    # ── SEND PUSH ALERTS (persistent — survives page refresh) ──
-    today_str = datetime.now().strftime("%Y-%m-%d")
-    already_alerted = cfg.get("last_alert_date") == today_str
-    if qs >= alert_thresh and not already_alerted and not earnings_near:
-        alert_msg = f"CASHFLOW ALERT: {ticker} Quant Edge {qs:.0f}/100. {action_strat}\n{action_plain}\nPrice: ${price:.2f} VIX {vix_v:.1f}"
-        sent = False
-        if wa_phone and wa_apikey:
-            sent = send_whatsapp_alert(wa_phone, wa_apikey, alert_msg)
-        if sent:
-            cfg["last_alert_date"] = today_str
-            save_config(cfg)
-            st.toast(f"WhatsApp alert sent! QE={qs:.0f} for {ticker}")
-    elif earnings_near and qs >= alert_thresh:
-        st.toast(f"Alert paused. Earnings within 14 days for {ticker}.")
 
     # ══════════════════════════════════════════════════════════════════
     #  SECTION 1 \u2014 TECHNICAL CHART (always visible)
