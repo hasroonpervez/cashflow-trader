@@ -2086,15 +2086,15 @@ def main():
         )
         o1, o2 = st.columns(2)
         with o1:
-            show_ind = st.toggle("EMAs & Bollinger", value=True, key="sb_ema")
-            show_gann = st.toggle("Gann Sq9", value=True, key="sb_gann")
-            show_ichi = st.toggle("Ichimoku", value=False, key="sb_ichi")
-            show_diamonds = st.toggle("Diamonds", value=True, key="sb_diamonds")
+            show_ind = st.toggle("EMAs & Bollinger", key="sb_ema")
+            show_gann = st.toggle("Gann Sq9", key="sb_gann")
+            show_ichi = st.toggle("Ichimoku", key="sb_ichi")
+            show_diamonds = st.toggle("Diamonds", key="sb_diamonds")
         with o2:
-            show_fib = st.toggle("Fibonacci", value=True, key="sb_fib")
-            show_sr = st.toggle("S/R levels", value=True, key="sb_sr")
-            show_super = st.toggle("Supertrend", value=False, key="sb_super")
-            show_gold_zone = st.toggle("Gold zone", value=True, key="sb_gold_zone")
+            show_fib = st.toggle("Fibonacci", key="sb_fib")
+            show_sr = st.toggle("S/R levels", key="sb_sr")
+            show_super = st.toggle("Supertrend", key="sb_super")
+            show_gold_zone = st.toggle("Gold zone", key="sb_gold_zone")
 
         prefs_cfg = {
             **cfg,
