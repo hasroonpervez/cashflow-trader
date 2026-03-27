@@ -396,46 +396,57 @@ div[data-testid="stMetricValue"], .mono, .glance-value, .ticker, .price-value{
 .earn-meta{margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.08);display:flex;gap:12px;flex-wrap:wrap}
 .earn-pill{padding:6px 10px;border-radius:999px;border:1px solid rgba(0,229,255,.35);background:rgba(2,6,23,.66);color:#cbd5e1;font-size:.82rem}
 @media(max-width:900px){.earnings-intel-grid{grid-template-columns:1fr}}
-/* ── Sidebar: segmented control = sliding pill (force dark theme; no light-on-light) ── */
-[data-testid="stSidebar"] [data-baseweb="segmented-control"]{
-  width:100%!important;max-width:100%!important;
-  background:#0c1220!important;
-  border:1px solid rgba(51,65,85,.85)!important;border-radius:12px!important;padding:4px!important;
+/* ── Sidebar: horizontal radio groups (Scanner / Focus / Horizon) — dark, readable on all hosts ── */
+[data-testid="stSidebar"] [data-baseweb="radio"]{
+  background:#0c1220!important;border:1px solid #334155!important;border-radius:12px!important;
+  padding:6px 8px!important;flex-wrap:wrap!important;gap:6px!important;
   box-shadow:inset 0 1px 0 rgba(255,255,255,.04)!important;
-  min-height:44px!important;
 }
-[data-testid="stSidebar"] [data-baseweb="segmented-control"] [role="button"]{
-  border-radius:8px!important;padding:8px 8px!important;min-height:36px!important;
-  font-weight:600!important;font-size:.74rem!important;letter-spacing:.01em!important;
-  border:1px solid transparent!important;transition:background .15s ease,color .15s ease!important;
-  flex:1 1 0!important;justify-content:center!important;outline:none!important;
-  box-shadow:none!important;
+[data-testid="stSidebar"] [data-baseweb="radio"] label,
+[data-testid="stSidebar"] [role="radiogroup"] label{
+  background:#1e293b!important;color:#f8fafc!important;border:1px solid #475569!important;
+  border-radius:10px!important;padding:9px 12px!important;margin:0 4px 4px 0!important;
+  font-weight:600!important;font-size:.76rem!important;letter-spacing:.01em!important;
+  cursor:pointer!important;transition:background .15s,border-color .15s,color .15s!important;
 }
-[data-testid="stSidebar"] [data-baseweb="segmented-control"] [role="button"] *{
-  color:inherit!important;background:transparent!important;
+[data-testid="stSidebar"] [data-baseweb="radio"] label:hover,
+[data-testid="stSidebar"] [role="radiogroup"] label:hover{
+  background:#334155!important;border-color:#64748b!important;color:#fff!important;
 }
-[data-testid="stSidebar"] [data-baseweb="segmented-control"] [role="button"][aria-selected="true"]{
+[data-testid="stSidebar"] [data-baseweb="radio"] label:has(input:checked),
+[data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked){
   background:linear-gradient(180deg,#22d3ee,#0ea5e9)!important;
-  color:#f8fafc!important;border-color:rgba(255,255,255,.12)!important;
-  box-shadow:0 1px 0 rgba(255,255,255,.2) inset,0 4px 14px rgba(14,165,233,.35)!important;
+  color:#fff!important;border-color:rgba(255,255,255,.25)!important;
+  box-shadow:0 2px 12px rgba(14,165,233,.4)!important;
 }
-[data-testid="stSidebar"] [data-baseweb="segmented-control"] [role="button"][aria-selected="true"] *{
-  color:#f8fafc!important;
+[data-testid="stSidebar"] [data-baseweb="radio"] label:has(input:checked) *,
+[data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) *{
+  color:#fff!important;
 }
-[data-testid="stSidebar"] [data-baseweb="segmented-control"] [role="button"][aria-selected="false"]{
-  color:#cbd5e1!important;background:rgba(15,23,42,.4)!important;
+[data-testid="stSidebar"] [data-baseweb="radio"] input[type="radio"],
+[data-testid="stSidebar"] [role="radiogroup"] input[type="radio"]{
+  accent-color:#22d3ee!important;
 }
-[data-testid="stSidebar"] [data-baseweb="segmented-control"] [role="button"][aria-selected="false"] *{
-  color:#cbd5e1!important;
+/* Kill theme light fills on radio wrappers (Streamlit Cloud) */
+[data-testid="stSidebar"] [data-baseweb="radio"] > div,
+[data-testid="stSidebar"] [role="radiogroup"] > div{
+  background:transparent!important;
 }
-[data-testid="stSidebar"] [data-baseweb="segmented-control"] [role="button"][aria-selected="false"]:hover{
-  color:#f1f5f9!important;background:rgba(51,65,85,.65)!important;
+/* Base Web v12+: options as [role="radio"] divs (not always <label>) */
+[data-testid="stSidebar"] [data-baseweb="radio"] [role="radio"]{
+  background:#1e293b!important;color:#f8fafc!important;border:1px solid #475569!important;
+  border-radius:10px!important;padding:9px 12px!important;margin:0 6px 6px 0!important;
+  font-weight:600!important;font-size:.76rem!important;
 }
-[data-testid="stSidebar"] [data-baseweb="segmented-control"] [role="button"][aria-selected="false"]:hover *{
+[data-testid="stSidebar"] [data-baseweb="radio"] [role="radio"][aria-checked="true"]{
+  background:linear-gradient(180deg,#22d3ee,#0ea5e9)!important;color:#fff!important;
+  border-color:rgba(255,255,255,.25)!important;box-shadow:0 2px 12px rgba(14,165,233,.4)!important;
+}
+[data-testid="stSidebar"] [data-baseweb="radio"] [role="radio"][aria-checked="false"]{
   color:#f1f5f9!important;
 }
-[data-testid="stSidebar"] [data-baseweb="segmented-control"] [role="button"]:focus-visible{
-  box-shadow:0 0 0 2px rgba(34,211,238,.45)!important;
+[data-testid="stSidebar"] [data-baseweb="radio"] [role="radio"]:hover{
+  background:#334155!important;border-color:#64748b!important;
 }
 /* ── Sidebar: sliders (Quant Edge threshold) ── */
 [data-testid="stSidebar"] [data-baseweb="slider"] [data-baseweb="thumb"]{
@@ -1879,20 +1890,17 @@ def main():
             st.session_state.pop("sb_watch_selected", None)
             st.info("Add at least one symbol in the box above (e.g. PLTR, NVDA).")
 
-        _sort_default = (
-            "Custom order"
-            if cfg.get("scanner_sort_mode", "Custom watchlist order") == "Custom watchlist order"
-            else "Confluence first"
+        _scan_idx = (
+            0 if cfg.get("scanner_sort_mode", "Custom watchlist order") == "Custom watchlist order" else 1
         )
-        _scan_seg = st.segmented_control(
+        _scan_seg = st.radio(
             "Scanner order",
-            options=["Custom order", "Confluence first"],
-            default=_sort_default,
-            key="sb_scan_seg",
+            ["Custom order", "Confluence first"],
+            index=_scan_idx,
+            horizontal=True,
+            key="sb_scan_radio",
             help="Custom: follow your list order. Confluence: strongest setups first.",
         )
-        if _scan_seg is None:
-            _scan_seg = _sort_default
         scanner_sort_mode = (
             "Custom watchlist order" if _scan_seg == "Custom order" else "Highest confluence first"
         )
@@ -1995,24 +2003,22 @@ def main():
             '<p class="cf-widget-hint">Pick how you think about trades and the typical option window.</p>',
             unsafe_allow_html=True,
         )
-        strat_mode = st.segmented_control(
+        strat_mode = st.radio(
             "Focus",
-            options=["Sell premium", "Hybrid", "Growth"],
-            default="Hybrid",
-            key="sb_strat_seg",
+            ["Sell premium", "Hybrid", "Growth"],
+            index=1,
+            horizontal=True,
+            key="sb_strat_radio",
             help="Sell premium: income first. Growth: more directional risk.",
         )
-        if strat_mode is None:
-            strat_mode = "Hybrid"
-        horizon = st.segmented_control(
+        horizon = st.radio(
             "Horizon",
-            options=["Weekly", "30 DTE", "45 DTE"],
-            default="30 DTE",
-            key="sb_horizon_seg",
+            ["Weekly", "30 DTE", "45 DTE"],
+            index=1,
+            horizontal=True,
+            key="sb_horizon_radio",
             help="Rough target days-to-expiration for planning.",
         )
-        if horizon is None:
-            horizon = "30 DTE"
         st.markdown("---")
         st.markdown("#### Chart overlays")
         st.markdown(

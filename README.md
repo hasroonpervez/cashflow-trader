@@ -18,7 +18,7 @@
 - Watchlist controls:
   - **Reorder / remove** dropdown + full-width **↑ Move up**, **↓ Move down**, **✕ Remove**, **Sort A–Z** (avoids cramped 3-column buttons in the narrow sidebar),
   - **Quick add** + **Add symbol** for a single ticker without editing the whole list,
-  - scan result order: `Custom watchlist order` vs `Highest confluence first` (segmented control).
+  - scan result order: `Custom watchlist order` vs `Highest confluence first` (horizontal radio).
 - **Streamlit-safe session updates:** programmatic list/selection changes use staging keys (`_sb_scanner_sync`, `_sb_watch_selected_sync`, `_sb_add_ticker_clear`) applied **before** the `text_area` / `selectbox` / quick-add input are created, so Streamlit does not throw `StreamlitAPIException` when reordering or adding symbols.
 - Default bootstrap watchlist (only when config is missing/deleted):
   - `PLTR,BMNR,AAPL,AMZN,NVDA,AMD,TSLA,SPY,QQQ`
