@@ -8,6 +8,13 @@
 
 ## What Changed In This Release
 
+### ✅ Performance & mobile
+- **`st.cache_resource`** caches Yahoo **`Ticker`** objects; OHLC still uses **`st.cache_data`** with TTL.
+- **Market Scanner** uses a **thread pool** (up to 8 workers) so watchlist symbols fetch in parallel.
+- **`load_config()`** merges **`st.secrets`** (scalar top-level keys only, for Streamlit Cloud) with **`config.json`**.
+- **`mini_mode`** (sidebar → Performance) persists in `config.json` and **skips heavy Plotly** (technical stack, volume-profile bar chart, simulator equity chart) while keeping the glance row, execution strip, quant dashboard, and scanner.
+- **CSS:** `touch-action: manipulation`, `min-height: 100dvh` on the app shell, and touch hints on the sticky nav / FAB to reduce mobile zoom/jitter.
+
 ### ✅ Technical chart — four separate Plotly panels
 - The **Technical Chart** section renders **four charts** (not one tall stacked figure): **Price & overlays**, **Volume**, **RSI (14)**, and **MACD**.
 - **Price** includes candles, EMAs, Bollinger (when enabled), optional Ichimoku / Supertrend, Fibonacci / Gann / S/R levels, Gold zone, and diamond markers — with a dedicated **Overlays** legend.
@@ -174,6 +181,7 @@ All persistent settings are stored in `config.json` via atomic writes.
 | `overlay_super` | Supertrend overlay on |
 | `overlay_diamonds` | Diamond signals overlay on |
 | `overlay_gold` | Gold zone overlay on |
+| `mini_mode` | Sidebar **Mini mode** — lighter UI (no heavy Plotly blocks listed above) |
 
 ---
 
@@ -213,7 +221,8 @@ If you want to prefill watchlist before launch:
   "overlay_ichi": false,
   "overlay_super": false,
   "overlay_diamonds": true,
-  "overlay_gold": true
+  "overlay_gold": true,
+  "mini_mode": false
 }
 ```
 

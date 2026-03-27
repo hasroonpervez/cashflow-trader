@@ -11,6 +11,7 @@ import html as _html_mod
 import pandas as pd
 import numpy as np
 import yfinance as yf
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 import plotly.graph_objects as go
 import math, warnings, json, time, os
@@ -26,6 +27,7 @@ DEFAULT_CONFIG = {
     "scanner_sort_mode": "Custom watchlist order",
     "strat_focus": "Hybrid",
     "strat_horizon": "30 DTE",
+    "mini_mode": False,
     "overlay_ema": True,
     "overlay_fib": True,
     "overlay_gann": True,
@@ -43,18 +45,38 @@ _LEGACY_CONFIG_KEYS = frozenset({
 REF_NOTIONAL = 100_000.0
 RISK_PCT_EXAMPLE = 3.0
 
+def _streamlit_secrets_flat():
+    """Scalar top-level keys from st.secrets (Streamlit Cloud). Skips nested tables."""
+    try:
+        if not hasattr(st, "secrets"):
+            return {}
+        sec = st.secrets
+        if sec is None or len(sec) == 0:
+            return {}
+        out = {}
+        for k in sec:
+            v = sec[k]
+            if isinstance(v, (dict, list)):
+                continue
+            out[k] = v
+        return out
+    except Exception:
+        return {}
+
+
 def load_config():
+    """Local `config.json` merged over defaults; optional `st.secrets` overlay for Cloud."""
+    merged = {**DEFAULT_CONFIG, **_streamlit_secrets_flat()}
     try:
         if CONFIG_PATH.exists():
             with open(CONFIG_PATH) as f:
                 saved = json.load(f)
-            merged = {**DEFAULT_CONFIG, **saved}
+            merged = {**merged, **saved}
             for k in _LEGACY_CONFIG_KEYS:
                 merged.pop(k, None)
-            return merged
     except Exception:
         pass
-    return DEFAULT_CONFIG.copy()
+    return merged
 
 def save_config(cfg):
     """Atomic write — writes to .tmp first, then renames. Zero corruption risk."""
@@ -77,6 +99,8 @@ def _hydrate_sidebar_prefs(cfg):
         opts = ("Weekly", "30 DTE", "45 DTE")
         v = cfg.get("strat_horizon", DEFAULT_CONFIG["strat_horizon"])
         st.session_state["sb_horizon_radio"] = v if v in opts else DEFAULT_CONFIG["strat_horizon"]
+    if "sb_mini_mode" not in st.session_state:
+        st.session_state["sb_mini_mode"] = bool(cfg.get("mini_mode", DEFAULT_CONFIG["mini_mode"]))
     for wkey, ckey, default in (
         ("sb_ema", "overlay_ema", True),
         ("sb_fib", "overlay_fib", True),
@@ -110,6 +134,13 @@ def retry_fetch(fn, retries=3, delay=2):
 st.set_page_config(page_title="CashFlow Command Center v14", page_icon="💰",
                    layout="wide", initial_sidebar_state="expanded")
 
+
+@st.cache_resource
+def _yfinance_ticker(symbol: str):
+    """Reuse Yahoo Finance Ticker objects (connections) across cached data fetches."""
+    return yf.Ticker(str(symbol).upper().strip())
+
+
 # Plotly toolbar: vertical mode bar avoids clashing with the legend
 _PLOTLY_UI_CONFIG = {
     "displayModeBar": True,
@@ -130,7 +161,12 @@ _CSS = """
 --blue:#3b82f6;--purple:#8b5cf6;--amber:#f59e0b;--cyan:#06b6d4;--cyan-bright:#00e5ff;
 --success:#00FFA3;--danger:#FF005C;--gold:#FFD700;
 --glass-bg:rgba(15,23,42,.65);--glass-bdr:rgba(255,255,255,.1);--nav-h:52px}
-.stApp{background:var(--bg0)!important;font-family:'Inter',sans-serif!important}
+.stApp{
+  background:var(--bg0)!important;font-family:'Inter',sans-serif!important;
+  min-height:100dvh;min-height:-webkit-fill-available;
+  touch-action:manipulation;-webkit-tap-highlight-color:transparent;
+}
+button,[role="button"]{touch-action:manipulation;-webkit-tap-highlight-color:transparent}
 .main .block-container{max-width:1400px!important;padding-top:calc(var(--nav-h) + 14px)!important;padding-left:.7rem!important;padding-right:.7rem!important}
 /* Shell row: fixed nav leaves no flow; collapse markdown + hide bootstrap iframe chrome */
 [data-testid="stMarkdownContainer"]:has(nav.sticky-nav){
@@ -332,7 +368,7 @@ header{display:none!important}
 }
 .sticky-nav{
   position:fixed;top:0;left:0;width:100%;height:var(--nav-h);
-  z-index:99999;
+  z-index:99999;touch-action:manipulation;
   pointer-events:auto!important;
   background:rgba(8,12,20,.8)!important;
   backdrop-filter:blur(15px);-webkit-backdrop-filter:blur(15px);
@@ -348,6 +384,7 @@ header{display:none!important}
 }
 .cf-vip-fab{
   position:fixed!important;top:80px!important;left:20px!important;z-index:1000008!important;
+  touch-action:manipulation;
   width:52px!important;height:52px!important;margin:0!important;padding:0!important;border-radius:12px!important;
   border:1px solid rgba(100,116,139,.45)!important;
   background:rgba(15,23,42,.92)!important;color:#e2e8f0!important;font-size:20px!important;font-weight:700!important;line-height:1!important;
@@ -693,7 +730,7 @@ st.markdown(
 @st.cache_data(ttl=300)
 def fetch_stock(ticker, period="1y", interval="1d"):
     def _fetch():
-        df = yf.Ticker(ticker).history(period=period, interval=interval)
+        df = _yfinance_ticker(ticker).history(period=period, interval=interval)
         if df.empty:
             return None
         df.index = pd.to_datetime(df.index)
@@ -706,7 +743,7 @@ def fetch_stock(ticker, period="1y", interval="1d"):
 def fetch_intraday_series(symbol, period="5d", interval="1h"):
     """Cached intraday close series for compact UI sparklines."""
     try:
-        hist = yf.Ticker(symbol).history(period=period, interval=interval)
+        hist = _yfinance_ticker(symbol).history(period=period, interval=interval)
         if hist is None or hist.empty or "Close" not in hist.columns:
             return pd.Series(dtype=float)
         s = pd.to_numeric(hist["Close"], errors="coerce").dropna()
@@ -717,7 +754,7 @@ def fetch_intraday_series(symbol, period="5d", interval="1h"):
 @st.cache_data(ttl=300)
 def fetch_info(ticker):
     try:
-        return yf.Ticker(ticker).info
+        return _yfinance_ticker(ticker).info
     except Exception:
         return {}
 
@@ -726,7 +763,7 @@ def fetch_options(ticker, exp=None):
     """Fetch options chain. Always returns ((calls_df, puts_df), exps) for stable unpacking."""
     empty = (pd.DataFrame(), pd.DataFrame())
     try:
-        t = yf.Ticker(str(ticker).upper())
+        t = _yfinance_ticker(ticker)
         raw_exps = getattr(t, "options", None)
         if raw_exps is None:
             return empty, []
@@ -745,7 +782,7 @@ def fetch_options(ticker, exp=None):
 @st.cache_data(ttl=600)
 def fetch_news(ticker):
     try:
-        raw = yf.Ticker(ticker).news or []
+        raw = _yfinance_ticker(ticker).news or []
         items = []
         for n in raw[:8]:
             title = n.get("title") or n.get("content", {}).get("title", "")
@@ -770,7 +807,7 @@ def fetch_news(ticker):
 def fetch_earnings_date(ticker):
     """Fetch next earnings date from yfinance corporate calendar."""
     try:
-        cal = yf.Ticker(ticker).calendar
+        cal = _yfinance_ticker(ticker).calendar
         if cal is None:
             return None
         if isinstance(cal, dict):
@@ -793,7 +830,7 @@ def fetch_macro():
     data = {}
     for label, sym in {"VIX": "^VIX", "10Y Yield": "^TNX", "DXY (UUP)": "UUP", "SPY": "SPY", "QQQ": "QQQ"}.items():
         try:
-            df = yf.Ticker(sym).history(period="5d")
+            df = _yfinance_ticker(sym).history(period="5d")
             if not df.empty:
                 last = df["Close"].iloc[-1]
                 prev = df["Close"].iloc[-2] if len(df) >= 2 else last
@@ -1145,13 +1182,14 @@ def calc_vol_skew(price, calls_df, puts_df, otm_pct=0.10):
 # ═════════════════════════════════════════════════════════════════════════
 
 def quant_edge_score(df, vix_val=None):
-    """Composite 0-100 using 5 NON-CORRELATED dimensions:
-    1. Trend (EMA stack) — price structure
-    2. Momentum (RSI only — single oscillator, not RSI+MACD+CCI which are collinear)
-    3. Volume (OBV) — independent of price momentum
-    4. Volatility (ATR regime + VIX) — separate dimension
-    5. Structure (market structure BOS/CHOCH) — pattern recognition
-    Each weighted equally at 20% to avoid false confidence from redundant signals.
+    """Composite 0-100 using five de-correlated dimensions (no Supertrend here — that
+    belongs in confluence/diamond context, not double-counted with EMA trend):
+    1. Trend — EMA stack only (structure of moving averages)
+    2. Momentum — RSI only (single oscillator)
+    3. Volume — OBV vs its own history
+    4. Volatility — ATR regime + optional VIX
+    5. Structure — market-structure label (not redundant with EMA slope)
+    Equal 20% weights.
     """
     sc = {}; close = df["Close"].iloc[-1]
     # 1. TREND (30% weight — most important for CC sellers)
@@ -1245,10 +1283,9 @@ def calc_gold_zone(df, df_wk=None):
 #  CONFLUENCE POINTS — 0-to-9 scoring (Startup.io-inspired, enhanced)
 # ═════════════════════════════════════════════════════════════════════════
 
-@st.cache_data(ttl=300)
-def calc_confluence_points(df, df_wk=None, vix_val=None):
-    """Compute 0-9 bullish confluence score with per-component breakdown.
-    Returns (score, max_score, breakdown_dict, bearish_score)."""
+def _calc_confluence_points_core(df, df_wk=None, vix_val=None):
+    """Same scoring as the dashboard confluence meter — not cached.
+    Safe to call on ``df.iloc[:i+1]`` for point-in-time diamond detection."""
     score = 0
     breakdown = {}
     price = df["Close"].iloc[-1]
@@ -1303,63 +1340,84 @@ def calc_confluence_points(df, df_wk=None, vix_val=None):
     return score, 9, breakdown, bearish
 
 
+@st.cache_data(ttl=300)
+def calc_confluence_points(df, df_wk=None, vix_val=None):
+    """Compute 0-9 bullish confluence score with per-component breakdown.
+    Returns (score, max_score, breakdown_dict, bearish_score)."""
+    return _calc_confluence_points_core(df, df_wk, vix_val)
+
+
 # ═════════════════════════════════════════════════════════════════════════
 #  DIAMOND SIGNAL DETECTION — Blue (buy) & Pink (exit/take-profit)
 # ═════════════════════════════════════════════════════════════════════════
 
+def _blue_diamond_institutional_ok(sub):
+    """Skip blue diamonds into parabolic blow-offs (ATR at rolling max) or thin volume."""
+    if len(sub) < 22:
+        return False
+    atr = TA.atr(sub)
+    ai = float(atr.iloc[-1])
+    if pd.isna(ai) or ai <= 0:
+        return False
+    win = min(252, len(atr))
+    atr_hi = float(atr.iloc[-win:].max())
+    if ai >= atr_hi * 0.998:
+        return False
+    vol = float(sub["Volume"].iloc[-1])
+    vma = float(sub["Volume"].iloc[-20:].mean())
+    if vma <= 0:
+        return False
+    return vol >= 1.2 * vma
+
+
+def _index_pos(idx_obj):
+    """Normalize df.index.get_loc result to a single integer position."""
+    if isinstance(idx_obj, (int, np.integer)):
+        return int(idx_obj)
+    if isinstance(idx_obj, slice):
+        return idx_obj.start
+    arr = np.asarray(idx_obj)
+    return int(arr.flat[-1])
+
+
 @st.cache_data(ttl=300)
 def detect_diamonds(df, df_wk=None, lookback=None):
-    """Blue Diamond: daily confluence jumps to 7+ and weekly bias is BULLISH or MIXED.
-    Pink Diamond: daily collapse or overbought fade and weekly bias is BEARISH or MIXED."""
+    """Blue Diamond: same 0–9 confluence as the UI jumps to 7+ (cross above threshold),
+    with weekly bias not bearish; **plus** ATR-not-at-extreme and volume ≥ 1.2× 20d avg.
+    Uses **point-in-time** scores via ``df.iloc[:i+1]``.
+
+    Pink Diamond: confluence collapses or overbought fade vs prior bar, with weekly bias
+    not strongly bullish-only."""
     diamonds = []
     n = len(df)
     if n < 55:
         return diamonds
 
-    st_l, st_d = TA.supertrend(df)
-    _, _, sa, sb, _ = TA.ichimoku(df)
-    adx_v, dip, din = TA.adx(df)
-    obv_s = TA.obv(df)
-    rsi_s = TA.rsi(df["Close"])
-    struct, _, _ = TA.market_structure(df)
-    gold_zone, _ = calc_gold_zone(df, df_wk)
+    rsi_series = TA.rsi(df["Close"])
 
     wk_bias = "UNKNOWN"
     if df_wk is not None and len(df_wk) >= 26:
         wk_bias, _ = weekly_trend_label(df_wk)
 
-    start = max(52, 26)
+    # First index where slice has 55 rows (need stable Ichimoku / gold / structure).
+    start = 54
     prev_score = 0
 
     for i in range(start, n):
-        sc = 0
-        pi = df["Close"].iloc[i]
+        sub = df.iloc[: i + 1]
+        sc, _, _, _ = _calc_confluence_points_core(sub, df_wk, None)
 
-        if st_d.iloc[i] == 1:
-            sc += 2
-        if (not pd.isna(sa.iloc[i]) and not pd.isna(sb.iloc[i])
-                and pi > max(sa.iloc[i], sb.iloc[i])):
-            sc += 2
-        if (not pd.isna(adx_v.iloc[i]) and adx_v.iloc[i] > 25
-                and not pd.isna(dip.iloc[i]) and not pd.isna(din.iloc[i])
-                and dip.iloc[i] > din.iloc[i]):
-            sc += 1
-        if i >= 20 and obv_s.iloc[i] > obv_s.iloc[i - 20]:
-            sc += 1
-        if pi > gold_zone:
-            sc += 1
-        if struct == "BULLISH":
-            sc += 1
+        rsi_i = float(rsi_series.iloc[i]) if not pd.isna(rsi_series.iloc[i]) else 50.0
+        pi = float(df["Close"].iloc[i])
 
-        rsi_i = rsi_s.iloc[i] if not pd.isna(rsi_s.iloc[i]) else 50
+        # Blue: 7+ confluence cross + institutional filters (ATR / volume)
+        if sc >= 7 and prev_score < 7 and wk_bias in ("BULLISH", "MIXED", "UNKNOWN"):
+            if _blue_diamond_institutional_ok(sub):
+                diamonds.append({"date": df.index[i], "price": pi, "type": "blue",
+                                 "score": sc, "rsi": rsi_i, "weekly": wk_bias})
 
-        # Blue Diamond: daily surge + weekly agrees (bullish or mixed only)
-        if sc >= 7 and prev_score < 7 and wk_bias in ("BULLISH", "MIXED"):
-            diamonds.append({"date": df.index[i], "price": pi, "type": "blue",
-                             "score": sc, "rsi": rsi_i, "weekly": wk_bias})
-
-        # Pink Diamond: daily collapse + weekly agrees (bearish or mixed only)
-        if ((sc <= 3 and prev_score >= 5) or (rsi_i > 75 and sc <= 4 and prev_score > 4)) and wk_bias in ("BEARISH", "MIXED"):
+        # Pink: collapse or RSI exhaustion vs elevated prior score + weekly not blocking shorts
+        if ((sc <= 3 and prev_score >= 5) or (rsi_i > 75 and sc <= 4 and prev_score > 4)) and wk_bias in ("BEARISH", "MIXED", "UNKNOWN"):
             diamonds.append({"date": df.index[i], "price": pi, "type": "pink",
                              "score": sc, "rsi": rsi_i, "weekly": wk_bias})
 
@@ -1886,6 +1944,39 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
     fig_r.add_hline(y=70, line_dash="dot", line_color="rgba(248,113,113,0.4)")
     fig_r.add_hline(y=50, line_dash="dot", line_color="rgba(148,163,184,0.3)")
     fig_r.add_hline(y=30, line_dash="dot", line_color="rgba(52,211,153,0.4)")
+    if diamonds:
+        rsi_track = TA.rsi(df["Close"])
+        bx, by, px, py = [], [], [], []
+        for d in diamonds:
+            try:
+                ix = _index_pos(df.index.get_loc(d["date"]))
+            except (KeyError, TypeError, IndexError):
+                continue
+            rv = float(rsi_track.iloc[ix]) if not pd.isna(rsi_track.iloc[ix]) else 50.0
+            if d["type"] == "blue":
+                bx.append(d["date"])
+                by.append(rv)
+            else:
+                px.append(d["date"])
+                py.append(rv)
+        if bx:
+            fig_r.add_trace(
+                go.Scatter(
+                    x=bx, y=by, mode="markers",
+                    marker=dict(symbol="diamond", size=12, color="#3b82f6", line=dict(color="#93c5fd", width=1.5)),
+                    name="Blue diamond", showlegend=False,
+                    hovertemplate="<b>Blue diamond</b><br>%{x}<br>RSI %{y:.1f}<extra></extra>",
+                )
+            )
+        if px:
+            fig_r.add_trace(
+                go.Scatter(
+                    x=px, y=py, mode="markers",
+                    marker=dict(symbol="diamond", size=12, color="#ec4899", line=dict(color="#f9a8d4", width=1.5)),
+                    name="Pink diamond", showlegend=False,
+                    hovertemplate="<b>Pink diamond</b><br>%{x}<br>RSI %{y:.1f}<extra></extra>",
+                )
+            )
     fig_r.update_layout(
         template="plotly_dark",
         paper_bgcolor="#080c14",
@@ -2285,10 +2376,23 @@ def main():
             show_super = st.toggle("Supertrend", key="sb_super")
             show_gold_zone = st.toggle("Gold zone", key="sb_gold_zone")
 
+        st.markdown("---")
+        st.markdown("#### Performance")
+        st.markdown(
+            '<p class="cf-widget-hint">Faster on phones — skips heavy Plotly figures.</p>',
+            unsafe_allow_html=True,
+        )
+        st.toggle(
+            "Mini mode",
+            key="sb_mini_mode",
+            help="Hides multi-chart technical view and other large Plotly figures. Keeps glance row, execution strip, quant dashboard, scanner, and reference.",
+        )
+
         prefs_cfg = {
             **cfg,
             "strat_focus": st.session_state.get("sb_strat_radio", DEFAULT_CONFIG["strat_focus"]),
             "strat_horizon": st.session_state.get("sb_horizon_radio", DEFAULT_CONFIG["strat_horizon"]),
+            "mini_mode": bool(st.session_state.get("sb_mini_mode", cfg.get("mini_mode", False))),
             "overlay_ema": bool(st.session_state.get("sb_ema", cfg.get("overlay_ema", True))),
             "overlay_fib": bool(st.session_state.get("sb_fib", cfg.get("overlay_fib", True))),
             "overlay_gann": bool(st.session_state.get("sb_gann", cfg.get("overlay_gann", True))),
@@ -2304,6 +2408,8 @@ def main():
 
         st.markdown("---")
         st.markdown("<div style='text-align:center;color:#64748b;font-size:.65rem'>Data: Yahoo Finance &middot; Not advice</div>", unsafe_allow_html=True)
+
+    mini_mode = bool(st.session_state.get("sb_mini_mode", False))
 
     # ── HEADER ──
     st.markdown(f"<h1 style='margin:0;font-size:1.8rem;background:linear-gradient(135deg,#10b981,#06b6d4);-webkit-background-clip:text;-webkit-text-fill-color:transparent'>{ticker} COMMAND CENTER</h1>", unsafe_allow_html=True)
@@ -2710,26 +2816,32 @@ def main():
         st.markdown(f"<div class='ac'>\U0001f514 <strong>{len(al)} Alert{'s' if len(al) > 1 else ''}</strong>: {hi_al[0]['m']}{'<em> +' + str(len(al) - 1) + ' more</em>' if len(al) > 1 else ''}</div>", unsafe_allow_html=True)
 
     # ══════════════════════════════════════════════════════════════════
-    #  SECTION 1 \u2014 TECHNICAL CHART (always visible)
+    #  SECTION 1 \u2014 TECHNICAL CHART (skipped in Mini mode for mobile performance)
     # ══════════════════════════════════════════════════════════════════
     st.markdown('<div id="charts" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
-    _section("Technical Chart", f"{ticker} — four separate charts below (price, volume, RSI, MACD). Zoom each panel independently. Use sidebar overlays sparingly on the price chart.",
-             tip_plain="Candles: OHLC per bar. EMA / Bollinger: trend and volatility. Fib & Gann & S/R: reference levels (toggle off if busy). Diamonds: confluence signals. Gold line: Gold Zone. Volume: participation. RSI: overbought/oversold heat. MACD: momentum vs signal.")
-    fig_p, fig_v, fig_r, fig_m = build_chart(
-        df, ticker, show_ind, show_fib, show_gann, show_sr, show_ichi, show_super,
-        diamonds=diamonds if show_diamonds else None,
-        gold_zone=gold_zone_price if show_gold_zone else None,
-    )
-    st.plotly_chart(fig_p, use_container_width=True, config=_PLOTLY_UI_CONFIG)
-    st.markdown("---")
-    st.markdown("#### Volume")
-    st.plotly_chart(fig_v, use_container_width=True, config=_PLOTLY_UI_CONFIG)
-    st.markdown("---")
-    st.markdown("#### RSI (14)")
-    st.plotly_chart(fig_r, use_container_width=True, config=_PLOTLY_UI_CONFIG)
-    st.markdown("---")
-    st.markdown("#### MACD")
-    st.plotly_chart(fig_m, use_container_width=True, config=_PLOTLY_UI_CONFIG)
+    if not mini_mode:
+        _section("Technical Chart", f"{ticker} — four separate charts below (price, volume, RSI, MACD). Zoom each panel independently. Use sidebar overlays sparingly on the price chart.",
+                 tip_plain="Candles: OHLC per bar. EMA / Bollinger: trend and volatility. Fib & Gann & S/R: reference levels (toggle off if busy). Diamonds: confluence signals. Gold line: Gold Zone. Volume: participation. RSI: overbought/oversold heat. MACD: momentum vs signal.")
+        fig_p, fig_v, fig_r, fig_m = build_chart(
+            df, ticker, show_ind, show_fib, show_gann, show_sr, show_ichi, show_super,
+            diamonds=diamonds if show_diamonds else None,
+            gold_zone=gold_zone_price if show_gold_zone else None,
+        )
+        st.plotly_chart(fig_p, use_container_width=True, config=_PLOTLY_UI_CONFIG)
+        st.markdown("---")
+        st.markdown("#### Volume")
+        st.plotly_chart(fig_v, use_container_width=True, config=_PLOTLY_UI_CONFIG)
+        st.markdown("---")
+        st.markdown("#### RSI (14)")
+        st.plotly_chart(fig_r, use_container_width=True, config=_PLOTLY_UI_CONFIG)
+        st.markdown("---")
+        st.markdown("#### MACD")
+        st.plotly_chart(fig_m, use_container_width=True, config=_PLOTLY_UI_CONFIG)
+    else:
+        st.info(
+            "**Mini mode:** technical charts are off to save bandwidth and CPU. "
+            "Disable **Mini mode** in the sidebar → Performance to load Plotly."
+        )
     chart_mood = "bull" if struct == "BULLISH" else ("bear" if struct == "BEARISH" else "neutral")
 
     # ── DIAMOND SIGNAL CARDS (below chart) ──
@@ -3009,12 +3121,15 @@ def main():
     vp = TA.volume_profile(df)
     if not vp.empty:
         poc = vp.loc[vp["volume"].idxmax()]
-        fig_vp = go.Figure(go.Bar(x=vp["volume"], y=vp["mid"], orientation="h",
-            marker_color=["#10b981" if v == vp["volume"].max() else "#3b82f6" for v in vp["volume"]]))
-        fig_vp.add_hline(y=poc["mid"], line_dash="solid", line_color="#f59e0b", annotation_text=f"POC ${poc['mid']:.2f}")
-        fig_vp.update_layout(template="plotly_dark", paper_bgcolor="#080c14", plot_bgcolor="#080c14", height=300,
-            margin=dict(l=60, r=20, t=20, b=40), yaxis_title="Price", xaxis_title="Volume", font=dict(family="JetBrains Mono", color="#94a3b8"))
-        st.plotly_chart(fig_vp, use_container_width=True, config=_PLOTLY_UI_CONFIG)
+        if not mini_mode:
+            fig_vp = go.Figure(go.Bar(x=vp["volume"], y=vp["mid"], orientation="h",
+                marker_color=["#10b981" if v == vp["volume"].max() else "#3b82f6" for v in vp["volume"]]))
+            fig_vp.add_hline(y=poc["mid"], line_dash="solid", line_color="#f59e0b", annotation_text=f"POC ${poc['mid']:.2f}")
+            fig_vp.update_layout(template="plotly_dark", paper_bgcolor="#080c14", plot_bgcolor="#080c14", height=300,
+                margin=dict(l=60, r=20, t=20, b=40), yaxis_title="Price", xaxis_title="Volume", font=dict(family="JetBrains Mono", color="#94a3b8"))
+            st.plotly_chart(fig_vp, use_container_width=True, config=_PLOTLY_UI_CONFIG)
+        else:
+            st.caption(f"Volume POC (mini mode): **${poc['mid']:.2f}** — full chart hidden.")
         _explain("\U0001f9e0 Volume Profile", f"The Point of Control (POC) is ${poc['mid']:.2f}. This is the most traded price. Think of it as the price point where your store sees the most customers. The stock is pulled toward this price like a magnet. Use it to pick your option strike prices.", "neutral")
 
     # ══════════════════════════════════════════════════════════════════
@@ -3288,12 +3403,15 @@ def main():
             m3.metric("Avg Ret", f"{br['ret_pct'].mean():.1f}%")
             m4.metric("Est Premium", f"${tp:,.0f}")
             br["cum"] = br["ret_pct"].cumsum()
-            fig_b = go.Figure(go.Scatter(x=br["entry_date"], y=br["cum"], mode="lines+markers",
-                line=dict(color="#10b981", width=2), marker=dict(size=5)))
-            fig_b.update_layout(template="plotly_dark", paper_bgcolor="#080c14", plot_bgcolor="#080c14",
-                height=300, margin=dict(l=40, r=20, t=20, b=40), yaxis_title="Cum Ret %",
-                font=dict(family="JetBrains Mono", color="#94a3b8"))
-            st.plotly_chart(fig_b, use_container_width=True, config=_PLOTLY_UI_CONFIG)
+            if not mini_mode:
+                fig_b = go.Figure(go.Scatter(x=br["entry_date"], y=br["cum"], mode="lines+markers",
+                    line=dict(color="#10b981", width=2), marker=dict(size=5)))
+                fig_b.update_layout(template="plotly_dark", paper_bgcolor="#080c14", plot_bgcolor="#080c14",
+                    height=300, margin=dict(l=40, r=20, t=20, b=40), yaxis_title="Cum Ret %",
+                    font=dict(family="JetBrains Mono", color="#94a3b8"))
+                st.plotly_chart(fig_b, use_container_width=True, config=_PLOTLY_UI_CONFIG)
+            else:
+                st.caption(f"Mini mode: cumulative return chart hidden. Final cum ret **{br['cum'].iloc[-1]:.1f}%** over {len(br)} trades.")
             wr = (br["profit"] > 0).mean() * 100
             _explain("\U0001f9e0 What does this backtest tell me?",
                 f"Over {len(br)} simulated trades, selling {bt_otm * 100:.0f}% out of the money covered calls every {bt_hold} days would have made roughly <strong>${tp:,.0f}</strong> in premium cash. "
@@ -3312,12 +3430,22 @@ def main():
     if watchlist_tickers:
         if st.button("Scan Watchlist", key="run_scanner"):
             scanner_results = []
+            n_scan = len(watchlist_tickers)
+            workers = min(8, max(1, n_scan))
             scan_progress = st.progress(0)
-            for si, tkr in enumerate(watchlist_tickers):
-                scan_progress.progress((si + 1) / len(watchlist_tickers), text=f"Scanning {tkr}...")
-                result = scan_single_ticker(tkr)
-                if result:
-                    scanner_results.append(result)
+            done_ct = 0
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                future_map = {pool.submit(scan_single_ticker, tkr): tkr for tkr in watchlist_tickers}
+                for fut in as_completed(future_map):
+                    done_ct += 1
+                    tkr = future_map[fut]
+                    scan_progress.progress(done_ct / n_scan, text=f"Scanning {tkr}… ({done_ct}/{n_scan})")
+                    try:
+                        result = fut.result()
+                        if result:
+                            scanner_results.append(result)
+                    except Exception:
+                        pass
             scan_progress.empty()
 
             if scanner_results:
