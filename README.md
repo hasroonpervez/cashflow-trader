@@ -12,7 +12,7 @@
 - **`st.cache_resource`** caches Yahoo **`Ticker`** objects; OHLC still uses **`st.cache_data`** with TTL.
 - **Market Scanner** uses a **thread pool** (up to 8 workers) so watchlist symbols fetch in parallel.
 - **`load_config()`** merges **`st.secrets`** (scalar top-level keys only, for Streamlit Cloud) with **`config.json`**.
-- **`mini_mode`** (sidebar → Performance) persists in `config.json` and **skips heavy Plotly** (technical stack, volume-profile bar chart, simulator equity chart) while keeping the glance row, execution strip, quant dashboard, and scanner.
+- **`mini_mode`** (sidebar → Performance) persists in `config.json` and **skips heavy Plotly** (technical stack, volume-profile bar chart, simulator equity chart) while keeping the glance row, execution strip, quant dashboard, and scanner. With Mini mode on, the app also injects **denser main-column CSS** (tighter padding, smaller section headers and card type) so more fits on one phone screen.
 - **CSS:** `touch-action: manipulation`, `min-height: 100dvh` on the app shell, and touch hints on the sticky nav / FAB to reduce mobile zoom/jitter.
 
 ### ✅ Technical chart — four separate Plotly panels

@@ -149,6 +149,55 @@ _PLOTLY_UI_CONFIG = {
     "scrollZoom": False,
 }
 
+# Injected only when Mini mode is on — tighter main-column density for mobile one-screen scans
+_MINI_MODE_DENSITY_CSS = """
+<style>
+.main .block-container{
+  max-width:100%!important;
+  padding-top:calc(var(--nav-h) + 4px)!important;
+  padding-left:.4rem!important;padding-right:.4rem!important;
+  padding-bottom:.3rem!important;
+}
+.main .block-container [data-testid="stVerticalBlock"]{gap:.22rem!important}
+.main .block-container [data-testid="stHorizontalBlock"]{gap:.3rem!important}
+.main .section-hdr{margin:20px 0 10px 0!important;padding:6px 0 8px 0!important}
+.main .section-hdr h2{font-size:1.08rem!important}
+.main .section-hdr p{font-size:.74rem!important;margin-top:2px!important}
+.main .glance-shell{margin:2px 0 4px 0!important;gap:5px!important}
+.main .glance-card{padding:6px 8px!important;border-radius:10px!important}
+.main .glance-mini{height:50px!important}
+.main .glance-label{font-size:.56rem!important;letter-spacing:.06em!important}
+.main .glance-caption{font-size:.62rem!important;margin-top:2px!important;line-height:1.22!important}
+.main .glance-value{font-size:1.02rem!important}
+.main .glance-inner{gap:4px!important}
+.main .execution-shell{gap:6px!important;margin:2px 0 4px 0!important}
+.main .bluf{padding:11px 12px!important;margin:5px 0!important;border-radius:11px!important}
+.main .bluf .mono{font-size:1.28rem!important}
+.main .trade-master{padding:10px 11px!important;border-radius:10px!important}
+.main .trade-master p{font-size:.82rem!important;line-height:1.42!important;margin:0 0 6px 0!important}
+.main .strike-big{font-size:clamp(1.35rem,4vw,2rem)!important}
+.main .rh-stepper{gap:5px!important;margin-top:6px!important}
+.main .rh-step{padding:6px 8px!important;font-size:.78rem!important}
+.main .tc,.main .ni,.main .ac,.main .scanner-row,.main .glass-card,.main .confluence-meter,.main .rr-card,.main .rh-card,.main .edu-card{padding:7px 9px!important;margin:3px 0!important;border-radius:9px!important}
+.main .diamond-blue,.main .diamond-pink,.main .gold-zone{padding:11px 12px!important;margin:5px 0!important}
+.main .explain{padding:10px 12px!important;margin:6px 0!important;line-height:1.48!important;font-size:.84rem!important}
+.main div[data-testid="stMetric"]{padding:6px 8px!important;border-radius:10px!important}
+.main div[data-testid="stMetric"] label{font-size:.6rem!important}
+.main div[data-testid="stMetric"] [data-testid="stMetricValue"]{font-size:1.02rem!important}
+.main .stMarkdown p{font-size:.84rem!important;line-height:1.45!important;margin:0 0 .3rem 0!important}
+.main h1{font-size:1.28rem!important;margin:0 0 .2rem 0!important}
+.main [data-testid="stExpander"] summary{font-size:.84rem!important;padding:.3rem .45rem!important}
+.main [data-baseweb="alert"]{padding:8px 10px!important;font-size:.82rem!important}
+.main .stTabs [data-baseweb="tab"]{padding:5px 9px!important;font-size:.78rem!important}
+.main .tip,.main .sb,.main .sr,.main .sn{padding:8px 10px!important;font-size:.82rem!important;margin:3px 0!important}
+.main .qe{padding:12px!important;margin:6px 0!important}
+@media (max-width:768px){
+  .main .block-container{padding-left:.35rem!important;padding-right:.35rem!important}
+  .main .section-hdr{margin:16px 0 8px 0!important}
+}
+</style>
+"""
+
 # ─────────────────────────────────────────────────────────────────────────
 # CSS (stored as variable, merged with navbar in a single st.markdown call
 # to prevent Streamlit from generating a visible "keyb" widget label)
@@ -2410,6 +2459,8 @@ def main():
         st.markdown("<div style='text-align:center;color:#64748b;font-size:.65rem'>Data: Yahoo Finance &middot; Not advice</div>", unsafe_allow_html=True)
 
     mini_mode = bool(st.session_state.get("sb_mini_mode", False))
+    if mini_mode:
+        st.markdown(_MINI_MODE_DENSITY_CSS, unsafe_allow_html=True)
 
     # ── HEADER ──
     st.markdown(f"<h1 style='margin:0;font-size:1.8rem;background:linear-gradient(135deg,#10b981,#06b6d4);-webkit-background-clip:text;-webkit-text-fill-color:transparent'>{ticker} COMMAND CENTER</h1>", unsafe_allow_html=True)
