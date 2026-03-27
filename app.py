@@ -279,20 +279,113 @@ section[data-testid="stSidebar"],
   box-shadow:0 4px 28px rgba(2,6,23,.5)!important;
   margin-bottom:14px!important;
 }
-/* HUD row labels: high contrast on dark bg (mobile captions were washing out) */
-.main p.cf-hud-label{
-  color:#f8fafc!important;font-size:0.8rem!important;font-weight:700!important;
-  letter-spacing:0.07em!important;text-transform:uppercase!important;margin:0 0 6px 0!important;
-  line-height:1.3!important;
+/* HUD row labels: high contrast on dark bg (Strategy / Horizon headers) */
+.main p.cf-hud-label,
+.main [data-testid="stVerticalBlockBorderWrapper"] p.cf-hud-label{
+  color:#e2e8f0!important;
+  -webkit-text-fill-color:#e2e8f0!important;
+  font-size:0.82rem!important;font-weight:800!important;
+  letter-spacing:0.08em!important;text-transform:uppercase!important;margin:0 0 6px 0!important;
+  line-height:1.35!important;
+  text-shadow:0 1px 2px rgba(0,0,0,.55)!important;
 }
 .main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stWidgetLabel"] p,
 .main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stWidgetLabel"] span,
 .main [data-testid="stVerticalBlockBorderWrapper"] label{
-  color:#f1f5f9!important;
+  color:#e2e8f0!important;
+  -webkit-text-fill-color:#e2e8f0!important;
 }
 .main [data-testid="stVerticalBlockBorderWrapper"] [data-baseweb="radio"] label,
 .main [data-testid="stVerticalBlockBorderWrapper"] [role="radiogroup"] label{
   color:#f8fafc!important;
+  -webkit-text-fill-color:#f8fafc!important;
+}
+/* st.segmented_control: Base Web button group (NOT [data-baseweb="radio"]); force readable pills */
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"],
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] > div{
+  background:#0c1220!important;
+  border:1px solid #334155!important;
+  border-radius:12px!important;
+  padding:4px 6px!important;
+  gap:6px!important;
+}
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] button,
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] [data-baseweb="button"]{
+  color:#e2e8f0!important;
+  -webkit-text-fill-color:#e2e8f0!important;
+  background:#1e293b!important;
+  border:1px solid #475569!important;
+  border-radius:10px!important;
+  font-weight:600!important;
+  font-size:0.78rem!important;
+}
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] button p,
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] button span,
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] [data-baseweb="button"] p,
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] [data-baseweb="button"] span{
+  color:#e2e8f0!important;
+  -webkit-text-fill-color:#e2e8f0!important;
+}
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] button[aria-pressed="true"],
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] button[aria-checked="true"],
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] [data-baseweb="button"][aria-pressed="true"]{
+  background:linear-gradient(180deg,#22d3ee,#0ea5e9)!important;
+  color:#fff!important;
+  -webkit-text-fill-color:#fff!important;
+  border-color:rgba(255,255,255,.28)!important;
+}
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] button[aria-pressed="true"] p,
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] button[aria-pressed="true"] span{
+  color:#fff!important;
+  -webkit-text-fill-color:#fff!important;
+}
+/* Base Web v12+ role="radio" segments inside Mission Control (some Streamlit builds) */
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] [role="radio"]{
+  background:#1e293b!important;color:#f1f5f9!important;border:1px solid #475569!important;
+  border-radius:10px!important;padding:8px 10px!important;font-weight:600!important;font-size:0.76rem!important;
+}
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] [role="radio"][aria-checked="true"]{
+  background:linear-gradient(180deg,#22d3ee,#0ea5e9)!important;color:#fff!important;
+  border-color:rgba(255,255,255,.25)!important;
+}
+/* Fallback: Streamlit attaches st-key-<widget_key> on the widget root (test id varies by version) */
+.main [data-testid="stVerticalBlockBorderWrapper"] div[class*="st-key-sb_strat_radio"] button,
+.main [data-testid="stVerticalBlockBorderWrapper"] div[class*="st-key-sb_horizon_radio"] button,
+.main [data-testid="stVerticalBlockBorderWrapper"] div[class*="st-key-sb_strat_radio"] [data-baseweb="button"],
+.main [data-testid="stVerticalBlockBorderWrapper"] div[class*="st-key-sb_horizon_radio"] [data-baseweb="button"]{
+  color:#e2e8f0!important;
+  -webkit-text-fill-color:#e2e8f0!important;
+  background:#1e293b!important;
+  border:1px solid #475569!important;
+}
+.main [data-testid="stVerticalBlockBorderWrapper"] div[class*="st-key-sb_strat_radio"] button[aria-pressed="true"],
+.main [data-testid="stVerticalBlockBorderWrapper"] div[class*="st-key-sb_horizon_radio"] button[aria-pressed="true"]{
+  background:linear-gradient(180deg,#22d3ee,#0ea5e9)!important;
+  color:#fff!important;
+  -webkit-text-fill-color:#fff!important;
+}
+/* Horizontal st.radio fallback for Strategy / Horizon: match pill contrast inside HUD */
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-baseweb="radio"]{
+  background:#0c1220!important;border:1px solid #334155!important;border-radius:12px!important;
+  padding:6px 8px!important;flex-wrap:wrap!important;gap:6px!important;
+}
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-baseweb="radio"] label{
+  background:#1e293b!important;color:#e2e8f0!important;
+  -webkit-text-fill-color:#e2e8f0!important;
+  border:1px solid #475569!important;
+  border-radius:10px!important;padding:8px 10px!important;font-weight:600!important;font-size:0.74rem!important;
+}
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-baseweb="radio"] label:has(input:checked){
+  background:linear-gradient(180deg,#22d3ee,#0ea5e9)!important;color:#fff!important;
+  -webkit-text-fill-color:#fff!important;
+  border-color:rgba(255,255,255,.25)!important;
+}
+.main [data-testid="stVerticalBlockBorderWrapper"] [role="radiogroup"] [role="radio"]{
+  background:#1e293b!important;color:#f1f5f9!important;border:1px solid #475569!important;
+  border-radius:10px!important;
+}
+.main [data-testid="stVerticalBlockBorderWrapper"] [role="radiogroup"] [role="radio"][aria-checked="true"]{
+  background:linear-gradient(180deg,#22d3ee,#0ea5e9)!important;color:#fff!important;
 }
 [data-testid="stSidebarUserContent"]{padding-top:100px!important}
 [data-testid="stSidebar"] h2,[data-testid="stSidebar"] h3,[data-testid="stSidebar"] h4{color:#00e5ff!important}
@@ -1925,7 +2018,8 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
     """Build four separate figures: price (+ overlays), volume, RSI, MACD — easier to read than one stacked chart."""
     last_px = float(df["Close"].iloc[-1])
     _grid = "rgba(30,41,59,0.55)"
-    _legend_font = dict(size=10, color="#e2e8f0", family="Inter, system-ui, sans-serif")
+    _legend_font = dict(size=11, color="#f1f5f9", family="Inter, system-ui, sans-serif")
+    _legend_title_font = dict(size=12, color="#e2e8f0", family="Inter, system-ui, sans-serif")
     uirev = f"{ticker}_tech"
 
     fig_p = go.Figure()
@@ -2044,10 +2138,11 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
             annotation_font=dict(color="#fde047", size=11, family="JetBrains Mono"),
         )
 
-    if diamonds:
+    if diamonds is not None:
         blue_d = [d for d in diamonds if d["type"] == "blue"]
         pink_d = [d for d in diamonds if d["type"] == "pink"]
-        _dm = dict(symbol="diamond", size=17, line=dict(color="rgba(248,250,252,0.95)", width=2))
+        # Slightly smaller markers: legend row height matches line swatches better than size 17.
+        _dm = dict(symbol="diamond", size=13, line=dict(color="rgba(248,250,252,0.95)", width=1.5))
         if blue_d:
             fig_p.add_trace(
                 go.Scatter(
@@ -2056,8 +2151,24 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
                     mode="markers",
                     marker={**_dm, "color": "#2563eb"},
                     name="Blue diamond",
-                    hovertemplate="<b>Blue diamond</b><br>%{x}<br>$%{customdata:.2f}<br>Buy confluence (7+ cross)<extra></extra>",
+                    legendgroup="diamond_blue",
+                    hovertemplate="<b>Blue diamond</b><br>%{x}<br>$%{customdata:.2f}<br>7+ confluence cross up (buy / add zone)<extra></extra>",
                     customdata=[d["price"] for d in blue_d],
+                )
+            )
+        else:
+            # Legend key only when no blue in history: tiny marker off last close so the chart matches the key.
+            fig_p.add_trace(
+                go.Scatter(
+                    x=[df.index[-1]],
+                    y=[last_px * 1.004],
+                    mode="markers",
+                    marker={**_dm, "color": "#2563eb", "size": 8, "opacity": 0.35},
+                    name="Blue diamond",
+                    legendgroup="diamond_blue",
+                    hovertemplate="<b>Blue diamond</b><br>Same marker as on chart when a buy signal fires.<br>"
+                    "Fires on <b>7+ confluence cross up</b> (weekly not bearish-only).<br>"
+                    "<i>No blue diamond in loaded history yet.</i><extra></extra>",
                 )
             )
         if pink_d:
@@ -2068,8 +2179,22 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
                     mode="markers",
                     marker={**_dm, "color": "#db2777"},
                     name="Pink diamond",
-                    hovertemplate="<b>Pink diamond</b><br>%{x}<br>$%{customdata:.2f}<br>Exit / take profit<extra></extra>",
+                    legendgroup="diamond_pink",
+                    hovertemplate="<b>Pink diamond</b><br>%{x}<br>$%{customdata:.2f}<br>Exit / de-risk (confluence fade or RSI exhaustion)<extra></extra>",
                     customdata=[d["price"] for d in pink_d],
+                )
+            )
+        else:
+            fig_p.add_trace(
+                go.Scatter(
+                    x=[df.index[-1]],
+                    y=[last_px * 0.996],
+                    mode="markers",
+                    marker={**_dm, "color": "#db2777", "size": 8, "opacity": 0.35},
+                    name="Pink diamond",
+                    legendgroup="diamond_pink",
+                    hovertemplate="<b>Pink diamond</b><br>Same marker as on chart for take-profit / defensive posture.<br>"
+                    "<i>No pink diamond in loaded history yet.</i><extra></extra>",
                 )
             )
 
@@ -2084,7 +2209,8 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
             font=dict(size=15, color="#f1f5f9", family="Inter, system-ui, sans-serif"),
         ),
         height=540,
-        margin=dict(l=56, r=118, t=56, b=44),
+        # Legend sits top-left inside plot so right-side Fib / Gold annotations stay readable.
+        margin=dict(l=56, r=88, t=56, b=44),
         xaxis_rangeslider_visible=False,
         hovermode="x unified",
         uirevision=uirev,
@@ -2092,17 +2218,18 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
         legend=dict(
             orientation="v",
             yanchor="top",
-            y=0.99,
+            y=0.98,
             xanchor="left",
-            x=1.01,
+            x=0.01,
             font=_legend_font,
-            bgcolor="rgba(15,23,42,0.94)",
-            bordercolor="rgba(148,163,184,0.35)",
+            bgcolor="rgba(2,6,23,0.97)",
+            bordercolor="rgba(100,116,139,0.65)",
             borderwidth=1,
             traceorder="normal",
-            itemwidth=30,
+            itemwidth=34,
+            itemsizing="constant",
             title_text="Overlays",
-            title_font=dict(size=11, color="#94a3b8"),
+            title_font=_legend_title_font,
         ),
         hoverlabel=_chart_hoverlabel(),
     )
