@@ -385,6 +385,82 @@ section[data-testid="stSidebar"],
   color:#fff!important;
   -webkit-text-fill-color:#fff!important;
 }
+/* Streamlit 1.39+ st.segmented_control: BaseButton <button kind="segmented_control"> (not baseweb).
+   Theme bgColor is light on some hosts — force HUD pills readable without BorderWrapper ancestry. */
+.main [data-testid="stButtonGroup"] button[kind="segmented_control"],
+[data-testid="stMain"] [data-testid="stButtonGroup"] button[kind="segmented_control"],
+.block-container [data-testid="stButtonGroup"] button[kind="segmented_control"]{
+  color:#e2e8f0!important;
+  -webkit-text-fill-color:#e2e8f0!important;
+  background-color:#1e293b!important;
+  background-image:none!important;
+  border:1px solid #475569!important;
+  border-radius:10px!important;
+  font-weight:600!important;
+  font-size:0.78rem!important;
+  box-shadow:none!important;
+}
+.main [data-testid="stButtonGroup"] button[kind="segmented_control"] p,
+.main [data-testid="stButtonGroup"] button[kind="segmented_control"] span,
+.main [data-testid="stButtonGroup"] button[kind="segmented_control"] div,
+[data-testid="stMain"] [data-testid="stButtonGroup"] button[kind="segmented_control"] p,
+[data-testid="stMain"] [data-testid="stButtonGroup"] button[kind="segmented_control"] span,
+.block-container [data-testid="stButtonGroup"] button[kind="segmented_control"] p,
+.block-container [data-testid="stButtonGroup"] button[kind="segmented_control"] span{
+  color:#e2e8f0!important;
+  -webkit-text-fill-color:#e2e8f0!important;
+  background:transparent!important;
+  background-color:transparent!important;
+}
+.main [data-testid="stButtonGroup"] button[kind="segmented_controlActive"],
+[data-testid="stMain"] [data-testid="stButtonGroup"] button[kind="segmented_controlActive"],
+.block-container [data-testid="stButtonGroup"] button[kind="segmented_controlActive"]{
+  background:linear-gradient(180deg,#22d3ee,#0ea5e9)!important;
+  background-color:transparent!important;
+  color:#fff!important;
+  -webkit-text-fill-color:#fff!important;
+  border:1px solid rgba(255,255,255,.28)!important;
+  font-weight:600!important;
+  font-size:0.78rem!important;
+}
+.main [data-testid="stButtonGroup"] button[kind="segmented_controlActive"] p,
+.main [data-testid="stButtonGroup"] button[kind="segmented_controlActive"] span,
+[data-testid="stMain"] [data-testid="stButtonGroup"] button[kind="segmented_controlActive"] p,
+[data-testid="stMain"] [data-testid="stButtonGroup"] button[kind="segmented_controlActive"] span,
+.block-container [data-testid="stButtonGroup"] button[kind="segmented_controlActive"] p,
+.block-container [data-testid="stButtonGroup"] button[kind="segmented_controlActive"] span{
+  color:#fff!important;
+  -webkit-text-fill-color:#fff!important;
+}
+.main [data-testid="stButtonGroup"] button[data-testid="stBaseButton-segmented_control"],
+[data-testid="stMain"] [data-testid="stButtonGroup"] button[data-testid="stBaseButton-segmented_control"]{
+  color:#e2e8f0!important;
+  -webkit-text-fill-color:#e2e8f0!important;
+  background-color:#1e293b!important;
+  background-image:none!important;
+  border:1px solid #475569!important;
+}
+.main [data-testid="stButtonGroup"] button[data-testid="stBaseButton-segmented_controlActive"],
+[data-testid="stMain"] [data-testid="stButtonGroup"] button[data-testid="stBaseButton-segmented_controlActive"]{
+  background:linear-gradient(180deg,#22d3ee,#0ea5e9)!important;
+  color:#fff!important;
+  -webkit-text-fill-color:#fff!important;
+  border-color:rgba(255,255,255,.28)!important;
+}
+[data-testid="stAppViewContainer"] [data-testid="stButtonGroup"] button[kind="segmented_control"],
+[data-testid="stAppViewContainer"] [data-testid="stButtonGroup"] button[kind="segmented_controlActive"]{
+  color:#e2e8f0!important;
+  -webkit-text-fill-color:#e2e8f0!important;
+  background-color:#1e293b!important;
+  background-image:none!important;
+  border-color:#475569!important;
+}
+[data-testid="stAppViewContainer"] [data-testid="stButtonGroup"] button[kind="segmented_controlActive"]{
+  background:linear-gradient(180deg,#22d3ee,#0ea5e9)!important;
+  color:#fff!important;
+  -webkit-text-fill-color:#fff!important;
+  border-color:rgba(255,255,255,.28)!important;
+}
 /* Horizontal st.radio fallback for Strategy / Horizon: match pill contrast inside HUD */
 .main [data-testid="stVerticalBlockBorderWrapper"] [data-baseweb="radio"]{
   background:#0c1220!important;border:1px solid #334155!important;border-radius:12px!important;
@@ -3015,7 +3091,7 @@ def main():
                 key="sb_mini_mode",
                 help="Skips heavy Plotly charts; glance row, execution strip, quant, and scanner stay live. Toggle off for the full chart stack.",
             )
-        r2c1, r2c2, r2c3 = st.columns([1.2, 1.2, 1.4])
+        r2c1, r2c2 = st.columns([1.2, 1.2])
         with r2c1:
             st.markdown('<p class="cf-hud-label">Option horizon</p>', unsafe_allow_html=True)
             if hasattr(st, "segmented_control"):
@@ -3045,13 +3121,6 @@ def main():
             )
             scanner_sort_mode = (
                 "Custom watchlist order" if _scan_seg == "Custom order" else "Highest confluence first"
-            )
-        with r2c3:
-            st.markdown('<p class="cf-hud-label">NOC layout</p>', unsafe_allow_html=True)
-            st.markdown(
-                '<p style="color:#cbd5e1;font-size:0.8rem;margin:0;line-height:1.35">'
-                "Mission Control holds the switches you touch all session. The watchlist editor lives in the expander up top.</p>",
-                unsafe_allow_html=True,
             )
 
     # Clickable ticker tape (chunk rows on wide lists so columns stay usable on mobile)
