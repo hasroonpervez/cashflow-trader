@@ -1764,9 +1764,6 @@ def main():
             cfg = new_cfg
 
         st.markdown("---")
-        ticker = "PLTR"
-        st.markdown("**Target Asset:** PLTR (Locked)")
-        st.markdown("---")
         st.markdown("#### Strategy")
         strat_mode = st.radio("Focus", ["Cash Flow (Sell Premium)","Hybrid","Aggressive Growth"], key="sb_strat_mode")
         horizon = st.radio("Horizon", ["Weekly","Monthly (30 DTE)","45 DTE"], key="sb_horizon")
@@ -1814,10 +1811,10 @@ def main():
             if st.session_state.get("sb_watch_selected") not in watch_items:
                 st.session_state["sb_watch_selected"] = watch_items[0]
             selected_ticker = st.selectbox(
-                "Reorder / remove — pick symbol",
+                "Dashboard symbol (charts, news, options)",
                 options=watch_items,
                 key="sb_watch_selected",
-                help="Choose a ticker, then use the buttons below.",
+                help="Everything below uses this symbol. Reorder or remove with the buttons under the watchlist.",
             )
             st.markdown(
                 "<div style='font-size:.68rem;color:#94a3b8;margin:0 0 6px 0'>"
@@ -1872,6 +1869,11 @@ def main():
         else:
             st.session_state.pop("sb_watch_selected", None)
             st.info("Add at least one symbol above (e.g. PLTR, NVDA).")
+
+        if watch_items:
+            ticker = selected_ticker
+        else:
+            ticker = "PLTR"
 
         st.markdown(
             "<div style='font-size:.72rem;color:#94a3b8;margin:10px 0 2px 0;font-weight:600'>"
@@ -1986,7 +1988,22 @@ def main():
     vix_v = macro.get("VIX", {}).get("price", 0)
     qs, qb = quant_edge_score(df, vix_v)
 
-    acct = pltr_sh * price
+    if ticker == "PLTR":
+        pltr_px = float(price)
+    else:
+        df_pltr_px = fetch_stock("PLTR", "5d", "1d")
+        if df_pltr_px is not None and not df_pltr_px.empty:
+            pltr_px = float(df_pltr_px["Close"].iloc[-1])
+        else:
+            pltr_px = float(price)
+    acct = pltr_sh * pltr_px
+    if ticker == "PLTR":
+        acct_sub = f"{pltr_sh:,} shares &times; ${price:.2f}"
+    else:
+        acct_sub = (
+            f"PLTR lot: {pltr_sh:,} sh &times; ${pltr_px:.2f} &middot; "
+            f"Dashboard: <span class='mono'>{_html_mod.escape(ticker)}</span> @ ${price:.2f}"
+        )
     acct_placeholder.markdown(
         f"<div style='background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.25);"
         f"border-radius:8px;padding:12px;margin:8px 0'>"
@@ -1995,7 +2012,7 @@ def main():
         f"<div style='font-size:1.3rem;color:#10b981;font-weight:700;font-family:monospace'>"
         f"${acct:,.2f}</div>"
         f"<div style='font-size:.65rem;color:#64748b;margin-top:2px'>"
-        f"{pltr_sh:,} shares &times; ${price:.2f}</div></div>",
+        f"{acct_sub}</div></div>",
         unsafe_allow_html=True)
 
     # ── GLANCE ROW (price, VIX, earnings, quant edge) ──
@@ -2278,59 +2295,60 @@ def main():
     )
 
     # ══════════════════════════════════════════════════════════════════
-    #  PLTR EARNINGS INTELLIGENCE
+    #  PLTR EARNINGS INTELLIGENCE (Palantir-specific — only when PLTR is the dashboard symbol)
     # ══════════════════════════════════════════════════════════════════
-    next_print = datetime(2026, 5, 4)
-    d_to_print = (next_print.date() - datetime.now().date()).days
-    if d_to_print > 0:
-        countdown_txt = f"{d_to_print} days to earnings ({next_print.strftime('%b %d, %Y')})"
-    elif d_to_print == 0:
-        countdown_txt = "Earnings expected today (May 04, 2026)"
-    else:
-        countdown_txt = f"Last projected print date passed by {abs(d_to_print)} days (May 04, 2026)"
-    with st.expander("📊 STRATEGIC INTELLIGENCE: Q4 2025 / 2026 OUTLOOK", expanded=True):
-        gc, bc = st.columns(2)
-        with gc:
+    if ticker == "PLTR":
+        next_print = datetime(2026, 5, 4)
+        d_to_print = (next_print.date() - datetime.now().date()).days
+        if d_to_print > 0:
+            countdown_txt = f"{d_to_print} days to earnings ({next_print.strftime('%b %d, %Y')})"
+        elif d_to_print == 0:
+            countdown_txt = "Earnings expected today (May 04, 2026)"
+        else:
+            countdown_txt = f"Last projected print date passed by {abs(d_to_print)} days (May 04, 2026)"
+        with st.expander("📊 STRATEGIC INTELLIGENCE: Q4 2025 / 2026 OUTLOOK", expanded=True):
+            gc, bc = st.columns(2)
+            with gc:
+                st.markdown(
+                    """
+                    <div class='earn-col earn-good'>
+                        <h4>THE GOOD (THE CATALYST)</h4>
+                        <ul>
+                            <li><strong>Hyper-Growth:</strong> Q4 2025 revenue grew 70% Y/Y to $1.41B. U.S. Commercial surged 137%.</li>
+                            <li><strong>Rule of 40:</strong> Palantir is operating at an elite Rule of 40 score of 127%.</li>
+                            <li><strong>2026 Guidance:</strong> Management guided to roughly 61% Y/Y growth with a $7.2B target.</li>
+                            <li><strong>Profitability:</strong> GAAP Net Income reached $609M (43% margin); FCF hit $791M.</li>
+                        </ul>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+            with bc:
+                st.markdown(
+                    f"""
+                    <div class='earn-col earn-bad'>
+                        <h4>THE BAD (THE RISK)</h4>
+                        <ul>
+                            <li><strong>Valuation:</strong> Trading at about 125x-248x P/E, priced for near-perfection.</li>
+                            <li><strong>International Lag:</strong> U.S. commercial +137% vs international commercial +2%.</li>
+                            <li><strong>SBC &amp; Dilution:</strong> Heavy stock-based compensation remains a key bear argument.</li>
+                            <li><strong>Upcoming Print:</strong> {countdown_txt}. Street EPS projection is $0.26-$0.29.</li>
+                        </ul>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
             st.markdown(
                 """
-                <div class='earn-col earn-good'>
-                    <h4>THE GOOD (THE CATALYST)</h4>
-                    <ul>
-                        <li><strong>Hyper-Growth:</strong> Q4 2025 revenue grew 70% Y/Y to $1.41B. U.S. Commercial surged 137%.</li>
-                        <li><strong>Rule of 40:</strong> Palantir is operating at an elite Rule of 40 score of 127%.</li>
-                        <li><strong>2026 Guidance:</strong> Management guided to roughly 61% Y/Y growth with a $7.2B target.</li>
-                        <li><strong>Profitability:</strong> GAAP Net Income reached $609M (43% margin); FCF hit $791M.</li>
-                    </ul>
+                <div class='earn-meta'>
+                    <span class='earn-pill'>Q4 2025 Revenue: $1.41B</span>
+                    <span class='earn-pill'>U.S. Commercial: +137% Y/Y</span>
+                    <span class='earn-pill'>2026 Guide: $7.2B</span>
+                    <span class='earn-pill'>Projected EPS: $0.26-$0.29</span>
                 </div>
                 """,
                 unsafe_allow_html=True
             )
-        with bc:
-            st.markdown(
-                f"""
-                <div class='earn-col earn-bad'>
-                    <h4>THE BAD (THE RISK)</h4>
-                    <ul>
-                        <li><strong>Valuation:</strong> Trading at about 125x-248x P/E, priced for near-perfection.</li>
-                        <li><strong>International Lag:</strong> U.S. commercial +137% vs international commercial +2%.</li>
-                        <li><strong>SBC &amp; Dilution:</strong> Heavy stock-based compensation remains a key bear argument.</li>
-                        <li><strong>Upcoming Print:</strong> {countdown_txt}. Street EPS projection is $0.26-$0.29.</li>
-                    </ul>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
-        st.markdown(
-            """
-            <div class='earn-meta'>
-                <span class='earn-pill'>Q4 2025 Revenue: $1.41B</span>
-                <span class='earn-pill'>U.S. Commercial: +137% Y/Y</span>
-                <span class='earn-pill'>2026 Guide: $7.2B</span>
-                <span class='earn-pill'>Projected EPS: $0.26-$0.29</span>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
 
     # ── ALERTS BAR ──
     hi_al = [a for a in al if a["p"] == "HIGH"]
@@ -2655,7 +2673,8 @@ def main():
     st.markdown('<div id="strategies" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
     _section("Cash Flow Strategies", f"Exactly which options to sell for {ticker} at ${price:.2f}. Copy these into Robinhood.",
              tip_plain="Pick the top optimal strike first. Covered calls are for owned shares. Cash secured puts are for cash income with possible entry. Spreads cap risk when you need tighter control.")
-    st.markdown(f"<div class='tc'><div style='display:flex;justify-content:space-between;align-items:center'><div><span style='color:#64748b;font-size:.8rem'>ANALYZING</span><br><span style='font-size:1.4rem;font-weight:700;color:#e2e8f0'>{ticker} @ ${price:.2f}</span></div><div style='text-align:right'><span style='color:#64748b;font-size:.8rem'>POSITION</span><br><span class='mono' style='color:#10b981'>{pltr_sh} sh @ ${pltr_cost:.2f}</span></div></div></div>", unsafe_allow_html=True)
+    pos_lbl = "POSITION" if ticker == "PLTR" else "YOUR PLTR LOT"
+    st.markdown(f"<div class='tc'><div style='display:flex;justify-content:space-between;align-items:center'><div><span style='color:#64748b;font-size:.8rem'>ANALYZING</span><br><span style='font-size:1.4rem;font-weight:700;color:#e2e8f0'>{ticker} @ ${price:.2f}</span></div><div style='text-align:right'><span style='color:#64748b;font-size:.8rem'>{pos_lbl}</span><br><span class='mono' style='color:#10b981'>{pltr_sh} sh @ ${pltr_cost:.2f}</span></div></div></div>", unsafe_allow_html=True)
 
     if opt_exps:
         sel_exp = st.selectbox("Expiration", opt_exps[:10], index=min(2, len(opt_exps) - 1), key="sel_exp")
