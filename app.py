@@ -13,7 +13,6 @@ import numpy as np
 import yfinance as yf
 from datetime import datetime, timedelta
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 import math, warnings, json, time, os
 from pathlib import Path
 warnings.filterwarnings("ignore")
@@ -1651,86 +1650,82 @@ def _levels_nearest(levels, price, n):
     return sorted(set(levels), key=lambda x: abs(float(x) - price))[:n]
 
 
+def _chart_hoverlabel():
+    return dict(bgcolor="#1e293b", font=dict(size=12, family="Inter, system-ui, sans-serif"))
+
+
 def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_sr=True,
                 show_ichi=False, show_super=False, diamonds=None, gold_zone=None):
+    """Build four separate figures: price (+ overlays), volume, RSI, MACD — easier to read than one stacked chart."""
     last_px = float(df["Close"].iloc[-1])
-    fig = make_subplots(
-        rows=4, cols=1, shared_xaxes=True, vertical_spacing=0.042,
-        row_heights=[0.58, 0.14, 0.14, 0.14],
-    )
-    fig.add_trace(
+    _grid = "rgba(30,41,59,0.55)"
+    _legend_font = dict(size=10, color="#e2e8f0", family="Inter, system-ui, sans-serif")
+    uirev = f"{ticker}_tech"
+
+    fig_p = go.Figure()
+    fig_p.add_trace(
         go.Candlestick(
             x=df.index, open=df["Open"], high=df["High"], low=df["Low"], close=df["Close"],
             increasing_line_color="#10b981", decreasing_line_color="#ef4444",
             increasing_fillcolor="#10b981", decreasing_fillcolor="#ef4444",
             increasing_line_width=1.35, decreasing_line_width=1.35,
             name="Price",
-        ),
-        row=1, col=1,
+        )
     )
     if show_ind:
         for p, c in [(20, "#38bdf8"), (50, "#fbbf24"), (200, "#a78bfa")]:
             if len(df) >= p:
-                fig.add_trace(
+                fig_p.add_trace(
                     go.Scatter(
                         x=df.index, y=TA.ema(df["Close"], p), mode="lines",
                         line=dict(color=c, width=1.1), name=f"EMA {p}", opacity=0.92,
                         hovertemplate=f"EMA {p}: %{{y:.2f}}<extra></extra>",
-                    ),
-                    row=1, col=1,
+                    )
                 )
         u, _m, lo = TA.bollinger(df["Close"])
-        fig.add_trace(
+        fig_p.add_trace(
             go.Scatter(
                 x=df.index, y=u, line=dict(color="rgba(148,163,184,0.45)", width=1),
                 name="Bollinger", legendgroup="bb", showlegend=True,
                 hovertemplate="BB upper: %{y:.2f}<extra></extra>",
-            ),
-            row=1, col=1,
+            )
         )
-        fig.add_trace(
+        fig_p.add_trace(
             go.Scatter(
                 x=df.index, y=lo, line=dict(color="rgba(148,163,184,0.45)", width=1),
                 fill="tonexty", fillcolor="rgba(148,163,184,0.06)",
                 name="BB lower", legendgroup="bb", showlegend=False,
                 hovertemplate="BB lower: %{y:.2f}<extra></extra>",
-            ),
-            row=1, col=1,
+            )
         )
     if show_ichi:
         t, k, sa, sb, _ = TA.ichimoku(df)
-        fig.add_trace(
-            go.Scatter(x=df.index, y=t, line=dict(color="#22d3ee", width=1.1), name="Tenkan", opacity=0.75),
-            row=1, col=1,
+        fig_p.add_trace(
+            go.Scatter(x=df.index, y=t, line=dict(color="#22d3ee", width=1.1), name="Tenkan", opacity=0.75)
         )
-        fig.add_trace(
-            go.Scatter(x=df.index, y=k, line=dict(color="#fb7185", width=1.1), name="Kijun", opacity=0.75),
-            row=1, col=1,
+        fig_p.add_trace(
+            go.Scatter(x=df.index, y=k, line=dict(color="#fb7185", width=1.1), name="Kijun", opacity=0.75)
         )
-        fig.add_trace(
+        fig_p.add_trace(
             go.Scatter(x=df.index, y=sa, line=dict(color="rgba(16,185,129,0.25)", width=0),
-                       name="Senkou A", showlegend=False),
-            row=1, col=1,
+                       name="Senkou A", showlegend=False)
         )
-        fig.add_trace(
+        fig_p.add_trace(
             go.Scatter(
                 x=df.index, y=sb, line=dict(color="rgba(239,68,68,0.25)", width=0),
                 fill="tonexty", fillcolor="rgba(34,197,94,0.07)", name="Ichimoku cloud",
                 hovertemplate="Cloud<extra></extra>",
-            ),
-            row=1, col=1,
+            )
         )
     if show_super:
         st_l, _st_d = TA.supertrend(df)
-        fig.add_trace(
+        fig_p.add_trace(
             go.Scatter(
                 x=df.index, y=st_l, mode="lines",
                 line=dict(color="#fb923c", width=2), name="Supertrend",
                 hovertemplate="Supertrend: %{y:.2f}<extra></extra>",
-            ),
-            row=1, col=1,
+            )
         )
-    # Fib: show five core levels only; label the three mid retracements + short 0/100 tags (less edge clutter).
     if show_fib and len(df) >= 50:
         rec = df.iloc[-60:]
         fl = TA.fib_retracement(rec["High"].max(), rec["Low"].min())
@@ -1748,51 +1743,46 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
                 ann = f"{fib_short[lab]} ${lev:.2f}"
             lw = 1.9 if lab in fib_labeled else 1.1
             op = 0.62 if lab in fib_labeled else 0.38
-            fig.add_hline(
+            fig_p.add_hline(
                 y=lev, line_dash="dot", line_color="rgba(56,189,248,0.55)", line_width=lw,
                 opacity=op, annotation_text=ann, annotation_position="right",
                 annotation_font=dict(size=10, color="rgba(186,230,253,0.95)"),
-                row=1, col=1,
             )
     if show_gann:
         gl = TA.gann_sq9(last_px)
         near = sorted(gl.items(), key=lambda x: abs(x[1] - last_px))[:3]
         for i, (_lab, lev) in enumerate(near, start=1):
-            fig.add_hline(
+            fig_p.add_hline(
                 y=lev, line_dash="dash", line_color="rgba(250,204,21,0.42)", line_width=1.2,
                 opacity=0.55, annotation_text=f"G{i} ${lev:.0f}", annotation_position="right",
                 annotation_font=dict(size=9, color="rgba(253,224,71,0.9)"),
-                row=1, col=1,
             )
     if show_sr:
         sups, ress = TA.find_sr(df)
         for s in _levels_nearest(sups, last_px, 2):
-            fig.add_hline(
+            fig_p.add_hline(
                 y=s, line_dash="solid", line_color="rgba(34,197,94,0.45)", line_width=1.2,
                 opacity=0.55, annotation_text=f"S {s:.2f}", annotation_position="left",
                 annotation_font=dict(size=9, color="rgba(134,239,172,0.95)"),
-                row=1, col=1,
             )
         for r in _levels_nearest(ress, last_px, 2):
-            fig.add_hline(
+            fig_p.add_hline(
                 y=r, line_dash="solid", line_color="rgba(248,113,113,0.45)", line_width=1.2,
                 opacity=0.55, annotation_text=f"R {r:.2f}", annotation_position="left",
                 annotation_font=dict(size=9, color="rgba(254,202,202,0.95)"),
-                row=1, col=1,
             )
     if gold_zone is not None:
-        fig.add_hline(
+        fig_p.add_hline(
             y=gold_zone, line_dash="solid", line_color="#eab308", line_width=3, opacity=0.9,
             annotation_text=f"Gold ${gold_zone:.2f}", annotation_position="right",
             annotation_font=dict(color="#fde047", size=11, family="JetBrains Mono"),
-            row=1, col=1,
         )
 
     if diamonds:
         blue_d = [d for d in diamonds if d["type"] == "blue"]
         pink_d = [d for d in diamonds if d["type"] == "pink"]
         if blue_d:
-            fig.add_trace(
+            fig_p.add_trace(
                 go.Scatter(
                     x=[d["date"] for d in blue_d],
                     y=[d["price"] * 0.985 for d in blue_d],
@@ -1801,11 +1791,10 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
                     name="Blue diamond",
                     hovertemplate="<b>Blue diamond</b><br>%{x}<br>$%{customdata:.2f}<br>Buy confluence<extra></extra>",
                     customdata=[d["price"] for d in blue_d],
-                ),
-                row=1, col=1,
+                )
             )
         if pink_d:
-            fig.add_trace(
+            fig_p.add_trace(
                 go.Scatter(
                     x=[d["date"] for d in pink_d],
                     y=[d["price"] * 1.015 for d in pink_d],
@@ -1814,58 +1803,24 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
                     name="Pink diamond",
                     hovertemplate="<b>Pink diamond</b><br>%{x}<br>$%{customdata:.2f}<br>Exit / take profit<extra></extra>",
                     customdata=[d["price"] for d in pink_d],
-                ),
-                row=1, col=1,
+                )
             )
 
-    vc = ["#10b981" if c >= o else "#ef4444" for c, o in zip(df["Close"], df["Open"])]
-    fig.add_trace(
-        go.Bar(x=df.index, y=df["Volume"], marker_color=vc, name="Volume", opacity=0.45, showlegend=False,
-               hovertemplate="Volume: %{y:,.0f}<extra></extra>"),
-        row=2, col=1,
-    )
-    fig.add_trace(
-        go.Scatter(x=df.index, y=TA.rsi(df["Close"]), line=dict(color="#c4b5fd", width=1.6), name="RSI",
-                   showlegend=False, hovertemplate="RSI: %{y:.1f}<extra></extra>"),
-        row=3, col=1,
-    )
-    fig.add_hline(y=70, line_dash="dot", line_color="rgba(248,113,113,0.35)", row=3, col=1)
-    fig.add_hline(y=50, line_dash="dot", line_color="rgba(148,163,184,0.25)", row=3, col=1)
-    fig.add_hline(y=30, line_dash="dot", line_color="rgba(52,211,153,0.35)", row=3, col=1)
-    ml, sl, hist = TA.macd(df["Close"])
-    fig.add_trace(
-        go.Scatter(x=df.index, y=ml, line=dict(color="#60a5fa", width=1.4), name="MACD line",
-                   showlegend=False, hovertemplate="MACD: %{y:.4f}<extra></extra>"),
-        row=4, col=1,
-    )
-    fig.add_trace(
-        go.Scatter(x=df.index, y=sl, line=dict(color="#fcd34d", width=1.1), name="MACD signal",
-                   showlegend=False, hovertemplate="Signal: %{y:.4f}<extra></extra>"),
-        row=4, col=1,
-    )
-    hc = ["#34d399" if v >= 0 else "#f87171" for v in hist]
-    fig.add_trace(
-        go.Bar(x=df.index, y=hist, marker_color=hc, name="MACD hist", opacity=0.5, showlegend=False,
-               hovertemplate="Hist: %{y:.4f}<extra></extra>"),
-        row=4, col=1,
-    )
-    _grid = "rgba(30,41,59,0.55)"
-    _legend_font = dict(size=10, color="#e2e8f0", family="Inter, system-ui, sans-serif")
-    fig.update_layout(
+    fig_p.update_layout(
         template="plotly_dark",
         paper_bgcolor="#080c14",
         plot_bgcolor="#080c14",
         font=dict(family="JetBrains Mono, monospace", size=11, color="#cbd5e1"),
         title=dict(
-            text=f"<b>{ticker}</b> · price & momentum",
-            x=0.01, xanchor="left", y=0.985, yanchor="top",
+            text=f"<b>{ticker}</b> · price & overlays",
+            x=0.01, xanchor="left", y=0.98, yanchor="top",
             font=dict(size=15, color="#f1f5f9", family="Inter, system-ui, sans-serif"),
         ),
-        height=840,
-        margin=dict(l=56, r=118, t=64, b=48),
+        height=540,
+        margin=dict(l=56, r=118, t=56, b=44),
         xaxis_rangeslider_visible=False,
         hovermode="x unified",
-        uirevision=ticker,
+        uirevision=uirev,
         showlegend=True,
         legend=dict(
             orientation="v",
@@ -1881,31 +1836,97 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
             traceorder="normal",
             itemwidth=28,
         ),
-        hoverlabel=dict(bgcolor="#1e293b", font_size=12, font_family="Inter, system-ui, sans-serif"),
+        hoverlabel=_chart_hoverlabel(),
+        xaxis=dict(gridcolor=_grid, zeroline=False, tickformat="%b %d<br>%Y", title=dict(text="Date", font=dict(size=11, color="#94a3b8"))),
+        yaxis=dict(gridcolor=_grid, zeroline=False, title=dict(text="Price ($)", font=dict(size=11, color="#94a3b8"))),
     )
-    fig.update_yaxes(
-        title_text="Price", title_font=dict(size=11, color="#94a3b8"), row=1, col=1,
-        gridcolor=_grid, zeroline=False,
+
+    vc = ["#10b981" if c >= o else "#ef4444" for c, o in zip(df["Close"], df["Open"])]
+    fig_v = go.Figure(
+        data=[
+            go.Bar(
+                x=df.index, y=df["Volume"], marker_color=vc, name="Volume", opacity=0.55,
+                hovertemplate="Volume: %{y:,.0f}<extra></extra>",
+            )
+        ]
     )
-    fig.update_yaxes(
-        title_text="Volume", title_font=dict(size=11, color="#94a3b8"), row=2, col=1,
-        gridcolor=_grid, zeroline=False,
+    fig_v.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="#080c14",
+        plot_bgcolor="#080c14",
+        font=dict(family="JetBrains Mono, monospace", size=11, color="#cbd5e1"),
+        height=240,
+        margin=dict(l=56, r=28, t=28, b=44),
+        hovermode="x unified",
+        uirevision=uirev,
+        showlegend=False,
+        hoverlabel=_chart_hoverlabel(),
+        xaxis=dict(gridcolor=_grid, zeroline=False, tickformat="%b %d<br>%Y", title=dict(text="Date", font=dict(size=11, color="#94a3b8"))),
+        yaxis=dict(gridcolor=_grid, zeroline=False, title=dict(text="Shares", font=dict(size=11, color="#94a3b8"))),
     )
-    fig.update_yaxes(
-        title_text="RSI", title_font=dict(size=11, color="#94a3b8"), range=[0, 100], row=3, col=1,
-        gridcolor=_grid, zeroline=False,
+
+    fig_r = go.Figure()
+    fig_r.add_trace(
+        go.Scatter(x=df.index, y=TA.rsi(df["Close"]), line=dict(color="#c4b5fd", width=1.8), name="RSI",
+                   hovertemplate="RSI: %{y:.1f}<extra></extra>")
     )
-    fig.update_yaxes(
-        title_text="MACD", title_font=dict(size=11, color="#94a3b8"), row=4, col=1,
-        gridcolor=_grid, zeroline=False,
+    fig_r.add_hline(y=70, line_dash="dot", line_color="rgba(248,113,113,0.4)")
+    fig_r.add_hline(y=50, line_dash="dot", line_color="rgba(148,163,184,0.3)")
+    fig_r.add_hline(y=30, line_dash="dot", line_color="rgba(52,211,153,0.4)")
+    fig_r.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="#080c14",
+        plot_bgcolor="#080c14",
+        font=dict(family="JetBrains Mono, monospace", size=11, color="#cbd5e1"),
+        height=260,
+        margin=dict(l=56, r=28, t=28, b=44),
+        hovermode="x unified",
+        uirevision=uirev,
+        showlegend=False,
+        hoverlabel=_chart_hoverlabel(),
+        yaxis=dict(range=[0, 100], gridcolor=_grid, zeroline=False, title=dict(text="RSI", font=dict(size=11, color="#94a3b8"))),
+        xaxis=dict(gridcolor=_grid, zeroline=False, tickformat="%b %d<br>%Y", title=dict(text="Date", font=dict(size=11, color="#94a3b8"))),
     )
-    for i in range(1, 4):
-        fig.update_xaxes(showticklabels=False, gridcolor=_grid, zeroline=False, row=i, col=1)
-    fig.update_xaxes(
-        gridcolor=_grid, zeroline=False, showticklabels=True, tickformat="%b %d<br>%Y",
-        row=4, col=1,
+
+    ml, sl, hist = TA.macd(df["Close"])
+    hc = ["#34d399" if v >= 0 else "#f87171" for v in hist]
+    fig_m = go.Figure()
+    fig_m.add_trace(
+        go.Scatter(x=df.index, y=ml, line=dict(color="#60a5fa", width=1.5), name="MACD",
+                   hovertemplate="MACD: %{y:.4f}<extra></extra>")
     )
-    return fig
+    fig_m.add_trace(
+        go.Scatter(x=df.index, y=sl, line=dict(color="#fcd34d", width=1.1), name="Signal",
+                   hovertemplate="Signal: %{y:.4f}<extra></extra>")
+    )
+    fig_m.add_trace(
+        go.Bar(x=df.index, y=hist, marker_color=hc, name="Histogram", opacity=0.55,
+               hovertemplate="Hist: %{y:.4f}<extra></extra>")
+    )
+    fig_m.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="#080c14",
+        plot_bgcolor="#080c14",
+        font=dict(family="JetBrains Mono, monospace", size=11, color="#cbd5e1"),
+        height=280,
+        margin=dict(l=56, r=28, t=36, b=44),
+        hovermode="x unified",
+        uirevision=uirev,
+        showlegend=True,
+        legend=dict(
+            orientation="h",
+            bgcolor="rgba(15,23,42,0.92)",
+            bordercolor="rgba(148,163,184,0.35)",
+            borderwidth=1,
+            x=0.99, xanchor="right", y=0.99, yanchor="top",
+            font=dict(size=10, color="#94a3b8"),
+        ),
+        hoverlabel=_chart_hoverlabel(),
+        xaxis=dict(gridcolor=_grid, zeroline=False, tickformat="%b %d<br>%Y", title=dict(text="Date", font=dict(size=11, color="#94a3b8"))),
+        yaxis=dict(gridcolor=_grid, zeroline=True, zerolinecolor="rgba(148,163,184,0.25)", title=dict(text="MACD", font=dict(size=11, color="#94a3b8"))),
+    )
+
+    return fig_p, fig_v, fig_r, fig_m
 
 
 # ═════════════════════════════════════════════════════════════════════════
@@ -2667,12 +2688,23 @@ def main():
     #  SECTION 1 \u2014 TECHNICAL CHART (always visible)
     # ══════════════════════════════════════════════════════════════════
     st.markdown('<div id="charts" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
-    _section("Technical Chart", f"{ticker} — hover vertically to align price, volume, RSI, and MACD. Use sidebar overlays sparingly; fewer lines read faster.",
-             tip_plain="Candles: OHLC per bar. EMA / Bollinger: trend and volatility. Fib & Gann & S/R: reference levels (toggle off if busy). Diamonds: confluence signals. Gold line: Gold Zone. Lower panels: participation (volume), heat (RSI), momentum (MACD).")
-    fig = build_chart(df, ticker, show_ind, show_fib, show_gann, show_sr, show_ichi, show_super,
-                      diamonds=diamonds if show_diamonds else None,
-                      gold_zone=gold_zone_price if show_gold_zone else None)
-    st.plotly_chart(fig, use_container_width=True, config=_PLOTLY_UI_CONFIG)
+    _section("Technical Chart", f"{ticker} — four separate charts below (price, volume, RSI, MACD). Zoom each panel independently. Use sidebar overlays sparingly on the price chart.",
+             tip_plain="Candles: OHLC per bar. EMA / Bollinger: trend and volatility. Fib & Gann & S/R: reference levels (toggle off if busy). Diamonds: confluence signals. Gold line: Gold Zone. Volume: participation. RSI: overbought/oversold heat. MACD: momentum vs signal.")
+    fig_p, fig_v, fig_r, fig_m = build_chart(
+        df, ticker, show_ind, show_fib, show_gann, show_sr, show_ichi, show_super,
+        diamonds=diamonds if show_diamonds else None,
+        gold_zone=gold_zone_price if show_gold_zone else None,
+    )
+    st.plotly_chart(fig_p, use_container_width=True, config=_PLOTLY_UI_CONFIG)
+    st.markdown("---")
+    st.markdown("#### Volume")
+    st.plotly_chart(fig_v, use_container_width=True, config=_PLOTLY_UI_CONFIG)
+    st.markdown("---")
+    st.markdown("#### RSI (14)")
+    st.plotly_chart(fig_r, use_container_width=True, config=_PLOTLY_UI_CONFIG)
+    st.markdown("---")
+    st.markdown("#### MACD")
+    st.plotly_chart(fig_m, use_container_width=True, config=_PLOTLY_UI_CONFIG)
     chart_mood = "bull" if struct == "BULLISH" else ("bear" if struct == "BEARISH" else "neutral")
 
     # ── DIAMOND SIGNAL CARDS (below chart) ──
