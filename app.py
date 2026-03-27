@@ -89,6 +89,31 @@ def save_config(cfg):
         pass
 
 
+def _overlay_prefs_from_session():
+    """Chart overlay keys as stored in session_state (sb_* toggles)."""
+    return {
+        "overlay_ema": bool(st.session_state.get("sb_ema", True)),
+        "overlay_fib": bool(st.session_state.get("sb_fib", True)),
+        "overlay_gann": bool(st.session_state.get("sb_gann", True)),
+        "overlay_sr": bool(st.session_state.get("sb_sr", True)),
+        "overlay_ichi": bool(st.session_state.get("sb_ichi", False)),
+        "overlay_super": bool(st.session_state.get("sb_super", False)),
+        "overlay_diamonds": bool(st.session_state.get("sb_diamonds", True)),
+        "overlay_gold": bool(st.session_state.get("sb_gold_zone", True)),
+    }
+
+
+def _persist_overlay_prefs():
+    """Persist overlay toggles from session state (used inside chart fragment). Merges onto latest config on disk."""
+    base = load_config()
+    o = _overlay_prefs_from_session()
+    upd = {**base, **o}
+    if any(upd.get(k) != base.get(k) for k in o):
+        save_config(upd)
+        return upd
+    return base
+
+
 def _hydrate_sidebar_prefs(cfg):
     """Load Strategy / Chart overlay widget state from config when session has no value yet."""
     if "sb_strat_radio" not in st.session_state:
@@ -132,7 +157,7 @@ def retry_fetch(fn, retries=3, delay=2):
     return None
 
 st.set_page_config(page_title="CashFlow Command Center v14", page_icon="💰",
-                   layout="wide", initial_sidebar_state="expanded")
+                   layout="wide", initial_sidebar_state="collapsed")
 
 
 @st.cache_resource
@@ -186,6 +211,9 @@ _MINI_MODE_DENSITY_CSS = """
 .main div[data-testid="stMetric"] [data-testid="stMetricValue"]{font-size:1.02rem!important}
 .main .stMarkdown p{font-size:.84rem!important;line-height:1.45!important;margin:0 0 .3rem 0!important}
 .main h1{font-size:1.28rem!important;margin:0 0 .2rem 0!important}
+.main .cf-page-header{margin-bottom:6px!important;gap:6px!important}
+.main .cf-page-header h1{font-size:1.22rem!important;line-height:1.2!important}
+.main .cf-page-header span{font-size:.62rem!important}
 .main [data-testid="stExpander"] summary{font-size:.84rem!important;padding:.3rem .45rem!important}
 .main [data-baseweb="alert"]{padding:8px 10px!important;font-size:.82rem!important}
 .main .stTabs [data-baseweb="tab"]{padding:5px 9px!important;font-size:.78rem!important}
@@ -232,7 +260,14 @@ iframe{border:0!important}
 .main [data-testid="stVerticalBlock"] > div:has(> div[data-testid="stMarkdownContainer"] nav.sticky-nav){
   min-height:0!important;margin-top:0!important;margin-bottom:0!important;
 }
-section[data-testid="stSidebar"]{background:var(--bg1)!important;border-right:1px solid var(--bdr)!important;z-index:1000006!important}
+section[data-testid="stSidebar"]{
+  background:rgba(8,12,20,.72)!important;
+  backdrop-filter:blur(20px)!important;-webkit-backdrop-filter:blur(20px)!important;
+  border-right:1px solid rgba(255,255,255,.1)!important;
+  z-index:1000006!important;
+  width:min(250px,92vw)!important;min-width:240px!important;
+}
+[data-testid="stSidebarNav"]{display:none!important}
 [data-testid="stSidebarUserContent"]{padding-top:100px!important}
 [data-testid="stSidebar"] h2,[data-testid="stSidebar"] h3,[data-testid="stSidebar"] h4{color:#00e5ff!important}
 [data-testid="stSidebar"] h1:not(.cf-sidebar-title){color:#00e5ff!important}
@@ -518,6 +553,24 @@ div[data-testid="stMetricValue"], .mono, .glance-value, .ticker, .price-value{
 .earn-meta{margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.08);display:flex;gap:12px;flex-wrap:wrap}
 .earn-pill{padding:6px 10px;border-radius:999px;border:1px solid rgba(0,229,255,.35);background:rgba(2,6,23,.66);color:#cbd5e1;font-size:.82rem}
 @media(max-width:900px){.earnings-intel-grid{grid-template-columns:1fr}}
+/* Command bar + watchlist tape (main column HUD) */
+.cf-command-bar .stMarkdown p{margin:0!important}
+.cf-tape-title{font-size:.82rem!important;font-weight:700!important;color:#e2e8f0!important;margin:2px 0 6px 0!important}
+.cf-tape-cell{text-align:center!important}
+/* Main-column segmented / radio pills (same intent as sidebar styling) */
+.main [data-baseweb="radio"]{
+  background:#0c1220!important;border:1px solid #334155!important;border-radius:12px!important;
+  padding:6px 8px!important;flex-wrap:wrap!important;gap:6px!important;
+}
+.main [data-baseweb="radio"] label{
+  background:#1e293b!important;color:#f8fafc!important;border:1px solid #475569!important;
+  border-radius:10px!important;padding:8px 10px!important;margin:0 4px 4px 0!important;
+  font-weight:600!important;font-size:.74rem!important;
+}
+.main [data-baseweb="radio"] label:has(input:checked){
+  background:linear-gradient(180deg,#22d3ee,#0ea5e9)!important;color:#fff!important;
+  border-color:rgba(255,255,255,.25)!important;
+}
 /* ── Sidebar: horizontal radio groups (Scanner / Focus / Horizon) — dark, readable on all hosts ── */
 [data-testid="stSidebar"] [data-baseweb="radio"]{
   background:#0c1220!important;border:1px solid #334155!important;border-radius:12px!important;
@@ -787,6 +840,21 @@ def fetch_stock(ticker, period="1y", interval="1d"):
             df.index = df.index.tz_localize(None)
         return df
     return retry_fetch(_fetch)
+
+
+@st.cache_data(ttl=120)
+def _ticker_pct_change_1d(symbol: str):
+    """Approximate last session % change for watchlist tape (cached per symbol)."""
+    try:
+        sym = str(symbol).upper().strip()
+        df = _yfinance_ticker(sym).history(period="10d", interval="1d")
+        if df is None or df.empty or len(df) < 2:
+            return None
+        c = df["Close"]
+        return float((c.iloc[-1] / c.iloc[-2] - 1.0) * 100.0)
+    except Exception:
+        return None
+
 
 @st.cache_data(ttl=300)
 def fetch_intraday_series(symbol, period="5d", interval="1h"):
@@ -1293,34 +1361,27 @@ def weekly_trend_label(df_wk):
 
 @st.cache_data(ttl=300)
 def calc_gold_zone(df, df_wk=None):
-    """Gold Zone: weighted average of Volume-Profile POC, 61.8% Fibonacci,
-    nearest Gann Sq9 level, and higher-TF order-block approximation.
-    Returns (gold_zone_price, component_dict)."""
+    """Gold Zone: mean of POC, Fib 61.8%, Gann Sq9, and 200-day SMA (institutional anchor).
+    ``df_wk`` is accepted for API compatibility; SMA 200 replaces weekly S/R in the blend."""
     price = df["Close"].iloc[-1]
     components = {}
 
     vp = TA.volume_profile(df)
     if not vp.empty:
-        poc = vp.loc[vp["volume"].idxmax(), "mid"]
-        components["POC"] = poc
+        components["POC"] = vp.loc[vp["volume"].idxmax(), "mid"]
 
-    if len(df) >= 50:
+    if len(df) >= 60:
         rec = df.iloc[-60:]
         hi, lo = rec["High"].max(), rec["Low"].min()
         components["Fib 61.8%"] = hi - (hi - lo) * 0.618
 
+    if len(df) >= 200:
+        components["SMA 200"] = float(df["Close"].rolling(200).mean().iloc[-1])
+
     gann = TA.gann_sq9(price)
     if gann:
-        below = {k: v for k, v in gann.items() if v <= price}
-        above = {k: v for k, v in gann.items() if v > price}
         nearest = min(gann.values(), key=lambda x: abs(x - price))
         components["Gann Sq9"] = nearest
-
-    if df_wk is not None and len(df_wk) >= 20:
-        sups, ress = TA.find_sr(df_wk, window=10)
-        all_sr = sups + ress
-        if all_sr:
-            components["Weekly S/R"] = min(all_sr, key=lambda x: abs(x - price))
 
     if components:
         gold_zone = round(np.mean(list(components.values())), 2)
@@ -2226,6 +2287,188 @@ def _parse_watchlist_string(s):
     return items
 
 
+@st.fragment
+def _fragment_technical_zone(
+    df,
+    df_wk,
+    ticker,
+    gold_zone_price,
+    gold_zone_components,
+    price,
+    diamonds,
+    latest_d,
+    cp_breakdown,
+    d_wr,
+    d_n,
+    struct,
+    mini_mode,
+):
+    """Charts + overlay toggles + diamond cards + gold zone copy. Reruns without refetching Yahoo data."""
+    if mini_mode:
+        st.info(
+            "**Mini mode:** technical charts are off to save bandwidth and CPU. "
+            "Disable **🚀 Turbo** in the Command Bar to load Plotly."
+        )
+        _persist_overlay_prefs()
+        return
+
+    st.markdown('<div id="charts" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
+    _section(
+        "Technical Chart",
+        f"{ticker} — four separate charts below (price, volume, RSI, MACD). Zoom each panel independently. "
+        "Flip chart layers below — updates here do not re-run the data feed.",
+        tip_plain="Candles: OHLC per bar. EMA / Bollinger: trend and volatility. Fib & Gann & S/R: reference levels (toggle off if busy). Diamonds: confluence signals. Gold line: Gold Zone. Volume: participation. RSI: overbought/oversold heat. MACD: momentum vs signal.",
+    )
+    st.markdown("##### Chart layers")
+    o1, o2 = st.columns(2)
+    with o1:
+        show_ind = st.toggle("EMAs & Bollinger", key="sb_ema")
+        show_gann = st.toggle("Gann Sq9", key="sb_gann")
+        show_ichi = st.toggle("Ichimoku", key="sb_ichi")
+        show_diamonds = st.toggle("Diamonds", key="sb_diamonds")
+    with o2:
+        show_fib = st.toggle("Fibonacci", key="sb_fib")
+        show_sr = st.toggle("S/R levels", key="sb_sr")
+        show_super = st.toggle("Supertrend", key="sb_super")
+        show_gold_zone = st.toggle("Gold zone", key="sb_gold_zone")
+
+    fig_p, fig_v, fig_r, fig_m = build_chart(
+        df,
+        ticker,
+        show_ind,
+        show_fib,
+        show_gann,
+        show_sr,
+        show_ichi,
+        show_super,
+        diamonds=diamonds if show_diamonds else None,
+        gold_zone=gold_zone_price if show_gold_zone else None,
+    )
+    st.plotly_chart(fig_p, use_container_width=True, config=_PLOTLY_UI_CONFIG)
+    st.markdown("---")
+    st.markdown("#### Volume")
+    st.plotly_chart(fig_v, use_container_width=True, config=_PLOTLY_UI_CONFIG)
+    st.markdown("---")
+    st.markdown("#### RSI (14)")
+    st.plotly_chart(fig_r, use_container_width=True, config=_PLOTLY_UI_CONFIG)
+    st.markdown("---")
+    st.markdown("#### MACD")
+    st.plotly_chart(fig_m, use_container_width=True, config=_PLOTLY_UI_CONFIG)
+
+    chart_mood = "bull" if struct == "BULLISH" else ("bear" if struct == "BEARISH" else "neutral")
+
+    if show_diamonds and diamonds:
+        recent_diamonds = [d for d in diamonds if (df.index[-1] - d["date"]).days <= 30]
+        if recent_diamonds:
+            st.markdown("#### Recent Diamond Signals")
+            d_cols = st.columns(min(len(recent_diamonds), 4))
+            for idx_d, d in enumerate(recent_diamonds[-4:]):
+                with d_cols[idx_d]:
+                    cls = "diamond-blue" if d["type"] == "blue" else "diamond-pink"
+                    icon = "🔷" if d["type"] == "blue" else "💎"
+                    label = "BLUE DIAMOND: Strong Buy" if d["type"] == "blue" else "PINK DIAMOND: Take Profit"
+                    age = (df.index[-1] - d["date"]).days
+                    prob_txt = f"Historical win rate: {d_wr:.0f}% over {d_n} signals" if d_n > 0 else "Insufficient history"
+                    st.markdown(
+                        f"<div class='{cls}'>"
+                        f"<div style='font-size:1.1rem;font-weight:700;margin-bottom:4px'>{icon} {label}</div>"
+                        f"<div style='color:#94a3b8;font-size:.85rem'>Date: {d['date'].strftime('%b %d, %Y')} ({age}d ago)<br>"
+                        f"Price: ${d['price']:.2f} | Score: {d['score']}/9 | RSI: {d['rsi']:.0f}<br>"
+                        f"<span style='color:#fbbf24;font-size:.8rem'>📊 {prob_txt}</span></div></div>",
+                        unsafe_allow_html=True,
+                    )
+
+            if latest_d and (df.index[-1] - latest_d["date"]).days <= 5:
+                why_type = "BLUE DIAMOND" if latest_d["type"] == "blue" else "PINK DIAMOND"
+                why_color = "#3b82f6" if latest_d["type"] == "blue" else "#ec4899"
+                why_action = (
+                    "Strong confluence aligned bullish. The market gave a high probability buy signal."
+                    if latest_d["type"] == "blue"
+                    else "Confluence collapsed or momentum exhausted. Time to protect gains."
+                )
+                flabels = _factor_checklist_labels()
+                factor_lines = ""
+                passed = 0
+                for key, nice in flabels.items():
+                    info = cp_breakdown.get(key)
+                    if not info:
+                        continue
+                    ok = info["pts"] > 0
+                    if ok:
+                        passed += 1
+                    mark = "&#10003;" if ok else ""
+                    row_col = "#34d399" if ok else "#64748b"
+                    factor_lines += (
+                        f"<div style='padding:5px 0;display:flex;align-items:flex-start;gap:10px;color:{row_col};font-size:.9rem'>"
+                        f"<span style='color:#34d399;font-weight:800;min-width:1.2em'>{mark}</span>"
+                        f"<span><strong style='color:#e2e8f0'>{nice}</strong>"
+                        f"<span style='color:#64748b;font-size:.8rem'> ({info['pts']}/{info['max']})</span></span></div>"
+                    )
+                wk_confirm = latest_d.get("weekly", "N/A")
+                win_badge = (
+                    f"<div style='margin:12px 0 8px 0'><span class='diamond-win-badge'>HISTORICAL WIN RATE: {d_wr:.0f}%</span>"
+                    f"<span style='color:#94a3b8;font-size:.8rem;margin-left:10px'>({d_n} past signals)</span></div>"
+                    if d_n > 0
+                    else "<div style='color:#64748b;font-size:.85rem;margin:8px 0'>Not enough history for a win rate badge yet.</div>"
+                )
+                st.markdown(
+                    f"<div style='background:rgba(15,23,42,.95);border:1px solid {why_color};border-radius:12px;padding:18px 20px;margin:12px 0'>"
+                    f"<div style='font-size:.8rem;color:{why_color};text-transform:uppercase;letter-spacing:.1em;font-weight:700;margin-bottom:6px'>"
+                    f"Why This {why_type}?</div>"
+                    f"<div style='color:#e2e8f0;font-size:.95rem;margin-bottom:6px'>Signal fired at <strong>{latest_d['score']}/9</strong> confluence. "
+                    f"Live checklist now shows <strong>{passed}/7</strong> headline factors green.</div>"
+                    f"<div style='color:#94a3b8;font-size:.88rem;margin-bottom:12px;line-height:1.5'>{why_action}</div>"
+                    f"{win_badge}"
+                    f"<div style='font-size:.72rem;color:#64748b;text-transform:uppercase;margin-bottom:6px'>Diamond checklist</div>"
+                    f"<div>{factor_lines}</div>"
+                    f"<div style='margin-top:12px;padding-top:10px;border-top:1px solid rgba(255,255,255,.06);font-size:.8rem;color:#94a3b8'>"
+                    f"Weekly filter at signal: <strong style='color:{why_color}'>{wk_confirm}</strong>. "
+                    f"RSI at signal: {latest_d['rsi']:.0f}.</div></div>",
+                    unsafe_allow_html=True,
+                )
+
+    if show_gold_zone:
+        show_gz_detail = st.checkbox("Show Gold Zone Breakdown", value=False, key="chk_gold_zone_detail")
+        if show_gz_detail:
+            st.markdown(
+                f"**Gold Zone Price: ${gold_zone_price:.2f}**. This is the weighted average of multiple key levels that institutional traders watch."
+            )
+            for comp_name, comp_val in gold_zone_components.items():
+                dist = (comp_val / price - 1) * 100
+                st.markdown(f"- **{comp_name}**: ${comp_val:.2f} ({dist:+.1f}% from current)")
+            _explain(
+                "Why the Gold Zone matters",
+                "The Gold Zone combines four of the strongest support/resistance signals into one level: "
+                "Volume Profile POC (where the most shares traded), the 61.8% Fibonacci golden ratio, "
+                "the 200-day simple moving average (institutional anchor), and the nearest Gann Square of 9 natural level. "
+                "When price is ABOVE the Gold Zone, bulls are in control. When it drops below, be cautious. "
+                "This is the single most important price level on the chart.",
+                "neutral",
+            )
+
+    if latest_d and latest_d["type"] == "blue" and (df.index[-1] - latest_d["date"]).days <= 3:
+        next_gz = gold_zone_price
+        st.markdown(
+            f"<div class='ac'>🔔 <strong>Alert Suggestion:</strong> Set an alert for next Blue Diamond at <strong>${next_gz:.2f}</strong> (Gold Zone). "
+            f"If {ticker} pulls back to the Gold Zone and confluence rebuilds above 7/9, that is your next high probability entry.</div>",
+            unsafe_allow_html=True,
+        )
+    elif latest_d and latest_d["type"] == "pink" and (df.index[-1] - latest_d["date"]).days <= 3:
+        st.markdown(
+            f"<div class='ac'>🔔 <strong>Alert Suggestion:</strong> Pink Diamond fired at ${latest_d['price']:.2f}. "
+            f"Consider taking partial profits. Set alert if {ticker} drops below Gold Zone ${gold_zone_price:.2f} for a full exit.</div>",
+            unsafe_allow_html=True,
+        )
+
+    _explain(
+        "\U0001f9e0 Quick read",
+        "Hover the <strong>i</strong> icon in the section title above for the full tour. "
+        "Bottom line: green candles and a rising short EMA mean buyers lead. Diamonds and Gold Zone are your institutional style GPS.",
+        chart_mood,
+    )
+    _persist_overlay_prefs()
+
+
 # ═════════════════════════════════════════════════════════════════════════
 #  MAIN
 # ═════════════════════════════════════════════════════════════════════════
@@ -2233,26 +2476,35 @@ def _parse_watchlist_string(s):
 def main():
     cfg = load_config()
 
-    # ── SIDEBAR ──
+    # ── SIDEBAR (glass pane — branding only; controls live in main Command Bar) ──
     with st.sidebar:
         st.markdown(
             """<div class="cf-sidebar-brand">
             <h1 class="cf-sidebar-title">CASHFLOW</h1>
-            <p class="cf-sidebar-subtitle">Command center · v14</p>
+            <p class="cf-sidebar-subtitle">Command center · v14.1</p>
             </div>""",
             unsafe_allow_html=True,
         )
-        st.markdown("---")
-        st.markdown("#### \U0001f50e Stock & watchlist")
         st.caption(
-            "Type symbols in the box, then choose **Select stock to analyze** for the main dashboard. "
-            "Reorder the list with the buttons below. Scanner order follows the list when “Custom order” is on."
+            "Ticker, strategy, watchlist, and Turbo live in the **Command Bar** in the main column. "
+            "Tap the ☰ button (bottom-left FAB) to open this panel when you need more space."
         )
-        # Streamlit forbids mutating session_state[sb_scanner] after the text_area exists.
-        if "_sb_scanner_sync" in st.session_state:
-            st.session_state["sb_scanner"] = st.session_state.pop("_sb_scanner_sync")
-        elif "sb_scanner" not in st.session_state:
-            st.session_state["sb_scanner"] = cfg.get("watchlist", DEFAULT_CONFIG["watchlist"])
+        st.markdown("---")
+        st.markdown(
+            "<div style='text-align:center;color:#64748b;font-size:.65rem'>Data: Yahoo Finance &middot; Not advice</div>",
+            unsafe_allow_html=True,
+        )
+
+    # ── WATCHLIST EDITOR (main column — avoids sidebar hamburger on mobile) ──
+    if "_sb_scanner_sync" in st.session_state:
+        st.session_state["sb_scanner"] = st.session_state.pop("_sb_scanner_sync")
+    elif "sb_scanner" not in st.session_state:
+        st.session_state["sb_scanner"] = cfg.get("watchlist", DEFAULT_CONFIG["watchlist"])
+
+    with st.expander("Edit watchlist", expanded=False):
+        st.caption(
+            "Paste symbols (commas or one per line). Reorder with the buttons. Scanner order uses **Custom** vs **Confluence** from the Command Bar."
+        )
         scanner_watchlist_raw = st.text_area(
             "Watchlist symbols",
             height=96,
@@ -2268,32 +2520,7 @@ def main():
                 st.session_state["sb_watch_selected"] = st.session_state.pop("_sb_watch_selected_sync")
             if st.session_state.get("sb_watch_selected") not in watch_items:
                 st.session_state["sb_watch_selected"] = watch_items[0]
-            selected_ticker = st.selectbox(
-                "Select stock to analyze",
-                options=watch_items,
-                key="sb_watch_selected",
-                help="Main chart, news, options, and scores use this ticker. Change anytime from the sidebar.",
-            )
-        else:
-            st.session_state.pop("sb_watch_selected", None)
-            st.info("Add at least one symbol in the box above (e.g. PLTR, NVDA).")
-
-        _scan_idx = (
-            0 if cfg.get("scanner_sort_mode", "Custom watchlist order") == "Custom watchlist order" else 1
-        )
-        _scan_seg = st.radio(
-            "Scanner order",
-            ["Custom order", "Confluence first"],
-            index=_scan_idx,
-            horizontal=True,
-            key="sb_scan_radio",
-            help="Custom: follow your list order. Confluence: strongest setups first.",
-        )
-        scanner_sort_mode = (
-            "Custom watchlist order" if _scan_seg == "Custom order" else "Highest confluence first"
-        )
-
-        if watch_items:
+            sel = st.session_state.get("sb_watch_selected")
             st.markdown(
                 "<div style='font-size:.68rem;color:#94a3b8;margin:0 0 6px 0'>"
                 + " · ".join(f"<span class='mono' style='color:#cbd5e1'>{_html_mod.escape(x)}</span>" for x in watch_items)
@@ -2305,54 +2532,51 @@ def main():
             remove_clicked = st.button("✕  Remove symbol", use_container_width=True, key="sb_remove_ticker")
             sort_az = st.button("Sort A–Z", use_container_width=True, key="sb_sort_az")
 
-            if up_clicked and selected_ticker in watch_items:
-                idx = watch_items.index(selected_ticker)
+            if up_clicked and sel in watch_items:
+                idx = watch_items.index(sel)
                 if idx > 0:
                     watch_items[idx - 1], watch_items[idx] = watch_items[idx], watch_items[idx - 1]
                     scanner_watchlist = ",".join(watch_items)
                     st.session_state["_sb_scanner_sync"] = scanner_watchlist
-                    st.session_state["_sb_watch_selected_sync"] = selected_ticker
-                    cfg = {**cfg, "watchlist": scanner_watchlist, "scanner_sort_mode": scanner_sort_mode}
+                    st.session_state["_sb_watch_selected_sync"] = sel
+                    cfg = {**cfg, "watchlist": scanner_watchlist, "scanner_sort_mode": cfg.get("scanner_sort_mode", DEFAULT_CONFIG["scanner_sort_mode"])}
                     save_config(cfg)
                     st.rerun()
-            if down_clicked and selected_ticker in watch_items:
-                idx = watch_items.index(selected_ticker)
+            if down_clicked and sel in watch_items:
+                idx = watch_items.index(sel)
                 if idx < len(watch_items) - 1:
                     watch_items[idx + 1], watch_items[idx] = watch_items[idx], watch_items[idx + 1]
                     scanner_watchlist = ",".join(watch_items)
                     st.session_state["_sb_scanner_sync"] = scanner_watchlist
-                    st.session_state["_sb_watch_selected_sync"] = selected_ticker
-                    cfg = {**cfg, "watchlist": scanner_watchlist, "scanner_sort_mode": scanner_sort_mode}
+                    st.session_state["_sb_watch_selected_sync"] = sel
+                    cfg = {**cfg, "watchlist": scanner_watchlist, "scanner_sort_mode": cfg.get("scanner_sort_mode", DEFAULT_CONFIG["scanner_sort_mode"])}
                     save_config(cfg)
                     st.rerun()
-            if remove_clicked and selected_ticker in watch_items:
-                watch_items = [t for t in watch_items if t != selected_ticker]
+            if remove_clicked and sel in watch_items:
+                watch_items = [t for t in watch_items if t != sel]
                 scanner_watchlist = ",".join(watch_items)
                 st.session_state["_sb_scanner_sync"] = scanner_watchlist
                 if watch_items:
                     st.session_state["_sb_watch_selected_sync"] = watch_items[0]
-                cfg = {**cfg, "watchlist": scanner_watchlist, "scanner_sort_mode": scanner_sort_mode}
+                cfg = {**cfg, "watchlist": scanner_watchlist, "scanner_sort_mode": cfg.get("scanner_sort_mode", DEFAULT_CONFIG["scanner_sort_mode"])}
                 save_config(cfg)
                 st.rerun()
             if sort_az and watch_items:
                 watch_items = sorted(watch_items)
                 scanner_watchlist = ",".join(watch_items)
                 st.session_state["_sb_scanner_sync"] = scanner_watchlist
-                sel = st.session_state.get("sb_watch_selected")
-                if sel not in watch_items:
+                sel2 = st.session_state.get("sb_watch_selected")
+                if sel2 not in watch_items:
                     st.session_state["_sb_watch_selected_sync"] = watch_items[0]
-                cfg = {**cfg, "watchlist": scanner_watchlist, "scanner_sort_mode": scanner_sort_mode}
+                cfg = {**cfg, "watchlist": scanner_watchlist, "scanner_sort_mode": cfg.get("scanner_sort_mode", DEFAULT_CONFIG["scanner_sort_mode"])}
                 save_config(cfg)
                 st.rerun()
-
-        if watch_items:
-            ticker = selected_ticker
         else:
-            ticker = "PLTR"
+            st.session_state.pop("sb_watch_selected", None)
+            st.info("Add at least one symbol above (e.g. PLTR, NVDA).")
 
         st.markdown(
-            "<div style='font-size:.72rem;color:#94a3b8;margin:10px 0 2px 0;font-weight:600'>"
-            "Quick add (optional)</div>",
+            "<div style='font-size:.72rem;color:#94a3b8;margin:10px 0 2px 0;font-weight:600'>Quick add</div>",
             unsafe_allow_html=True,
         )
         if "_sb_add_ticker_clear" in st.session_state:
@@ -2374,96 +2598,154 @@ def main():
                 st.session_state["_sb_scanner_sync"] = scanner_watchlist
                 st.session_state["_sb_watch_selected_sync"] = add_ticker
                 st.session_state["_sb_add_ticker_clear"] = True
-                cfg = {**cfg, "watchlist": scanner_watchlist, "scanner_sort_mode": scanner_sort_mode}
+                cfg = {**cfg, "watchlist": scanner_watchlist, "scanner_sort_mode": cfg.get("scanner_sort_mode", DEFAULT_CONFIG["scanner_sort_mode"])}
                 save_config(cfg)
                 st.rerun()
             else:
                 st.toast("Enter a ticker in the box above, then tap Add symbol.")
 
-        watch_cfg = {**cfg, "watchlist": scanner_watchlist, "scanner_sort_mode": scanner_sort_mode}
-        if watch_cfg != cfg:
-            save_config(watch_cfg)
-            cfg = watch_cfg
+    # Re-parse watchlist after expander (Streamlit has run widgets)
+    scanner_watchlist_raw = st.session_state.get("sb_scanner", "")
+    watch_items = _parse_watchlist_string(scanner_watchlist_raw)
+    scanner_watchlist = ",".join(watch_items)
 
-        _hydrate_sidebar_prefs(cfg)
+    _scan_idx = (
+        0 if cfg.get("scanner_sort_mode", "Custom watchlist order") == "Custom watchlist order" else 1
+    )
 
-        st.markdown("---")
-        st.markdown("#### Strategy")
-        st.markdown(
-            '<p class="cf-widget-hint">Pick how you think about trades and the typical option window. Saved automatically.</p>',
-            unsafe_allow_html=True,
-        )
-        strat_mode = st.radio(
-            "Focus",
-            ["Sell premium", "Hybrid", "Growth"],
-            horizontal=True,
-            key="sb_strat_radio",
-            help="Sell premium: income first. Growth: more directional risk.",
-        )
-        horizon = st.radio(
-            "Horizon",
-            ["Weekly", "30 DTE", "45 DTE"],
-            horizontal=True,
-            key="sb_horizon_radio",
-            help="Rough target days-to-expiration for planning.",
-        )
-        st.markdown("---")
-        st.markdown("#### Chart overlays")
-        st.markdown(
-            '<p class="cf-widget-hint">Flip layers on or off — saved automatically for your next visit.</p>',
-            unsafe_allow_html=True,
-        )
-        o1, o2 = st.columns(2)
-        with o1:
-            show_ind = st.toggle("EMAs & Bollinger", key="sb_ema")
-            show_gann = st.toggle("Gann Sq9", key="sb_gann")
-            show_ichi = st.toggle("Ichimoku", key="sb_ichi")
-            show_diamonds = st.toggle("Diamonds", key="sb_diamonds")
-        with o2:
-            show_fib = st.toggle("Fibonacci", key="sb_fib")
-            show_sr = st.toggle("S/R levels", key="sb_sr")
-            show_super = st.toggle("Supertrend", key="sb_super")
-            show_gold_zone = st.toggle("Gold zone", key="sb_gold_zone")
+    with st.container(border=True):
+        st.markdown("**Command Bar** — target, strategy, and scanner sort stay in your line of sight.")
+        r1c1, r1c2, r1c3 = st.columns([1.15, 2.0, 0.95])
+        with r1c1:
+            st.caption("Target")
+            if watch_items:
+                st.selectbox(
+                    "target",
+                    watch_items,
+                    key="sb_watch_selected",
+                    help="Main chart, news, options, and scores use this ticker.",
+                    label_visibility="collapsed",
+                )
+            else:
+                st.caption("Add tickers in **Edit watchlist**")
+        with r1c2:
+            st.caption("Strategy focus")
+            if hasattr(st, "segmented_control"):
+                st.segmented_control(
+                    "Focus",
+                    ["Sell premium", "Hybrid", "Growth"],
+                    key="sb_strat_radio",
+                    label_visibility="collapsed",
+                )
+            else:
+                st.radio(
+                    "Focus",
+                    ["Sell premium", "Hybrid", "Growth"],
+                    horizontal=True,
+                    key="sb_strat_radio",
+                    label_visibility="collapsed",
+                    help="Sell premium: income first. Growth: more directional risk.",
+                )
+        with r1c3:
+            st.caption("Performance")
+            st.toggle(
+                "🚀 Turbo",
+                key="sb_mini_mode",
+                help="Turbo (Mini mode): skips heavy Plotly charts — glance row, execution, quant, scanner stay on.",
+            )
+        r2c1, r2c2, r2c3 = st.columns([1.2, 1.2, 1.4])
+        with r2c1:
+            st.caption("Option horizon")
+            if hasattr(st, "segmented_control"):
+                st.segmented_control(
+                    "Horizon",
+                    ["Weekly", "30 DTE", "45 DTE"],
+                    key="sb_horizon_radio",
+                    label_visibility="collapsed",
+                )
+            else:
+                st.radio(
+                    "Horizon",
+                    ["Weekly", "30 DTE", "45 DTE"],
+                    horizontal=True,
+                    key="sb_horizon_radio",
+                    label_visibility="collapsed",
+                )
+        with r2c2:
+            st.caption("Scanner order")
+            _scan_seg = st.radio(
+                "Scanner order",
+                ["Custom order", "Confluence first"],
+                index=_scan_idx,
+                horizontal=True,
+                key="sb_scan_radio",
+                help="Custom: follow your list order. Confluence: strongest setups first.",
+            )
+            scanner_sort_mode = (
+                "Custom watchlist order" if _scan_seg == "Custom order" else "Highest confluence first"
+            )
+        with r2c3:
+            st.caption("Tip")
+            st.caption("Chart layers live under **Technical Chart** — toggling them does not re-fetch Yahoo data.")
 
-        st.markdown("---")
-        st.markdown("#### Performance")
-        st.markdown(
-            '<p class="cf-widget-hint">Faster on phones — skips heavy Plotly figures.</p>',
-            unsafe_allow_html=True,
-        )
-        st.toggle(
-            "Mini mode",
-            key="sb_mini_mode",
-            help="Hides multi-chart technical view and other large Plotly figures. Keeps glance row, execution strip, quant dashboard, scanner, and reference.",
-        )
+    if watch_items:
+        if "_sb_watch_selected_sync" in st.session_state:
+            st.session_state["sb_watch_selected"] = st.session_state.pop("_sb_watch_selected_sync")
+        if st.session_state.get("sb_watch_selected") not in watch_items:
+            st.session_state["sb_watch_selected"] = watch_items[0]
+        ticker = st.session_state.get("sb_watch_selected", watch_items[0])
+    else:
+        st.session_state.pop("sb_watch_selected", None)
+        ticker = "PLTR"
 
-        prefs_cfg = {
-            **cfg,
-            "strat_focus": st.session_state.get("sb_strat_radio", DEFAULT_CONFIG["strat_focus"]),
-            "strat_horizon": st.session_state.get("sb_horizon_radio", DEFAULT_CONFIG["strat_horizon"]),
-            "mini_mode": bool(st.session_state.get("sb_mini_mode", cfg.get("mini_mode", False))),
-            "overlay_ema": bool(st.session_state.get("sb_ema", cfg.get("overlay_ema", True))),
-            "overlay_fib": bool(st.session_state.get("sb_fib", cfg.get("overlay_fib", True))),
-            "overlay_gann": bool(st.session_state.get("sb_gann", cfg.get("overlay_gann", True))),
-            "overlay_sr": bool(st.session_state.get("sb_sr", cfg.get("overlay_sr", True))),
-            "overlay_ichi": bool(st.session_state.get("sb_ichi", cfg.get("overlay_ichi", False))),
-            "overlay_super": bool(st.session_state.get("sb_super", cfg.get("overlay_super", False))),
-            "overlay_diamonds": bool(st.session_state.get("sb_diamonds", cfg.get("overlay_diamonds", True))),
-            "overlay_gold": bool(st.session_state.get("sb_gold_zone", cfg.get("overlay_gold", True))),
-        }
-        if prefs_cfg != cfg:
-            save_config(prefs_cfg)
-            cfg = prefs_cfg
+    # Watchlist tape — tap a ticker to select (same session key as Target)
+    if watch_items:
+        st.markdown('<p class="cf-tape-title">Watchlist tape</p>', unsafe_allow_html=True)
+        st.caption("Daily % change is approximate (last vs prior session). Selected ticker uses the cyan highlight.")
+        tape_rows = [watch_items[i : i + 8] for i in range(0, len(watch_items), 8)]
+        tape_i = 0
+        for row_tickers in tape_rows:
+            cols = st.columns(len(row_tickers))
+            for j, tkr in enumerate(row_tickers):
+                pct = _ticker_pct_change_1d(tkr)
+                pct_str = f"{pct:+.2f}%" if pct is not None else "—"
+                c_pct = "#10b981" if (pct is not None and pct >= 0) else ("#ef4444" if pct is not None else "#64748b")
+                is_sel = tkr == st.session_state.get("sb_watch_selected")
+                with cols[j]:
+                    st.markdown(
+                        f"<div class='cf-tape-cell'><span style='color:{c_pct};font-size:.62rem;font-weight:800'>{_html_mod.escape(pct_str)}</span></div>",
+                        unsafe_allow_html=True,
+                    )
+                    if st.button(
+                        tkr,
+                        key=f"cf_tape_{tape_i}",
+                        use_container_width=True,
+                        type="primary" if is_sel else "secondary",
+                    ):
+                        st.session_state["sb_watch_selected"] = tkr
+                        st.rerun()
+                tape_i += 1
 
-        st.markdown("---")
-        st.markdown("<div style='text-align:center;color:#64748b;font-size:.65rem'>Data: Yahoo Finance &middot; Not advice</div>", unsafe_allow_html=True)
+    watch_cfg = {**cfg, "watchlist": scanner_watchlist, "scanner_sort_mode": scanner_sort_mode}
+    if watch_cfg != cfg:
+        save_config(watch_cfg)
+        cfg = watch_cfg
+
+    _hydrate_sidebar_prefs(cfg)
+
+    prefs_cfg = {
+        **cfg,
+        "strat_focus": st.session_state.get("sb_strat_radio", DEFAULT_CONFIG["strat_focus"]),
+        "strat_horizon": st.session_state.get("sb_horizon_radio", DEFAULT_CONFIG["strat_horizon"]),
+        "mini_mode": bool(st.session_state.get("sb_mini_mode", cfg.get("mini_mode", False))),
+    }
+    if prefs_cfg != cfg:
+        save_config(prefs_cfg)
+        cfg = prefs_cfg
 
     mini_mode = bool(st.session_state.get("sb_mini_mode", False))
     if mini_mode:
         st.markdown(_MINI_MODE_DENSITY_CSS, unsafe_allow_html=True)
-
-    # ── HEADER ──
-    st.markdown(f"<h1 style='margin:0;font-size:1.8rem;background:linear-gradient(135deg,#10b981,#06b6d4);-webkit-background-clip:text;-webkit-text-fill-color:transparent'>{ticker} COMMAND CENTER</h1>", unsafe_allow_html=True)
 
     # ── FETCH ──
     with st.spinner(f"Loading {ticker}..."):
@@ -2476,6 +2758,28 @@ def main():
     if df is None or df.empty:
         st.error(f"Data feed unavailable for {ticker}. Yahoo Finance may be throttling or market is closed. Retrying on next refresh...")
         st.stop()
+
+    # ── HEADER — Live Pulse (timestamp after successful load) ──
+    last_update = datetime.now().strftime("%H:%M:%S")
+    tk_hdr = _html_mod.escape(ticker)
+    st.markdown(
+        f"""<div class="cf-page-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
+    <h1 style="margin:0;font-size:1.8rem;background:linear-gradient(135deg,#10b981,#06b6d4);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">
+        {tk_hdr} COMMAND CENTER
+    </h1>
+    <div style="display:flex;align-items:center;gap:8px;background:rgba(16,185,129,0.1);padding:4px 12px;border-radius:20px;border:1px solid rgba(16,185,129,0.2);">
+        <div style="width:8px;height:8px;background:#10b981;border-radius:50%;box-shadow:0 0 8px #10b981;animation:cf_live_dot_pulse 2s ease-in-out infinite;"></div>
+        <span style="font-size:.7rem;color:#10b981;font-family:JetBrains Mono,monospace;font-weight:700;">LIVE FEED: {last_update}</span>
+    </div>
+</div>
+<style>
+@keyframes cf_live_dot_pulse {{
+  0%,100% {{ opacity: 1; }}
+  50% {{ opacity: 0.3; }}
+}}
+</style>""",
+        unsafe_allow_html=True,
+    )
 
     # ── EARNINGS AMBUSH CHECK ──
     earnings_near = False
@@ -2607,7 +2911,7 @@ def main():
     # ── DIAMOND / GOLD ZONE / CONFLUENCE ──
     gold_zone_price, gold_zone_components = calc_gold_zone(df, df_wk)
     cp_score, cp_max, cp_breakdown, cp_bearish = calc_confluence_points(df, df_wk, vix_v)
-    diamonds = detect_diamonds(df, df_wk) if show_diamonds else []
+    diamonds = detect_diamonds(df, df_wk)
     latest_d = latest_diamond_status(diamonds)
     d_wr, d_avg, d_n = diamond_win_rate(df, diamonds, forward_bars=10)
 
@@ -2751,6 +3055,7 @@ def main():
         cp_bar_html += f"<div style='flex:1;height:10px;background:{color};border-radius:5px;margin:0 1px'></div>"
 
     gz_gap_pct = ((price / gold_zone_price - 1) * 100) if gold_zone_price else 0.0
+    show_gold_glance = bool(st.session_state.get("sb_gold_zone", True))
     bluf_html = f"""<div class='bluf'>
         <div style='display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px'>
             <div>
@@ -2772,7 +3077,7 @@ def main():
         </div>
         <div style='display:flex;gap:16px;flex-wrap:wrap;margin-top:14px;border-top:1px solid rgba(255,255,255,.06);padding-top:12px'>
             <div style='flex:1;min-width:250px'>
-                <div style='font-size:.7rem;color:{"#eab308" if show_gold_zone else "#64748b"};text-transform:uppercase;letter-spacing:.1em;margin-bottom:4px'>⬥ GOLD ZONE</div>
+                <div style='font-size:.7rem;color:{"#eab308" if show_gold_glance else "#64748b"};text-transform:uppercase;letter-spacing:.1em;margin-bottom:4px'>⬥ GOLD ZONE</div>
                 <span class='mono' style='font-size:1.3rem;font-weight:700;color:#fbbf24'>${gold_zone_price:.2f}</span>
                 <span style='color:#94a3b8;font-size:.8rem;margin-left:8px'>({gz_gap_pct:+.1f}% away)</span>
             </div>
@@ -2867,130 +3172,24 @@ def main():
         st.markdown(f"<div class='ac'>\U0001f514 <strong>{len(al)} Alert{'s' if len(al) > 1 else ''}</strong>: {hi_al[0]['m']}{'<em> +' + str(len(al) - 1) + ' more</em>' if len(al) > 1 else ''}</div>", unsafe_allow_html=True)
 
     # ══════════════════════════════════════════════════════════════════
-    #  SECTION 1 \u2014 TECHNICAL CHART (skipped in Mini mode for mobile performance)
+    #  SECTION 1 — TECHNICAL CHART (fragment: overlay toggles without refetching Yahoo)
     # ══════════════════════════════════════════════════════════════════
-    st.markdown('<div id="charts" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
-    if not mini_mode:
-        _section("Technical Chart", f"{ticker} — four separate charts below (price, volume, RSI, MACD). Zoom each panel independently. Use sidebar overlays sparingly on the price chart.",
-                 tip_plain="Candles: OHLC per bar. EMA / Bollinger: trend and volatility. Fib & Gann & S/R: reference levels (toggle off if busy). Diamonds: confluence signals. Gold line: Gold Zone. Volume: participation. RSI: overbought/oversold heat. MACD: momentum vs signal.")
-        fig_p, fig_v, fig_r, fig_m = build_chart(
-            df, ticker, show_ind, show_fib, show_gann, show_sr, show_ichi, show_super,
-            diamonds=diamonds if show_diamonds else None,
-            gold_zone=gold_zone_price if show_gold_zone else None,
-        )
-        st.plotly_chart(fig_p, use_container_width=True, config=_PLOTLY_UI_CONFIG)
-        st.markdown("---")
-        st.markdown("#### Volume")
-        st.plotly_chart(fig_v, use_container_width=True, config=_PLOTLY_UI_CONFIG)
-        st.markdown("---")
-        st.markdown("#### RSI (14)")
-        st.plotly_chart(fig_r, use_container_width=True, config=_PLOTLY_UI_CONFIG)
-        st.markdown("---")
-        st.markdown("#### MACD")
-        st.plotly_chart(fig_m, use_container_width=True, config=_PLOTLY_UI_CONFIG)
-    else:
-        st.info(
-            "**Mini mode:** technical charts are off to save bandwidth and CPU. "
-            "Disable **Mini mode** in the sidebar → Performance to load Plotly."
-        )
+    _fragment_technical_zone(
+        df,
+        df_wk,
+        ticker,
+        gold_zone_price,
+        gold_zone_components,
+        price,
+        diamonds,
+        latest_d,
+        cp_breakdown,
+        d_wr,
+        d_n,
+        struct,
+        mini_mode,
+    )
     chart_mood = "bull" if struct == "BULLISH" else ("bear" if struct == "BEARISH" else "neutral")
-
-    # ── DIAMOND SIGNAL CARDS (below chart) ──
-    if show_diamonds and diamonds:
-        recent_diamonds = [d for d in diamonds if (df.index[-1] - d["date"]).days <= 30]
-        if recent_diamonds:
-            st.markdown("#### Recent Diamond Signals")
-            d_cols = st.columns(min(len(recent_diamonds), 4))
-            for idx_d, d in enumerate(recent_diamonds[-4:]):
-                with d_cols[idx_d]:
-                    cls = "diamond-blue" if d["type"] == "blue" else "diamond-pink"
-                    icon = "🔷" if d["type"] == "blue" else "💎"
-                    label = "BLUE DIAMOND: Strong Buy" if d["type"] == "blue" else "PINK DIAMOND: Take Profit"
-                    age = (df.index[-1] - d["date"]).days
-                    prob_txt = f"Historical win rate: {d_wr:.0f}% over {d_n} signals" if d_n > 0 else "Insufficient history"
-                    st.markdown(f"<div class='{cls}'>"
-                        f"<div style='font-size:1.1rem;font-weight:700;margin-bottom:4px'>{icon} {label}</div>"
-                        f"<div style='color:#94a3b8;font-size:.85rem'>Date: {d['date'].strftime('%b %d, %Y')} ({age}d ago)<br>"
-                        f"Price: ${d['price']:.2f} | Score: {d['score']}/9 | RSI: {d['rsi']:.0f}<br>"
-                        f"<span style='color:#fbbf24;font-size:.8rem'>📊 {prob_txt}</span></div></div>",
-                        unsafe_allow_html=True)
-
-            if latest_d and (df.index[-1] - latest_d["date"]).days <= 5:
-                why_type = "BLUE DIAMOND" if latest_d["type"] == "blue" else "PINK DIAMOND"
-                why_color = "#3b82f6" if latest_d["type"] == "blue" else "#ec4899"
-                why_action = (
-                    "Strong confluence aligned bullish. The market gave a high probability buy signal."
-                    if latest_d["type"] == "blue"
-                    else "Confluence collapsed or momentum exhausted. Time to protect gains."
-                )
-                flabels = _factor_checklist_labels()
-                factor_lines = ""
-                passed = 0
-                for key, nice in flabels.items():
-                    info = cp_breakdown.get(key)
-                    if not info:
-                        continue
-                    ok = info["pts"] > 0
-                    if ok:
-                        passed += 1
-                    mark = "&#10003;" if ok else ""
-                    row_col = "#34d399" if ok else "#64748b"
-                    factor_lines += (
-                        f"<div style='padding:5px 0;display:flex;align-items:flex-start;gap:10px;color:{row_col};font-size:.9rem'>"
-                        f"<span style='color:#34d399;font-weight:800;min-width:1.2em'>{mark}</span>"
-                        f"<span><strong style='color:#e2e8f0'>{nice}</strong>"
-                        f"<span style='color:#64748b;font-size:.8rem'> ({info['pts']}/{info['max']})</span></span></div>"
-                    )
-                wk_confirm = latest_d.get("weekly", "N/A")
-                win_badge = (
-                    f"<div style='margin:12px 0 8px 0'><span class='diamond-win-badge'>HISTORICAL WIN RATE: {d_wr:.0f}%</span>"
-                    f"<span style='color:#94a3b8;font-size:.8rem;margin-left:10px'>({d_n} past signals)</span></div>"
-                    if d_n > 0
-                    else "<div style='color:#64748b;font-size:.85rem;margin:8px 0'>Not enough history for a win rate badge yet.</div>"
-                )
-                st.markdown(
-                    f"<div style='background:rgba(15,23,42,.95);border:1px solid {why_color};border-radius:12px;padding:18px 20px;margin:12px 0'>"
-                    f"<div style='font-size:.8rem;color:{why_color};text-transform:uppercase;letter-spacing:.1em;font-weight:700;margin-bottom:6px'>"
-                    f"Why This {why_type}?</div>"
-                    f"<div style='color:#e2e8f0;font-size:.95rem;margin-bottom:6px'>Signal fired at <strong>{latest_d['score']}/9</strong> confluence. "
-                    f"Live checklist now shows <strong>{passed}/7</strong> headline factors green.</div>"
-                    f"<div style='color:#94a3b8;font-size:.88rem;margin-bottom:12px;line-height:1.5'>{why_action}</div>"
-                    f"{win_badge}"
-                    f"<div style='font-size:.72rem;color:#64748b;text-transform:uppercase;margin-bottom:6px'>Diamond checklist</div>"
-                    f"<div>{factor_lines}</div>"
-                    f"<div style='margin-top:12px;padding-top:10px;border-top:1px solid rgba(255,255,255,.06);font-size:.8rem;color:#94a3b8'>"
-                    f"Weekly filter at signal: <strong style='color:{why_color}'>{wk_confirm}</strong>. "
-                    f"RSI at signal: {latest_d['rsi']:.0f}.</div></div>",
-                    unsafe_allow_html=True)
-
-    # Gold Zone components breakdown
-    if show_gold_zone:
-        show_gz_detail = st.checkbox("Show Gold Zone Breakdown", value=False, key="chk_gold_zone_detail")
-        if show_gz_detail:
-            st.markdown(f"**Gold Zone Price: ${gold_zone_price:.2f}**. This is the weighted average of multiple key levels that institutional traders watch.")
-            for comp_name, comp_val in gold_zone_components.items():
-                dist = (comp_val / price - 1) * 100
-                st.markdown(f"- **{comp_name}**: ${comp_val:.2f} ({dist:+.1f}% from current)")
-            _explain("Why the Gold Zone matters",
-                "The Gold Zone combines four of the strongest support/resistance signals into one level: "
-                "Volume Profile POC (where the most shares traded), the 61.8% Fibonacci golden ratio, "
-                "the nearest Gann Square of 9 natural level, and weekly support/resistance. "
-                "When price is ABOVE the Gold Zone, bulls are in control. When it drops below, be cautious. "
-                "This is the single most important price level on the chart.", "neutral")
-
-    # Alert suggestion
-    if latest_d and latest_d["type"] == "blue" and (df.index[-1] - latest_d["date"]).days <= 3:
-        next_gz = gold_zone_price
-        st.markdown(f"<div class='ac'>🔔 <strong>Alert Suggestion:</strong> Set an alert for next Blue Diamond at <strong>${next_gz:.2f}</strong> (Gold Zone). "
-            f"If {ticker} pulls back to the Gold Zone and confluence rebuilds above 7/9, that is your next high probability entry.</div>", unsafe_allow_html=True)
-    elif latest_d and latest_d["type"] == "pink" and (df.index[-1] - latest_d["date"]).days <= 3:
-        st.markdown(f"<div class='ac'>🔔 <strong>Alert Suggestion:</strong> Pink Diamond fired at ${latest_d['price']:.2f}. "
-            f"Consider taking partial profits. Set alert if {ticker} drops below Gold Zone ${gold_zone_price:.2f} for a full exit.</div>", unsafe_allow_html=True)
-
-    _explain("\U0001f9e0 Quick read",
-        "Hover the <strong>i</strong> icon in the section title above for the full tour. "
-        "Bottom line: green candles and a rising short EMA mean buyers lead. Diamonds and Gold Zone are your institutional style GPS.",
-        chart_mood)
 
     # ══════════════════════════════════════════════════════════════════
     #  SECTION 2 \u2014 SETUP ANALYSIS
@@ -3562,7 +3761,7 @@ def main():
             else:
                 st.info("No scanner results. Check your ticker symbols.")
     else:
-        st.info("Add tickers to your watchlist in the sidebar to use the scanner.")
+        st.info("Add tickers under **Edit watchlist** (above) to use the scanner.")
 
     # ══════════════════════════════════════════════════════════════════
     #  SECTION 8 \u2014 NEWS & MACRO
@@ -3594,7 +3793,7 @@ def main():
     edu = [
         ("Blue Diamond Signal", "A Blue Diamond appears when 7 or more out of 9 confluence factors align bullish at the same time. Think of it as every traffic light on your route turning green simultaneously. It means Supertrend, Ichimoku, ADX, OBV, Structure, and Gold Zone all agree: this is a high probability buy zone. Buy on Blue Diamonds."),
         ("Pink Diamond Signal", "A Pink Diamond appears when bullish confluence collapses or momentum exhausts (RSI > 75 with weak confluence). Think of it as your dashboard warning lights all turning on. It means the easy money in this move is done. Take profits, sell aggressive covered calls, or tighten your stops. Sell on Pink Diamonds."),
-        ("Gold Zone", "The Gold Zone is a single dynamic price level calculated from Volume Profile POC, the 61.8% Fibonacci golden ratio, the nearest Gann Square of 9 level, and weekly support or resistance. When the stock is above the Gold Zone, bulls are in control. Below it, bears have the edge. Use the Gold Zone as your anchor for all strike selection."),
+        ("Gold Zone", "The Gold Zone is a single dynamic price level calculated from Volume Profile POC, the 61.8% Fibonacci golden ratio, the 200-day simple moving average, and the nearest Gann Square of 9 level. When the stock is above the Gold Zone, bulls are in control. Below it, bears have the edge. Use the Gold Zone as your anchor for all strike selection."),
         ("Confluence Points (0-9)", "The Confluence score checks 9 independent bullish factors: Supertrend direction (2pts), Ichimoku cloud position (2pts), ADX trend strength (1pt), OBV accumulation (1pt), bullish divergences (1pt), position vs Gold Zone (1pt), and market structure (1pt). Scores of 7+ trigger Blue Diamonds. Scores below 4 signal caution."),
         ("Covered Call", "You own 100 shares. You sell 1 call above the current price. You collect cash today. If the stock stays below that price, you keep the cash AND you keep your shares. Target: 1 to 3 percent per month in pure cash income."),
         ("Cash Secured Put and The Wheel", "You sell a put and hold cash to buy shares if needed. If you get assigned, you sell Covered Calls on those new shares. When shares get called away, you sell puts again. This is the cash flow loop. Repeat forever."),
