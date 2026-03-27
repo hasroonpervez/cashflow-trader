@@ -2,19 +2,19 @@
 
 **Repository:** [github.com/hasroonpervez/cashflow-trader](https://github.com/hasroonpervez/cashflow-trader)
 
-> A high-density Streamlit trading terminal for options cash-flow execution, with a **HUD-style main column** (Mission Control + ticker tape), glass UI, persistent state, and decision-first intelligence blocks.
+> A high-density Streamlit trading terminal for options cash-flow execution, with a **HUD-style main column** (Mission Control + ticker tape + in-page watchlist editor), glass UI, persistent state, and decision-first intelligence blocks. The default Streamlit sidebar is hidden; controls live in the main scroll.
 
 ---
 
 ## What Changed In This Release
 
-### ✅ HUD / Mission Control layout (v14.1)
+### ✅ HUD / Mission Control layout (v14.1+)
 - **Main column first:** A bordered **MISSION CONTROL** bar sits directly under the sticky nav (NOC-style: switches above the “monitors”).
-- **Target ticker** `selectbox`, **Strategy** (`st.segmented_control` when available, else horizontal `radio`), **Turbo** (`mini_mode`), **option horizon**, and **scanner sort** all live in Mission Control — not buried in the sidebar.
-- **Watchlist tape:** one tap per symbol to set the active ticker; **primary** button highlights the selection. Rows show a **cached daily % change** (last vs prior session). Long lists wrap in **chunks of 8** columns so mobile stays usable.
-- **Sidebar = paperwork:** **`⚙️ System Config`** with **`Edit Watchlist Symbols`** expander (textarea, reorder, quick add, **Save & refresh main**). The sidebar block runs **first** in `main()` so `sb_scanner` is up to date before Mission Control reads it.
-- **Glass sidebar:** translucent panel with blur and cyan border; **`stSidebarNav` hidden** — use the **☰ FAB** to open settings when you need the list editor.
-- **App opens with the sidebar collapsed** (`initial_sidebar_state="collapsed"`) so you land on Mission Control without an extra tap.
+- **Target ticker** `selectbox`, **Strategy** (`st.segmented_control` when available, else horizontal `radio`), **Turbo** (`mini_mode`), **option horizon**, and **scanner sort** all live in Mission Control.
+- **Watchlist tape:** one tap per symbol to set the active ticker; **primary** button highlights the selection. Rows show a **cached daily % change** (last vs prior session). Long lists wrap in **chunks of 8** columns so mobile stays usable. Tape taps use a **staging key** (`_sb_watch_selected_sync`) so `session_state` stays compatible with Streamlit 1.33+ (no mutating the selectbox key after the widget exists).
+- **No sidebar workflow:** The Streamlit sidebar is **hidden in CSS**; all list editing is in the **main column**. **`✏️ Edit Watchlist Symbols`** is a **`st.expander` at the top of main** (it runs **before** Mission Control so `sb_scanner` is current on the same run). A second **✏️ Edit Watchlist Symbols** button under the tape sets `_open_watchlist_editor` and reruns once to expand the editor. Footer line: **Data: Yahoo Finance · Not advice**.
+- **High-contrast HUD labels:** Mission Control row titles use a dedicated **`cf-hud-label`** style so **Strategy**, **Option horizon**, and similar fields stay readable on dark backgrounds (including segmented controls).
+- **Sticky nav** still jumps to Execution, Charts, Setup, Quant, Strategies, Risk, Scanner, News, Guide (`initial_sidebar_state="collapsed"` remains for hosts that still mount an empty sidebar region).
 - **Live Pulse** header after a successful data load: timestamp pill so you can see the feed is fresh at a glance.
 
 ### ✅ Technical chart — fragment + four Plotly panels
@@ -24,20 +24,26 @@
 - **Gold Zone** blends **Volume Profile POC**, **61.8% Fib** (60-bar window), **200-day SMA** when history allows, and **nearest Gann Square of 9** level (mean of available components).
 
 ### ✅ Performance & mobile
-- **`st.cache_resource`** caches Yahoo **`Ticker`** objects; OHLC still uses **`st.cache_data`** with TTL.
+- **Yahoo access:** OHLC and options use **`@st.cache_data`** with TTLs. The app uses **`_yfinance_ticker()`** (fresh `yf.Ticker` per call) to avoid stale sessions and unbounded cached connections on large watchlists.
+- **Cold load:** The five independent Yahoo calls in `main()` (**equity daily, equity weekly, macro, news, earnings**) run in parallel via **`ThreadPoolExecutor`**.
+- **Options:** `fetch_options(ticker)` with **`exp=None`** returns **expiration strings only** (no `option_chain` download). Call again with a chosen expiry when you need strikes (saves one redundant chain pull per load).
+- **Confluence + Gold Zone:** On the full dataframe, **Gold Zone is computed once** and passed into **`calc_confluence_points(..., gold_zone_price=...)`** so POC/Fib/SMA/Gann are not duplicated for the same bar.
+- **`calc_gold_zone`** is **not** wrapped in `st.cache_data`: in the diamond loop every prefix `df.iloc[:i+1]` is a distinct frame, so dataframe-keyed caching did not hit and only added hashing cost.
+- **Glance row:** When **`len(df) >= 7`**, the price sparkline reuses **`df["Close"].tail(7)`** instead of a separate `1mo` history fetch.
+- **Quant Edge:** ATR is computed **once** per score (single `TA.atr(df)` series) for the volatility pillar.
 - **Market Scanner** uses a **thread pool** (up to 8 workers) so watchlist symbols fetch in parallel.
 - **`load_config()`** merges **`st.secrets`** (scalar top-level keys only, for Streamlit Cloud) with **`config.json`**.
 - **`mini_mode`** (**🚀 Turbo** in Mission Control) persists in `config.json` and **skips heavy Plotly** (technical stack, volume-profile bar chart, simulator equity chart) while keeping the glance row, execution strip, quant dashboard, and scanner. With Turbo on, the app injects **denser main-column CSS** (tighter padding, smaller section headers and cards) so more fits on one phone screen.
-- **CSS:** `touch-action: manipulation`, `min-height: 100dvh` on the app shell, and touch hints on the sticky nav / FAB to reduce mobile zoom/jitter.
+- **CSS:** `touch-action: manipulation`, `min-height: 100dvh` on the app shell, and touch hints on the sticky nav to reduce mobile zoom/jitter.
 
 ### ✅ Persistent User State (Watchlist + Scan Ordering)
 - `config.json` persistence includes `watchlist`, `scanner_sort_mode`, **Strategy** (`strat_focus`, `strat_horizon`), **Turbo / mini_mode**, and **Chart overlay** toggles (`overlay_*`).
-- **Watchlist editor** (sidebar → **Edit Watchlist Symbols**):
+- **Watchlist editor** (main column → **✏️ Edit Watchlist Symbols** expander):
   - **Textarea** for symbols — **commas, newlines, or semicolons**; duplicates removed; uppercase normalization.
-  - Auto-saves with the usual **`watch_cfg`** merge; optional **Save & refresh main** forces a disk write + rerun.
-  - **Reorder:** **↑ / ↓**, **✕ Remove**, **Sort A–Z**, **Quick add** + **Add symbol**.
+  - Auto-saves with the usual **`watch_cfg`** merge; **Save and refresh** forces a disk write + rerun.
+  - **Reorder:** **↑ / ↓**, **✕ Remove**, **Sort A to Z**, **Quick add** + **Add symbol**.
 - **Scanner order** (`Custom watchlist order` vs `Highest confluence first`) is controlled from **Mission Control** (main column).
-- **Streamlit-safe session updates:** staging keys **`_sb_scanner_sync`**, **`_sb_watch_selected_sync`**, **`_sb_add_ticker_clear`** are applied **before** the textarea / quick-add widgets are built, avoiding `StreamlitAPIException` on reorder/add.
+- **Streamlit-safe session updates:** staging keys **`_sb_scanner_sync`**, **`_sb_watch_selected_sync`**, **`_sb_add_ticker_clear`**, **`_open_watchlist_editor`** are applied **before** widgets that own those values are built, avoiding `StreamlitAPIException` on reorder, add, or tape taps.
 - Default bootstrap watchlist (only when config is missing/deleted):
   - `PLTR,BMNR,AAPL,AMZN,NVDA,AMD,TSLA,SPY,QQQ`
 - `config.json` stores the keys listed under **Persisted Keys** below (legacy keys from older builds are stripped on load).
@@ -73,7 +79,7 @@
   2. VIX
   3. Earnings countdown
   4. Quant Edge
-- Price/VIX/Earnings/Quant Edge cards include simplified **7-day right-aligned** trend lines (**inline SVG**, not Plotly) so the row stays aligned when the **sidebar is open** or the main column is narrow.
+- Price/VIX/Earnings/Quant Edge cards include simplified **7-day right-aligned** trend lines (**inline SVG**, not Plotly) so the row stays aligned on narrow viewports.
 - Layout stays single-row on desktop and wraps cleanly on narrower widths.
 
 ### ✅ Mission Card / Execution UX
@@ -84,7 +90,7 @@
 ### ✅ New PLTR Earnings Intelligence Section
 - Added dedicated **Strategic Intelligence earnings drawer** (custom-styled expander) with dual-column catalyst/risk framing.
 - Includes high-density “Good vs Bad” bullets tied to Feb 2, 2026 report context and May 4, 2026 projection context.
-- Includes upcoming print countdown and projected EPS range (`$0.26-$0.29`).
+- Includes upcoming print countdown and projected EPS range (`$0.26` to `$0.29`).
 
 ### ✅ ADHD-Friendly Tooltip System
 - `cf-tip` behavior was redesigned from browser-native title tooltips to a custom readable tooltip panel:
@@ -129,7 +135,7 @@
   - diamond status,
   - quant edge,
   - Gold Zone distance.
-- **Mission Control** target + **watchlist tape** for fast ticker switching; full list edit in **sidebar → Edit Watchlist Symbols**.
+- **Mission Control** target + **watchlist tape** for fast ticker switching; full list edit in **✏️ Edit Watchlist Symbols** (top expander or button under the tape).
 - Scanner output order is set in **Mission Control** (`Custom watchlist order` vs confluence-first).
 
 ### 🧠 Risk, Sentiment, and Backtesting
@@ -202,7 +208,7 @@ If you are upgrading from an older version, use this safe sequence:
    ```bash
    streamlit run app.py
    ```
-4. Open the sidebar (**☰**), expand **Edit Watchlist Symbols**, and confirm your watchlist loaded correctly.
+4. Expand **✏️ Edit Watchlist Symbols** at the top of the page (or tap the button under the watchlist tape) and confirm your watchlist loaded correctly.
 
 ### About missing keys
 - Old `config.json` files without newer keys are automatically backfilled by the app’s default config merge.
@@ -246,8 +252,8 @@ Latest QA sweep performed against current `app.py` included:
 Residual manual QA recommended:
 - viewport pass at 1400/1200/992/768 widths,
 - live market/open-hours data behavior (yfinance variability),
-- **Mission Control:** strategy segments, Turbo, horizon, scanner sort, target selectbox sync with **ticker tape**,
-- **Sidebar:** **Edit Watchlist Symbols** — textarea, reorder, remove, Sort A–Z, quick add, **Save & refresh main** (no `StreamlitAPIException` from staging keys),
+- **Mission Control:** strategy segments, Turbo, horizon, scanner sort, target selectbox sync with **ticker tape** (no `StreamlitAPIException` when tapping tape symbols),
+- **Watchlist editor:** textarea, reorder, remove, Sort A to Z, quick add, **Save and refresh**; bottom button opens the expander on rerun,
 - **Technical Chart:** flip overlay toggles and confirm charts update without a full refetch feeling (fragment rerun).
 
 ---
