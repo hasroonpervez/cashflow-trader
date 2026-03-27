@@ -392,6 +392,73 @@ div[data-testid="stMetricValue"], .mono, .glance-value, .ticker, .price-value{
 .earn-meta{margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.08);display:flex;gap:12px;flex-wrap:wrap}
 .earn-pill{padding:6px 10px;border-radius:999px;border:1px solid rgba(0,229,255,.35);background:rgba(2,6,23,.66);color:#cbd5e1;font-size:.82rem}
 @media(max-width:900px){.earnings-intel-grid{grid-template-columns:1fr}}
+/* ── Sidebar: segmented control = sliding pill (scanner / focus / horizon) ── */
+[data-testid="stSidebar"] [data-baseweb="segmented-control"]{
+  width:100%!important;max-width:100%!important;
+  background:linear-gradient(180deg,rgba(15,23,42,.96),rgba(8,12,20,.99))!important;
+  border:1px solid rgba(0,229,255,.28)!important;border-radius:12px!important;padding:5px!important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 8px 28px rgba(2,6,23,.55)!important;
+  min-height:44px!important;
+}
+[data-testid="stSidebar"] [data-baseweb="segmented-control"] [role="button"]{
+  border-radius:9px!important;padding:8px 10px!important;min-height:36px!important;
+  font-weight:600!important;font-size:.76rem!important;letter-spacing:.02em!important;
+  border:none!important;transition:background .18s ease,color .18s ease,box-shadow .18s ease!important;
+  flex:1 1 0!important;justify-content:center!important;
+}
+[data-testid="stSidebar"] [data-baseweb="segmented-control"] [role="button"][aria-selected="true"]{
+  background:linear-gradient(135deg,rgba(0,229,255,.38),rgba(6,182,212,.2))!important;
+  color:#f8fafc!important;
+  box-shadow:0 0 0 1px rgba(0,229,255,.5),0 4px 20px rgba(0,229,255,.25)!important;
+}
+[data-testid="stSidebar"] [data-baseweb="segmented-control"] [role="button"][aria-selected="false"]{
+  color:#94a3b8!important;background:transparent!important;
+}
+[data-testid="stSidebar"] [data-baseweb="segmented-control"] [role="button"][aria-selected="false"]:hover{
+  color:#e2e8f0!important;background:rgba(148,163,184,.08)!important;
+}
+/* ── Sidebar: sliders (Quant Edge threshold) ── */
+[data-testid="stSidebar"] [data-baseweb="slider"] [data-baseweb="thumb"]{
+  background:linear-gradient(180deg,#22d3ee,#0891b2)!important;
+  border:2px solid rgba(255,255,255,.85)!important;
+  box-shadow:0 0 0 2px rgba(0,229,255,.35),0 4px 14px rgba(0,229,255,.4)!important;
+  height:22px!important;width:22px!important;
+}
+[data-testid="stSidebar"] [data-baseweb="slider"] [data-baseweb="track"]{
+  background:rgba(30,41,59,.9)!important;border-radius:999px!important;height:8px!important;
+}
+[data-testid="stSidebar"] [data-baseweb="slider"] [data-baseweb="track"] [data-index="0"]{
+  background:linear-gradient(90deg,rgba(0,229,255,.15),rgba(0,229,255,.55))!important;
+  border-radius:999px!important;
+}
+/* ── Sidebar: toggle switches (chart overlays) ── */
+[data-testid="stSidebar"] [data-testid="stToggle"] label{
+  font-size:.84rem!important;font-weight:500!important;color:#e2e8f0!important;
+}
+[data-testid="stSidebar"] [data-baseweb="checkbox"] [data-baseweb="checkmark"]{
+  border-radius:999px!important;
+}
+[data-testid="stSidebar"] [data-testid="stToggle"] [data-baseweb="switch"]{
+  background:rgba(30,41,59,.95)!important;border:1px solid rgba(148,163,184,.35)!important;
+}
+[data-testid="stSidebar"] [data-testid="stToggle"] [data-baseweb="switch"][data-state="checked"]{
+  background:linear-gradient(135deg,#0891b2,#06b6d4)!important;border-color:rgba(0,229,255,.5)!important;
+  box-shadow:0 0 16px rgba(0,229,255,.35)!important;
+}
+[data-testid="stSidebar"] .cf-toggle-grid{
+  display:grid;grid-template-columns:1fr 1fr;gap:6px 10px;align-items:center;margin-top:4px;
+}
+[data-testid="stSidebar"] .cf-toggle-grid [data-testid="stToggle"]{margin:0!important;padding:4px 0!important;}
+[data-testid="stSidebar"] .cf-widget-hint{
+  font-size:.68rem!important;color:#64748b!important;margin:-4px 0 8px 0!important;line-height:1.35!important;
+}
+[data-testid="stSidebar"] [data-baseweb="select"] > div:first-child{
+  border-radius:10px!important;border-color:rgba(0,229,255,.32)!important;
+  background:rgba(15,23,42,.85)!important;min-height:42px!important;
+}
+[data-testid="stSidebar"] [data-baseweb="textarea"]{
+  border-radius:10px!important;border-color:rgba(0,229,255,.22)!important;
+}
 [data-testid="stExpander"]{
   background:rgba(15,23,42,.65)!important;border:1px solid rgba(255,255,255,.1)!important;border-radius:12px!important;
   backdrop-filter:blur(12px)!important;-webkit-backdrop-filter:blur(12px)!important;
@@ -1790,12 +1857,22 @@ def main():
             st.session_state.pop("sb_watch_selected", None)
             st.info("Add at least one symbol in the box above (e.g. PLTR, NVDA).")
 
-        scanner_sort_mode = st.radio(
-            "Scanner result order",
-            ["Custom watchlist order", "Highest confluence first"],
-            index=0 if cfg.get("scanner_sort_mode", "Custom watchlist order") == "Custom watchlist order" else 1,
-            key="sb_scan_sort_mode",
-            horizontal=True,
+        _sort_default = (
+            "Custom order"
+            if cfg.get("scanner_sort_mode", "Custom watchlist order") == "Custom watchlist order"
+            else "Confluence first"
+        )
+        _scan_seg = st.segmented_control(
+            "Scanner order",
+            options=["Custom order", "Confluence first"],
+            default=_sort_default,
+            key="sb_scan_seg",
+            help="Custom: follow your list order. Confluence: strongest setups first.",
+        )
+        if _scan_seg is None:
+            _scan_seg = _sort_default
+        scanner_sort_mode = (
+            "Custom watchlist order" if _scan_seg == "Custom order" else "Highest confluence first"
         )
 
         if watch_items:
@@ -1892,18 +1969,45 @@ def main():
 
         st.markdown("---")
         st.markdown("#### Strategy")
-        strat_mode = st.radio("Focus", ["Cash Flow (Sell Premium)","Hybrid","Aggressive Growth"], key="sb_strat_mode")
-        horizon = st.radio("Horizon", ["Weekly","Monthly (30 DTE)","45 DTE"], key="sb_horizon")
+        st.markdown(
+            '<p class="cf-widget-hint">Pick how you think about trades and the typical option window.</p>',
+            unsafe_allow_html=True,
+        )
+        strat_mode = st.segmented_control(
+            "Focus",
+            options=["Sell premium", "Hybrid", "Growth"],
+            default="Hybrid",
+            key="sb_strat_seg",
+            help="Sell premium: income first. Growth: more directional risk.",
+        )
+        if strat_mode is None:
+            strat_mode = "Hybrid"
+        horizon = st.segmented_control(
+            "Horizon",
+            options=["Weekly", "30 DTE", "45 DTE"],
+            default="30 DTE",
+            key="sb_horizon_seg",
+            help="Rough target days-to-expiration for planning.",
+        )
+        if horizon is None:
+            horizon = "30 DTE"
         st.markdown("---")
-        st.markdown("#### Chart Overlays")
-        show_ind = st.checkbox("EMAs & Bollinger", True, key="sb_ema")
-        show_fib = st.checkbox("Fibonacci", True, key="sb_fib")
-        show_gann = st.checkbox("Gann Sq9", True, key="sb_gann")
-        show_sr = st.checkbox("Support/Resistance", True, key="sb_sr")
-        show_ichi = st.checkbox("Ichimoku Cloud", False, key="sb_ichi")
-        show_super = st.checkbox("Supertrend", False, key="sb_super")
-        show_diamonds = st.checkbox("Diamond Signals", True, key="sb_diamonds")
-        show_gold_zone = st.checkbox("Gold Zone", True, key="sb_gold_zone")
+        st.markdown("#### Chart overlays")
+        st.markdown(
+            '<p class="cf-widget-hint">Flip layers on or off — the chart updates immediately.</p>',
+            unsafe_allow_html=True,
+        )
+        o1, o2 = st.columns(2)
+        with o1:
+            show_ind = st.toggle("EMAs & Bollinger", value=True, key="sb_ema")
+            show_gann = st.toggle("Gann Sq9", value=True, key="sb_gann")
+            show_ichi = st.toggle("Ichimoku", value=False, key="sb_ichi")
+            show_diamonds = st.toggle("Diamonds", value=True, key="sb_diamonds")
+        with o2:
+            show_fib = st.toggle("Fibonacci", value=True, key="sb_fib")
+            show_sr = st.toggle("S/R levels", value=True, key="sb_sr")
+            show_super = st.toggle("Supertrend", value=False, key="sb_super")
+            show_gold_zone = st.toggle("Gold zone", value=True, key="sb_gold_zone")
 
         st.markdown("---")
 
@@ -1913,8 +2017,18 @@ def main():
                                   help="Your number with country code, no + (e.g. 13143266122)", key="sb_wa_phone")
         wa_apikey = st.text_input("WhatsApp API Key", value=cfg.get("whatsapp_apikey", ""),
                                    help="Your CallMeBot API key (e.g. 8186573)", key="sb_wa_apikey")
-        alert_thresh = st.slider("Alert when Quant Edge >", 50, 95, cfg.get("alert_threshold", 80),
-                                  help="Send alert when score crosses this threshold", key="sb_alert_thresh")
+        st.markdown(
+            '<p class="cf-widget-hint">Drag to set when WhatsApp should fire (if configured below).</p>',
+            unsafe_allow_html=True,
+        )
+        alert_thresh = st.slider(
+            "Alert when Quant Edge ≥",
+            50,
+            95,
+            cfg.get("alert_threshold", 80),
+            help="Send alert when the score crosses this threshold.",
+            key="sb_alert_thresh",
+        )
 
         # Persist alert settings
         alert_cfg = {**cfg, "whatsapp_phone": wa_phone, "whatsapp_apikey": wa_apikey, "alert_threshold": alert_thresh}
