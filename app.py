@@ -1,7 +1,7 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════╗
 ║  CASHFLOW COMMAND CENTER v14.0 — Institutional Edition                  ║
-║  Glanceable Robinhood grade execution + Diamond / Gold Zone / Quant      ║
+║  Glanceable execution desk + Diamond / Gold Zone / Quant                   ║
 ║  Hurst · Kelly · Black Scholes engines unchanged in this release          ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 """
@@ -24,20 +24,25 @@ except ImportError:
 warnings.filterwarnings("ignore")
 
 # ─────────────────────────────────────────────────────────────────────────
-# CONFIG PERSISTENCE — saves portfolio settings to config.json
+# CONFIG PERSISTENCE — alerts + watchlist (no personal portfolio in shared deploys)
 # ─────────────────────────────────────────────────────────────────────────
 CONFIG_PATH = Path(__file__).parent / "config.json"
-DEFAULT_CONFIG = {"acct": 100000, "pltr_sh": 500, "pltr_cost": 45.0, "max_risk": 2,
-                  "whatsapp_phone": "", "whatsapp_apikey": "", "alert_threshold": 80,
+DEFAULT_CONFIG = {"whatsapp_phone": "", "whatsapp_apikey": "", "alert_threshold": 80,
                   "last_alert_date": "", "watchlist": "PLTR,BMNR,AAPL,AMZN,NVDA,AMD,TSLA,SPY,QQQ",
                   "scanner_sort_mode": "Custom watchlist order"}
+# Anonymous reference only — used for Kelly / ATR example math (not user portfolio data).
+REF_NOTIONAL = 100_000.0
+RISK_PCT_EXAMPLE = 3.0
 
 def load_config():
     try:
         if CONFIG_PATH.exists():
             with open(CONFIG_PATH) as f:
                 saved = json.load(f)
-            return {**DEFAULT_CONFIG, **saved}
+            merged = {**DEFAULT_CONFIG, **saved}
+            for k in ("acct", "pltr_sh", "pltr_cost", "max_risk"):
+                merged.pop(k, None)
+            return merged
     except Exception:
         pass
     return DEFAULT_CONFIG.copy()
@@ -1750,38 +1755,12 @@ def main():
             <p style='color:#64748b;font-size:.65rem;letter-spacing:.15em;text-transform:uppercase'>
             COMMAND CENTER v14.0</p></div>""", unsafe_allow_html=True)
         st.markdown("---")
-        st.markdown("#### Portfolio")
-        pltr_sh = st.number_input("PLTR Shares", value=cfg["pltr_sh"], step=100, key="sb_pltr_sh")
-        acct_placeholder = st.empty()
-        acct = 0
-        pltr_cost = st.number_input("PLTR Avg Cost ($)", value=cfg["pltr_cost"], step=1.0, format="%.2f", key="sb_pltr_cost")
-        max_risk = st.slider("Max Risk/Trade (%)", 1, 10, cfg["max_risk"], key="sb_max_risk")
-
-        # Save config if anything changed
-        new_cfg = {**cfg, "pltr_sh": pltr_sh, "pltr_cost": pltr_cost, "max_risk": max_risk}
-        if new_cfg != cfg:
-            save_config(new_cfg)
-            cfg = new_cfg
-
-        st.markdown("---")
-        st.markdown("#### Strategy")
-        strat_mode = st.radio("Focus", ["Cash Flow (Sell Premium)","Hybrid","Aggressive Growth"], key="sb_strat_mode")
-        horizon = st.radio("Horizon", ["Weekly","Monthly (30 DTE)","45 DTE"], key="sb_horizon")
-        st.markdown("---")
-        st.markdown("#### Chart Overlays")
-        show_ind = st.checkbox("EMAs & Bollinger", True, key="sb_ema")
-        show_fib = st.checkbox("Fibonacci", True, key="sb_fib")
-        show_gann = st.checkbox("Gann Sq9", True, key="sb_gann")
-        show_sr = st.checkbox("Support/Resistance", True, key="sb_sr")
-        show_ichi = st.checkbox("Ichimoku Cloud", False, key="sb_ichi")
-        show_super = st.checkbox("Supertrend", False, key="sb_super")
-        show_diamonds = st.checkbox("Diamond Signals", True, key="sb_diamonds")
-        show_gold_zone = st.checkbox("Gold Zone", True, key="sb_gold_zone")
-        st.markdown("---")
-        st.markdown("#### \U0001f50e Scanner Watchlist")
-        st.caption("Edit symbols below (commas or one per line). Order = scan priority when “Custom order” is on.")
+        st.markdown("#### \U0001f50e Stock & watchlist")
+        st.caption(
+            "Type symbols in the box, then choose **Select stock to analyze** for the main dashboard. "
+            "Reorder the list with the buttons below. Scanner order follows the list when “Custom order” is on."
+        )
         # Streamlit forbids mutating session_state[sb_scanner] after the text_area exists.
-        # Apply programmatic list updates on the *next* run, before the widget is created.
         if "_sb_scanner_sync" in st.session_state:
             st.session_state["sb_scanner"] = st.session_state.pop("_sb_scanner_sync")
         elif "sb_scanner" not in st.session_state:
@@ -1796,6 +1775,21 @@ def main():
         watch_items = _parse_watchlist_string(scanner_watchlist_raw)
         scanner_watchlist = ",".join(watch_items)
 
+        if watch_items:
+            if "_sb_watch_selected_sync" in st.session_state:
+                st.session_state["sb_watch_selected"] = st.session_state.pop("_sb_watch_selected_sync")
+            if st.session_state.get("sb_watch_selected") not in watch_items:
+                st.session_state["sb_watch_selected"] = watch_items[0]
+            selected_ticker = st.selectbox(
+                "Select stock to analyze",
+                options=watch_items,
+                key="sb_watch_selected",
+                help="Main chart, news, options, and scores use this ticker. Change anytime from the sidebar.",
+            )
+        else:
+            st.session_state.pop("sb_watch_selected", None)
+            st.info("Add at least one symbol in the box above (e.g. PLTR, NVDA).")
+
         scanner_sort_mode = st.radio(
             "Scanner result order",
             ["Custom watchlist order", "Highest confluence first"],
@@ -1805,17 +1799,6 @@ def main():
         )
 
         if watch_items:
-            # Same rule as sb_scanner: never assign sb_watch_selected after the selectbox is built.
-            if "_sb_watch_selected_sync" in st.session_state:
-                st.session_state["sb_watch_selected"] = st.session_state.pop("_sb_watch_selected_sync")
-            if st.session_state.get("sb_watch_selected") not in watch_items:
-                st.session_state["sb_watch_selected"] = watch_items[0]
-            selected_ticker = st.selectbox(
-                "Dashboard symbol (charts, news, options)",
-                options=watch_items,
-                key="sb_watch_selected",
-                help="Everything below uses this symbol. Reorder or remove with the buttons under the watchlist.",
-            )
             st.markdown(
                 "<div style='font-size:.68rem;color:#94a3b8;margin:0 0 6px 0'>"
                 + " · ".join(f"<span class='mono' style='color:#cbd5e1'>{_html_mod.escape(x)}</span>" for x in watch_items)
@@ -1866,9 +1849,6 @@ def main():
                 cfg = {**cfg, "watchlist": scanner_watchlist, "scanner_sort_mode": scanner_sort_mode}
                 save_config(cfg)
                 st.rerun()
-        else:
-            st.session_state.pop("sb_watch_selected", None)
-            st.info("Add at least one symbol above (e.g. PLTR, NVDA).")
 
         if watch_items:
             ticker = selected_ticker
@@ -1909,6 +1889,22 @@ def main():
         if watch_cfg != cfg:
             save_config(watch_cfg)
             cfg = watch_cfg
+
+        st.markdown("---")
+        st.markdown("#### Strategy")
+        strat_mode = st.radio("Focus", ["Cash Flow (Sell Premium)","Hybrid","Aggressive Growth"], key="sb_strat_mode")
+        horizon = st.radio("Horizon", ["Weekly","Monthly (30 DTE)","45 DTE"], key="sb_horizon")
+        st.markdown("---")
+        st.markdown("#### Chart Overlays")
+        show_ind = st.checkbox("EMAs & Bollinger", True, key="sb_ema")
+        show_fib = st.checkbox("Fibonacci", True, key="sb_fib")
+        show_gann = st.checkbox("Gann Sq9", True, key="sb_gann")
+        show_sr = st.checkbox("Support/Resistance", True, key="sb_sr")
+        show_ichi = st.checkbox("Ichimoku Cloud", False, key="sb_ichi")
+        show_super = st.checkbox("Supertrend", False, key="sb_super")
+        show_diamonds = st.checkbox("Diamond Signals", True, key="sb_diamonds")
+        show_gold_zone = st.checkbox("Gold Zone", True, key="sb_gold_zone")
+
         st.markdown("---")
 
         # Alert settings
@@ -1987,33 +1983,6 @@ def main():
     hi52, lo52 = df["High"].max(), df["Low"].min()
     vix_v = macro.get("VIX", {}).get("price", 0)
     qs, qb = quant_edge_score(df, vix_v)
-
-    if ticker == "PLTR":
-        pltr_px = float(price)
-    else:
-        df_pltr_px = fetch_stock("PLTR", "5d", "1d")
-        if df_pltr_px is not None and not df_pltr_px.empty:
-            pltr_px = float(df_pltr_px["Close"].iloc[-1])
-        else:
-            pltr_px = float(price)
-    acct = pltr_sh * pltr_px
-    if ticker == "PLTR":
-        acct_sub = f"{pltr_sh:,} shares &times; ${price:.2f}"
-    else:
-        acct_sub = (
-            f"PLTR lot: {pltr_sh:,} sh &times; ${pltr_px:.2f} &middot; "
-            f"Dashboard: <span class='mono'>{_html_mod.escape(ticker)}</span> @ ${price:.2f}"
-        )
-    acct_placeholder.markdown(
-        f"<div style='background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.25);"
-        f"border-radius:8px;padding:12px;margin:8px 0'>"
-        f"<div style='font-size:.7rem;color:#64748b;text-transform:uppercase;letter-spacing:.1em'>"
-        f"Account Size (Live)</div>"
-        f"<div style='font-size:1.3rem;color:#10b981;font-weight:700;font-family:monospace'>"
-        f"${acct:,.2f}</div>"
-        f"<div style='font-size:.65rem;color:#64748b;margin-top:2px'>"
-        f"{acct_sub}</div></div>",
-        unsafe_allow_html=True)
 
     # ── GLANCE ROW (price, VIX, earnings, quant edge) ──
     vix_disp = f"{vix_v:.1f}" if vix_v else "N/A"
@@ -2133,27 +2102,32 @@ def main():
         if csp_list:
             bluf_csp = next((c for c in csp_list if c.get("optimal")), csp_list[0])
 
-    # ── DETERMINE BEST STRATEGY ──
-    nc = pltr_sh // 100 if ticker == "PLTR" and pltr_sh >= 100 else 1
-    if ticker == "PLTR" and pltr_sh >= 100:
-        if struct == "BULLISH" and fg > 50:
-            action_strat = "SELL COVERED CALLS"
-            action_plain = f"Sell {nc} covered call contract(s) above the current price. You collect cash today. If {ticker} stays below the strike by expiration, you keep the cash AND you keep your shares. That is the goal."
-        elif fg < 35:
-            action_strat = "SELL CASH SECURED PUTS"
-            action_plain = f"The market is scared right now (fear score: {fg:.0f}). Scared buyers pay you more for protection. Sell puts below the current price and collect that extra cash. If the stock drops to your strike, you buy {ticker} at a discount. That is a win either way."
-        else:
-            action_strat = "SELL COVERED CALLS + BULL PUT SPREAD"
-            action_plain = f"The market is flat. Collect income from two places at once. Sell calls against your shares AND sell a put spread below support for extra cash."
+    # ── DETERMINE BEST STRATEGY (example contract counts — no personal position data) ──
+    nc = 1
+    if struct == "BULLISH" and fg > 50:
+        action_strat = "SELL COVERED CALLS"
+        action_plain = (
+            f"If you hold at least 100 shares, sell {nc} covered call contract(s) above the current price. "
+            f"You collect premium today. If {ticker} stays below the strike by expiration, you keep the cash and your shares."
+        )
+    elif fg < 35:
+        action_strat = "SELL CASH SECURED PUTS"
+        action_plain = (
+            f"The market is scared right now (fear score: {fg:.0f}). Buyers pay more for protection. "
+            f"Sell cash-secured puts below the price. If assigned, you buy {ticker} at your strike."
+        )
+    elif struct != "BEARISH":
+        action_strat = "BULL PUT SPREAD"
+        action_plain = "Define-risk credit spread: collect premium with a capped max loss."
     else:
-        action_strat = "BULL PUT SPREAD" if struct != "BEARISH" else "BEAR CALL SPREAD"
-        action_plain = "You do not own shares of this stock. Use credit spreads to collect cash with limited risk."
+        action_strat = "BEAR CALL SPREAD"
+        action_plain = "Define-risk credit spread when the tape is heavy — cap upside risk."
 
     # ── RECOMMENDED TRADE (optimal strike from options engine) ──
     master_kind, master_b = None, None
     if opt_exps and bluf_exp:
         br = struct in ("BULLISH", "RANGING")
-        if br and ticker == "PLTR" and pltr_sh >= 100 and bluf_cc:
+        if br and bluf_cc:
             master_kind, master_b = "cc", bluf_cc
         elif br and bluf_csp:
             master_kind, master_b = "csp", bluf_csp
@@ -2176,9 +2150,9 @@ def main():
                 f"COLLECT ${prem_tot:,.0f} CASH TODAY. {pop_pct} PERCENT PROBABILITY OF KEEPING SHARES."
             )
             rh_steps = [
-                f"Open Robinhood, search {ticker}, and enter Trade Options.",
+                f"In your broker app, open {ticker} and go to options.",
                 f"Choose expiration {bluf_exp} ({dte_m} days out).",
-                f"Sell {n_c}x ${master_b['strike']:.0f} call(s) near mid, then Send to Open.",
+                f"Sell {n_c}x ${master_b['strike']:.0f} call(s) near mid, then confirm the order.",
             ]
         else:
             prem_tot = master_b["prem_100"]
@@ -2187,9 +2161,9 @@ def main():
                 f"COLLECT ${prem_tot:,.0f} CASH TODAY. {pop_pct} PERCENT ODDS OPTION EXPIRES WORTHLESS IF PRICE STAYS ABOVE THE STRIKE."
             )
             rh_steps = [
-                f"Open Robinhood, search {ticker}, and enter Trade Options.",
+                f"In your broker app, open {ticker} and go to options.",
                 f"Choose expiration {bluf_exp} ({dte_m} days out).",
-                f"Sell 1x ${master_b['strike']:.0f} put near mid, then Send to Open.",
+                f"Sell 1x ${master_b['strike']:.0f} put near mid, then confirm the order.",
             ]
         stepper = "".join(
             f"<div class='rh-step'><div class='num'>{i}.</div><div class='txt'>{_html_mod.escape(s)}</div></div>"
@@ -2202,7 +2176,7 @@ def main():
             f"<p style='color:#e2e8f0;font-size:1.05rem;line-height:1.55;margin:0 0 14px 0;font-weight:600'>{headline}</p>"
             f"<div class='strike-big' style='margin:8px 0 6px 0'>${_html_mod.escape(strike_s)}</div>"
             f"<div style='color:#94a3b8;font-size:.88rem;margin-bottom:12px'>Prop desk optimal strike · IV {master_b['iv']:.1f}% · dte {dte_m}</div>"
-            f"<div style='font-size:.75rem;font-weight:700;color:#a5f3fc;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px'>Robinhood playbook</div>"
+            f"<div style='font-size:.75rem;font-weight:700;color:#a5f3fc;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px'>Broker checklist</div>"
             f"<div class='rh-stepper'>{stepper}</div>"
             f"<p style='color:#64748b;font-size:.78rem;margin:14px 0 0 0'>Quotes can lag. Confirm credit in the app before you send the order.</p>"
             f"</div>"
@@ -2671,10 +2645,13 @@ def main():
     #  SECTION 4 \u2014 CASH-FLOW STRATEGIES
     # ══════════════════════════════════════════════════════════════════
     st.markdown('<div id="strategies" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
-    _section("Cash Flow Strategies", f"Exactly which options to sell for {ticker} at ${price:.2f}. Copy these into Robinhood.",
+    _section("Cash Flow Strategies", f"Exactly which options to sell for {ticker} at ${price:.2f}. Copy strikes into your broker.",
              tip_plain="Pick the top optimal strike first. Covered calls are for owned shares. Cash secured puts are for cash income with possible entry. Spreads cap risk when you need tighter control.")
-    pos_lbl = "POSITION" if ticker == "PLTR" else "YOUR PLTR LOT"
-    st.markdown(f"<div class='tc'><div style='display:flex;justify-content:space-between;align-items:center'><div><span style='color:#64748b;font-size:.8rem'>ANALYZING</span><br><span style='font-size:1.4rem;font-weight:700;color:#e2e8f0'>{ticker} @ ${price:.2f}</span></div><div style='text-align:right'><span style='color:#64748b;font-size:.8rem'>{pos_lbl}</span><br><span class='mono' style='color:#10b981'>{pltr_sh} sh @ ${pltr_cost:.2f}</span></div></div></div>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div class='tc'><div style='text-align:center'><span style='color:#64748b;font-size:.8rem'>ANALYZING</span><br>"
+        f"<span style='font-size:1.4rem;font-weight:700;color:#e2e8f0'>{_html_mod.escape(ticker)} @ ${price:.2f}</span></div></div>",
+        unsafe_allow_html=True,
+    )
 
     if opt_exps:
         sel_exp = st.selectbox("Expiration", opt_exps[:10], index=min(2, len(opt_exps) - 1), key="sel_exp")
@@ -2688,7 +2665,7 @@ def main():
                 cc = Opt.covered_calls(price, calls, dte, rfr)
                 if cc:
                     opt_cc = next((c for c in cc if c.get("optimal")), cc[0])
-                    b = opt_cc; nc_s = pltr_sh // 100 if ticker == "PLTR" else 1
+                    b = opt_cc; nc_s = 1
                     opt_html = '<div style="font-size:.7rem;font-weight:700;color:#06b6d4;margin-bottom:6px">\U0001f3af OPTIMAL PROP-DESK STRIKE</div>' if b.get("optimal") else ""
                     in_zone = Opt.DELTA_LOW <= abs(b["delta"]) <= Opt.DELTA_HIGH
                     delta_color = "#10b981" if in_zone else "#f59e0b"
@@ -2855,12 +2832,13 @@ def main():
             dc = "#10b981" if v["chg"] >= 0 else "#ef4444"
             st.markdown(f"<div style='display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #1e293b'><span style='color:#94a3b8'>{k}</span><span class='mono' style='color:#e2e8f0'>{v['price']:.2f} <span style='color:{dc}'>{v['chg']:+.2f}%</span></span></div>", unsafe_allow_html=True)
     with p2:
-        mrt = acct * max_risk / 100
-        st.markdown(f"<div class='tc'><div style='font-size:.75rem;color:#64748b'>MAX RISK/TRADE</div><div class='mono' style='font-size:1.3rem;color:#e2e8f0'>${mrt:,.0f}</div></div>", unsafe_allow_html=True)
-        if ticker == "PLTR":
-            conc = pltr_sh * price / acct * 100
-            cc_c = "#ef4444" if conc > 50 else ("#f59e0b" if conc > 30 else "#10b981")
-            st.markdown(f"<div class='tc'><div style='font-size:.75rem;color:#64748b'>PLTR CONCENTRATION</div><div class='mono' style='font-size:1.3rem;color:{cc_c}'>{conc:.1f}%</div></div>", unsafe_allow_html=True)
+        mrt = REF_NOTIONAL * RISK_PCT_EXAMPLE / 100
+        st.markdown(
+            f"<div class='tc'><div style='font-size:.75rem;color:#64748b'>EXAMPLE MAX RISK/TRADE</div>"
+            f"<div class='mono' style='font-size:1.3rem;color:#e2e8f0'>${mrt:,.0f}</div>"
+            f"<div style='font-size:.65rem;color:#64748b;margin-top:6px'>{RISK_PCT_EXAMPLE:.0f}% of ${REF_NOTIONAL:,.0f} reference (illustrative)</div></div>",
+            unsafe_allow_html=True,
+        )
         atr_v = TA.atr(df).iloc[-1]
         if pd.isna(atr_v) or atr_v <= 0:
             atr_v = price * .03
@@ -2868,7 +2846,8 @@ def main():
         st.markdown(f"<div class='tc'><div style='font-size:.75rem;color:#64748b'>ATR SIZING</div><div style='color:#94a3b8;font-size:.85rem;margin-top:8px'>ATR: ${atr_v:.2f} | Max shares: {sh_atr} | Contracts: {sh_atr // 100}</div></div>", unsafe_allow_html=True)
         _explain("Position sizing in plain English",
             f"ATR is ${atr_v:.2f}. That is how much this stock moves on an average day. Think of it as the normal daily price swing. "
-            f"Based on your {max_risk}% risk limit (${mrt:,.0f} max loss per trade), you can safely trade up to {sh_atr} shares or {sh_atr // 100} option contracts. Never go over this number.", "neutral")
+            f"Using an illustrative {RISK_PCT_EXAMPLE:.0f}% risk budget on a ${REF_NOTIONAL:,.0f} reference account (${mrt:,.0f} max loss per trade), "
+            f"you could size up to about {sh_atr} shares or {max(0, sh_atr // 100)} option contracts. Scale to your own account and rules.", "neutral")
 
         # Kelly Criterion — mathematically optimal allocation
         k_full, k_half = 0.0, 0.0
@@ -2886,18 +2865,17 @@ def main():
             k_full, k_half = kelly_criterion(k_pop, k_win, k_loss)
             k_source = f"CSP ${bluf_csp['strike']:.0f}"
         if k_half > 0:
-            k_dollars = acct * k_half / 100
-            kc = "#10b981" if k_half <= max_risk else "#f59e0b"
+            k_dollars = REF_NOTIONAL * k_half / 100
+            kc = "#10b981" if k_half <= RISK_PCT_EXAMPLE * 5 else "#f59e0b"
             st.markdown(
                 f"<div class='tc'><div style='font-size:.75rem;color:#64748b'>KELLY CRITERION (HALF-KELLY)</div>"
                 f"<div class='mono' style='font-size:1.3rem;color:{kc}'>{k_half:.1f}% = ${k_dollars:,.0f}</div>"
                 f"<div style='font-size:.7rem;color:#64748b;margin-top:4px'>Full Kelly: {k_full:.1f}% | Source: {k_source}</div></div>",
                 unsafe_allow_html=True)
             _explain("Kelly Criterion in plain English",
-                f"The Kelly formula says the perfect bet size for this trade is {k_full:.1f}% of your account. "
-                f"We use <strong>Half Kelly ({k_half:.1f}%)</strong> for extra safety. That means <strong>${k_dollars:,.0f}</strong> is your maximum allocation. "
-                "Think of a poker pro who never bets more than the math says is smart. "
-                "Even on good trades, betting too much kills your long term growth. Discipline is everything.", "neutral")
+                f"The Kelly formula suggests about {k_full:.1f}% of a reference portfolio for this edge. "
+                f"We show <strong>Half Kelly ({k_half:.1f}%)</strong> for safety — on a <strong>${REF_NOTIONAL:,.0f}</strong> illustrative account that is <strong>${k_dollars:,.0f}</strong>. "
+                "Scale to your own capital and risk rules; this app does not store your balances.", "neutral")
         else:
             st.markdown("<div class='tc'><div style='font-size:.75rem;color:#64748b'>KELLY CRITERION</div>"
                 "<div style='color:#94a3b8;font-size:.85rem;margin-top:6px'>Not enough data yet. No liquid option strikes available to calculate your optimal bet size.</div></div>",
@@ -2927,7 +2905,7 @@ def main():
     if bt_df is not None and len(bt_df) > bt_hold + 20:
         br = Backtest.cc_sim(bt_df, bt_otm, bt_hold, bt_iv)
         if not br.empty:
-            tp = br["premium"].sum() * (pltr_sh / 100 if ticker == "PLTR" else 1)
+            tp = br["premium"].sum() * 1
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("Trades", len(br))
             m2.metric("Win Rate", f"{(br['profit'] > 0).mean() * 100:.0f}%")
