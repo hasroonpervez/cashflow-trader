@@ -49,19 +49,33 @@ iframe{border:0!important}
 .main [data-testid="stVerticalBlock"] > div:has(> div[data-testid="stMarkdownContainer"] nav.sticky-nav){
   min-height:0!important;margin-top:0!important;margin-bottom:0!important;
 }
-/* Settings drawer: collapsed by default; FAB script toggles inline display when open */
+/* Sidebar: visible when user opens it (Streamlit arrow). Do not display:none — breaks Cloud UX. */
 section[data-testid="stSidebar"],
 [data-testid="stSidebar"]{
-  display:none!important;width:0!important;min-width:0!important;max-width:0!important;
-  overflow:hidden!important;visibility:hidden!important;
-  box-sizing:border-box!important;
   background:linear-gradient(180deg,#080d16 0%,#0f172a 50%,#0a101c 100%)!important;
   border-right:1px solid rgba(100,116,139,.28)!important;
   -webkit-font-smoothing:antialiased!important;
   -moz-osx-font-smoothing:grayscale!important;
 }
 [data-testid="stSidebarNav"]{display:none!important}
+/* Legacy FAB removed — nav uses Streamlit buttons */
 #sob,.cf-vip-fab{display:none!important;visibility:hidden!important;pointer-events:none!important}
+/* Fixed top row: marker paragraph + first horizontal block (section nav buttons) */
+#cf-top-nav-marker{display:none!important;margin:0!important;padding:0!important;height:0!important;}
+.main .block-container > div [data-testid="stVerticalBlock"] > div:has(> p#cf-top-nav-marker) + div [data-testid="stHorizontalBlock"]{
+  position:fixed!important;top:0!important;left:0!important;right:0!important;width:100%!important;max-width:100%!important;
+  z-index:99998!important;
+  background:rgba(8,12,20,.9)!important;
+  backdrop-filter:blur(12px)!important;-webkit-backdrop-filter:blur(12px)!important;
+  border-bottom:1px solid #1e293b!important;
+  padding:6px 6px calc(6px + env(safe-area-inset-top,0px)) 6px!important;
+  margin:0!important;box-sizing:border-box!important;
+}
+.main .block-container > div [data-testid="stVerticalBlock"] > div:has(> p#cf-top-nav-marker) + div [data-testid="stHorizontalBlock"] [data-testid="column"]{padding:0 2px!important;}
+.main .block-container > div [data-testid="stVerticalBlock"] > div:has(> p#cf-top-nav-marker) + div [data-testid="stHorizontalBlock"] button p,
+.main .block-container > div [data-testid="stVerticalBlock"] > div:has(> p#cf-top-nav-marker) + div [data-testid="stHorizontalBlock"] button{
+  font-size:0.65rem!important;font-weight:700!important;
+}
 /* Mission Control: single bordered HUD shell in main (st.container border=True) */
 .main [data-testid="stVerticalBlockBorderWrapper"]{
   background:rgba(15,23,42,.88)!important;
