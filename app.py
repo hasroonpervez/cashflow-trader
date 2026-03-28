@@ -1114,6 +1114,80 @@ function onDocClick(ev){
   toggleFromUi(ev);
 }
 pd.addEventListener('click',onDocClick,false);
+/* Sticky nav: anchors inside inactive st.tabs are not mounted — switch tab first, then scroll. */
+function cfFindMainDashTabButtons(){
+  var lists=pd.querySelectorAll('[data-baseweb="tab-list"]');
+  for(var i=0;i<lists.length;i++){
+    var tabs=lists[i].querySelectorAll('[role="tab"]');
+    if(tabs.length!==3)continue;
+    var a=(tabs[0].textContent||'').trim();
+    var b=(tabs[1].textContent||'').trim();
+    if(a.indexOf('Setup')>=0&&b.indexOf('Cashflow')>=0)return tabs;
+  }
+  return null;
+}
+function cfClickMainDashTab(idx,cb,retries){
+  retries=retries||0;
+  var tabs=cfFindMainDashTabButtons();
+  if(!tabs||!tabs[idx]){
+    if(retries<30){setTimeout(function(){cfClickMainDashTab(idx,cb,retries+1);},120);return;}
+    if(cb)cb();
+    return;
+  }
+  try{tabs[idx].click();}catch(e1){}
+  setTimeout(function(){if(cb)cb();},480);
+}
+function cfOpenQuickReference(){
+  var exps=pd.querySelectorAll('[data-testid="stExpander"]');
+  for(var i=0;i<exps.length;i++){
+    var sum=exps[i].querySelector('summary');
+    if(!sum)continue;
+    var tx=(sum.textContent||'').replace(/\s+/g,' ').trim();
+    if(tx.indexOf('Quick Reference')<0)continue;
+    var det=exps[i].querySelector('details');
+    if(det&&!det.open)try{sum.click();}catch(e){}
+    break;
+  }
+}
+function cfScrollToHashId(id){
+  var n=0;
+  function one(){
+    var el=pd.getElementById(id);
+    if(el){
+      el.scrollIntoView({behavior:'smooth',block:'start'});
+      try{pw.history.replaceState(null,'','#'+id);}catch(e){}
+      return;
+    }
+    n++; if(n<50)setTimeout(one,110);
+  }
+  setTimeout(one,60);
+}
+function cfOnStickyNavClick(ev){
+  var t=ev.target;
+  if(t&&t.nodeType===3)t=t.parentElement;
+  if(!t||!t.closest)return;
+  var a=t.closest('a[href^="#"]');
+  if(!a||!a.closest('.sticky-nav'))return;
+  var href=a.getAttribute('href')||'';
+  var id=href.slice(1);
+  if(!id)return;
+  var map={setup:0,'quant-dashboard':0,strategies:1,risk:2,scanner:2,news:2,guide:2};
+  if(map[id]===undefined)return;
+  ev.preventDefault();
+  ev.stopPropagation();
+  var tidx=map[id];
+  cfClickMainDashTab(tidx,function(){
+    if(id==='guide'){
+      setTimeout(function(){
+        cfOpenQuickReference();
+        setTimeout(function(){cfScrollToHashId(id);},380);
+      },120);
+    }else{
+      cfScrollToHashId(id);
+    }
+  });
+}
+pd.addEventListener('click',cfOnStickyNavClick,true);
 function ensureToggle(){
   var fab=pd.getElementById('sob');
   if(!fab){
