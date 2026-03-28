@@ -17,9 +17,11 @@ st.set_page_config(
 )
 
 import html as _html_mod
+import threading
 import pandas as pd
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
 from datetime import datetime, timedelta
 import plotly.graph_objects as go
 import math, warnings, json
@@ -28,6 +30,19 @@ from pathlib import Path
 import data.yf_engine as yf_engine
 
 warnings.filterwarnings("ignore")
+
+
+def _submit_with_script_ctx(executor, fn, /, *args, **kwargs):
+    """Run ``fn`` in a pool thread with the active ScriptRunContext (needed for ``st.cache_data``)."""
+    ctx = get_script_run_ctx()
+
+    def _run():
+        if ctx is not None:
+            add_script_run_ctx(threading.current_thread(), ctx)
+        return fn(*args, **kwargs)
+
+    return executor.submit(_run)
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # CONFIG — watchlist, scanner, strategy, chart overlays (session_state only; no disk writes)
@@ -194,9 +209,8 @@ def _hydrate_sidebar_prefs(cfg):
 def _client_suggests_mobile_chart():
     """Best-effort mobile UA hint for tighter Plotly margins (server-side; no layout jank)."""
     try:
-        from streamlit.web.server.websocket_headers import _get_websocket_headers
-
-        h = _get_websocket_headers() or {}
+        _hdrs = st.context.headers
+        h = _hdrs.to_dict() if _hdrs is not None else {}
         lk = {str(k).lower(): v for k, v in h.items()}
         ua = str(lk.get("user-agent") or lk.get("user_agent") or "").lower()
         return any(tok in ua for tok in ("iphone", "ipad", "ipod", "android", "mobile"))
@@ -2591,13 +2605,13 @@ def main():
     # ── FETCH (parallel I/O: independent Yahoo endpoints + sparkline series) ──
     with st.spinner(f"Loading {ticker}..."):
         with ThreadPoolExecutor(max_workers=7) as _pool:
-            _f_df = _pool.submit(fetch_stock, ticker, "1y", "1d")
-            _f_wk = _pool.submit(fetch_stock, ticker, "2y", "1wk")
-            _f_1mo = _pool.submit(fetch_stock, ticker, "1mo", "1d")
-            _f_vix_m = _pool.submit(fetch_stock, "^VIX", "1mo", "1d")
-            _f_macro = _pool.submit(fetch_macro)
-            _f_news = _pool.submit(fetch_news, ticker)
-            _f_earn = _pool.submit(fetch_earnings_date, ticker)
+            _f_df = _submit_with_script_ctx(_pool, fetch_stock, ticker, "1y", "1d")
+            _f_wk = _submit_with_script_ctx(_pool, fetch_stock, ticker, "2y", "1wk")
+            _f_1mo = _submit_with_script_ctx(_pool, fetch_stock, ticker, "1mo", "1d")
+            _f_vix_m = _submit_with_script_ctx(_pool, fetch_stock, "^VIX", "1mo", "1d")
+            _f_macro = _submit_with_script_ctx(_pool, fetch_macro)
+            _f_news = _submit_with_script_ctx(_pool, fetch_news, ticker)
+            _f_earn = _submit_with_script_ctx(_pool, fetch_earnings_date, ticker)
             df = _f_df.result()
             df_wk = _f_wk.result()
             df_1mo_spark = _f_1mo.result()
@@ -3814,7 +3828,9 @@ def main():
                     done_ct = 0
                     scan_failed = []
                     with ThreadPoolExecutor(max_workers=workers) as pool:
-                        future_map = {pool.submit(scan_single_ticker, tkr): tkr for tkr in watchlist_tickers}
+                        future_map = {
+                            _submit_with_script_ctx(pool, scan_single_ticker, tkr): tkr for tkr in watchlist_tickers
+                        }
                         for fut in as_completed(future_map):
                             done_ct += 1
                             tkr = future_map[fut]
