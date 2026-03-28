@@ -130,6 +130,67 @@ function cfScrollToHashId(id){
   }
   setTimeout(one,60);
 }
+/* Nested strip under "Risk, scanner & intel": Market News / Macro & Yields / Upcoming Earnings */
+function cfFindIntelNestedTabButtons(){
+  var lists=pd.querySelectorAll('[data-baseweb="tab-list"]');
+  for(var i=0;i<lists.length;i++){
+    var tabs=lists[i].querySelectorAll('[role="tab"]');
+    if(tabs.length!==3)continue;
+    var t0=(tabs[0].textContent||'').replace(/\s+/g,' ').trim();
+    var t1=(tabs[1].textContent||'').replace(/\s+/g,' ').trim();
+    if(t0.indexOf('Market')>=0&&t0.indexOf('News')>=0&&t1.indexOf('Macro')>=0)return tabs;
+  }
+  return null;
+}
+function cfClickIntelNestedSubtab(labelNeedle,cb,retries){
+  retries=retries||0;
+  var tabs=cfFindIntelNestedTabButtons();
+  if(!tabs){
+    if(retries<35){setTimeout(function(){cfClickIntelNestedSubtab(labelNeedle,cb,retries+1);},120);return;}
+    if(cb)cb();
+    return;
+  }
+  var j=-1;
+  for(var k=0;k<tabs.length;k++){
+    var tx=(tabs[k].textContent||'').replace(/\s+/g,' ').trim();
+    if(tx.indexOf(labelNeedle)>=0){j=k;break;}
+  }
+  if(j>=0){try{tabs[j].click();}catch(e2){}}
+  setTimeout(function(){if(cb)cb();},420);
+}
+/* Hash ids that live inside nested intel tabs — open main "Risk, scanner & intel" then the right sub-tab */
+var CF_INTEL_MAIN_IDX=2;
+var CF_NESTED_INTEL_SUBTAB={
+  news:'Market News',
+  macro:'Macro',
+  earnings:'Upcoming Earnings'
+};
+function cfNavigateHashFromNav(id){
+  if(id==='guide'){
+    cfClickMainDashTab(CF_INTEL_MAIN_IDX,function(){
+      setTimeout(function(){
+        cfOpenQuickReference();
+        setTimeout(function(){cfScrollToHashId(id);},380);
+      },120);
+    });
+    return;
+  }
+  var subNeedle=CF_NESTED_INTEL_SUBTAB[id];
+  if(subNeedle){
+    cfClickMainDashTab(CF_INTEL_MAIN_IDX,function(){
+      cfClickIntelNestedSubtab(subNeedle,function(){cfScrollToHashId(id);});
+    });
+    return;
+  }
+  var map={setup:0,'quant-dashboard':0,strategies:1,risk:2,scanner:2};
+  if(map[id]===undefined)return;
+  cfClickMainDashTab(map[id],function(){cfScrollToHashId(id);});
+}
+function cfHashNavKnown(id){
+  if(id in CF_NESTED_INTEL_SUBTAB)return true;
+  if(id==='guide')return true;
+  return id==='setup'||id==='quant-dashboard'||id==='strategies'||id==='risk'||id==='scanner';
+}
 function cfOnStickyNavClick(ev){
   var t=ev.target;
   if(t&&t.nodeType===3)t=t.parentElement;
@@ -138,22 +199,10 @@ function cfOnStickyNavClick(ev){
   if(!a||!a.closest('.sticky-nav'))return;
   var href=a.getAttribute('href')||'';
   var id=href.slice(1);
-  if(!id)return;
-  var map={setup:0,'quant-dashboard':0,strategies:1,risk:2,scanner:2,news:2,guide:2};
-  if(map[id]===undefined)return;
+  if(!id||!cfHashNavKnown(id))return;
   ev.preventDefault();
   ev.stopPropagation();
-  var tidx=map[id];
-  cfClickMainDashTab(tidx,function(){
-    if(id==='guide'){
-      setTimeout(function(){
-        cfOpenQuickReference();
-        setTimeout(function(){cfScrollToHashId(id);},380);
-      },120);
-    }else{
-      cfScrollToHashId(id);
-    }
-  });
+  cfNavigateHashFromNav(id);
 }
 pd.addEventListener('click',cfOnStickyNavClick,true);
 function ensureToggle(){

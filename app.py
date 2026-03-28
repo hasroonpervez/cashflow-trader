@@ -3912,6 +3912,7 @@ def main():
                 else:
                     st.info("No news found.")
             with m_tab:
+                st.markdown('<div id="macro" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
                 st.markdown("#### Macro Dashboard")
                 for k, v in macro.items():
                     dc = "#10b981" if v["chg"] >= 0 else "#ef4444"
