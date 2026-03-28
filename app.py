@@ -602,7 +602,9 @@ section[data-testid="stSidebar"],
 }
 [data-testid="stSidebar"] [data-testid="stHorizontalBlock"] [data-testid="column"]{min-width:0!important}
 [data-testid="stSidebar"] textarea{font-family:'JetBrains Mono',monospace!important;font-size:.78rem!important;line-height:1.35!important}
-.stMarkdown,.stText,p,span,label{color:var(--t1)!important;font-family:'Inter',sans-serif!important}
+/* Scoped typography only — a global `span,label` rule breaks Streamlit expander chevrons
+   (Material Symbols render as literal names like _arrow_right and overlap the label). */
+.stMarkdown,.stText{color:var(--t1)!important;font-family:'Inter',sans-serif!important}
 h1,h2,h3,h4,h5,h6{font-family:'Inter',sans-serif!important;font-weight:700!important;color:var(--cyan-bright)!important}
 div[data-testid="stMetric"]{
   background:linear-gradient(160deg,rgba(15,23,42,.96),rgba(15,23,42,.78))!important;
@@ -1012,7 +1014,12 @@ div[data-testid="stMetricValue"], .mono, .glance-value, .ticker, .price-value{
   box-shadow:inset 0 0 0 1px rgba(0,229,255,.22),0 10px 26px rgba(2,6,23,.36)!important;
 }
 [data-testid="stExpander"] details,[data-testid="stExpander"] summary{border:none!important}
-[data-testid="stExpander"] summary{background:transparent!important}
+[data-testid="stExpander"] summary{
+  background:transparent!important;
+  display:flex!important;align-items:center!important;gap:0.5rem!important;
+  flex-wrap:nowrap!important;list-style:none!important;
+}
+[data-testid="stExpander"] summary::-webkit-details-marker{display:none!important}
 [data-testid="stExpander"] *{border-color:transparent!important}
 .scanner-row{overflow:hidden}
 .scanner-grid{display:flex;justify-content:space-between;align-items:center;flex-wrap:nowrap;gap:10px;overflow-x:auto}
