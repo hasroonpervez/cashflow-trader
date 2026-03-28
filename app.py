@@ -2318,7 +2318,7 @@ def main():
     # ── Watchlist editor (must run before Mission Control so sb_scanner is committed same run)
     _wl_expanded = bool(st.session_state.pop("_open_watchlist_editor", False))
     st.caption("CashFlow Command Center · v14.1")
-    with st.expander("Edit watchlist symbols", expanded=_wl_expanded, key="cf_watchlist_editor_exp"):
+    with st.expander("Edit watchlist symbols", expanded=_wl_expanded):
         st.caption(
             "Drop in tickers separated by commas or line breaks. Shuffle the lineup with the controls. "
             "Watchlist and desk preferences are kept in this session (not written to disk)."
@@ -3117,7 +3117,7 @@ def main():
                     countdown_txt = "Earnings expected today (May 04, 2026)"
                 else:
                     countdown_txt = f"Last projected print date passed by {abs(d_to_print)} days (May 04, 2026)"
-                with st.expander("STRATEGIC INTELLIGENCE: PLTR · Q4 2025 / 2026 OUTLOOK", expanded=True, key="cf_pltr_intel_exp"):
+                with st.expander("STRATEGIC INTELLIGENCE: PLTR · Q4 2025 / 2026 OUTLOOK", expanded=True):
                     gc, bc = st.columns(2)
                     with gc:
                         st.markdown(
