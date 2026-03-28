@@ -102,14 +102,6 @@
 - Includes high-density “Good vs Bad” bullets tied to Feb 2, 2026 report context and May 4, 2026 projection context.
 - Includes upcoming print countdown and projected EPS range (`$0.26` to `$0.29`).
 
-### ✅ ADHD-Friendly Tooltip System
-- `cf-tip` behavior was redesigned from browser-native title tooltips to a custom readable tooltip panel:
-  - high-contrast dark background,
-  - `border-left: 4px solid #00E5FF`,
-  - readable `14px` font size.
-- Streamlit tooltip containers were also styled to match this accessibility pattern.
-- Forced minimum tooltip width for readability (`min-width: 350px`) with off-white text (`#f1f5f9`).
-
 ### ✅ Dense Data Tracking Enhancements
 - Added hover transitions and highlight color on table rows to help track lines across wide data grids.
 - Global spacing across vertical/horizontal blocks was tightened for faster dashboard navigation.
