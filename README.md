@@ -6,6 +6,20 @@
 
 ---
 
+## Architecture (modular layout)
+
+| Area | Location |
+|------|----------|
+| Streamlit UI + technical / options / scanner logic | `app.py` |
+| Yahoo Finance access (thread-local `requests` session, retries, defensive empty frames) | `data/yf_engine.py` |
+| Global theme CSS + sticky-nav / settings FAB boot script | `assets/styles.css`, `assets/routing.js` → `inject_assets()` in `app.py` |
+| Desk preferences (watchlist, strategy, overlays, Turbo, scanner order) | `st.session_state` only (`_cf_app_config`); **the app does not write `config.json`** |
+| Optional legacy seed | If `config.json` is present at startup, it is **read once per browser session** to hydrate session state (migration / local convenience) |
+
+Quant engines (Black–Scholes, Hurst exponent, Kelly criterion, and related desk math) live in `app.py` and were **not** refactored for this modular split.
+
+---
+
 ## What Changed In This Release
 
 ### ✅ Execution strip & signal logic (v14.1)
@@ -13,7 +27,7 @@
 - **“Why this trade?”** (`cf-tip`) uses **`_confluence_why_trade_plain`**, the same **7 headline confluence checklist** as Diamond cards (Supertrend, Ichimoku, ADX, OBV, Divergence, Gold Zone, Structure), including when the chain or strike line is empty.
 - **Blue Diamond** now requires **multi-timeframe agreement**: confluence must **cross up to 7+**, **daily market structure must be BULLISH** on that bar, and the **weekly MACD/EMA bias must not be BEARISH** (weekly bias is still evaluated from the current weekly frame; daily structure is evaluated per bar in the scan). Chart legend hovers and the Quick Reference glossary match this definition.
 - **Weekly trend label** (`weekly_trend_label`) is **hardened**: requires a **`pandas.DataFrame`**, validates **`Close`**, length, numeric coercion, and try/except so the main desk and **Market Scanner** never throw on thin, malformed, or non-frame weekly inputs.
-- **Streamlit widget labels (ASCII):** Mission Control **Turbo** toggle reads **`Turbo mode`** (no emoji in the widget label). Watchlist UI uses **`Edit watchlist symbols`** (expander), **`Open watchlist editor`** (tape shortcut), and plain **Move up / Move down / Remove symbol** buttons — stable explicit `key=` values are unchanged (`sb_mini_mode`, `sb_strat_radio`, etc.) so `config.json` and sessions stay compatible.
+- **Streamlit widget labels (ASCII):** Mission Control **Turbo** toggle reads **`Turbo mode`** (no emoji in the widget label). Watchlist UI uses **`Edit watchlist symbols`** (expander), **`Open watchlist editor`** (tape shortcut), and plain **Move up / Move down / Remove symbol** buttons — stable explicit `key=` values are unchanged (`sb_mini_mode`, `sb_strat_radio`, etc.) so session state and optional legacy `config.json` stay aligned.
 - **Early options / BLUF path** is wrapped in defensive parsing: safe expiry strings, tuple unpacking, and fallbacks so missing or quiet option chains do not crash the page.
 - **Mission Control segments:** Streamlit’s `st.segmented_control` renders as **`data-testid="stButtonGroup"`** on current builds; HUD CSS styles **`stButtonGroup` and legacy `stSegmentedControl`** so unselected pills stay **dark with readable text** (not default light fills).
 
@@ -28,12 +42,12 @@
 
 ### ✅ Technical chart — fragment + four Plotly panels
 - **Chart layers** (EMAs, Fib, Gann, S/R, Ichimoku, Supertrend, diamonds, gold zone line) live under **Technical Chart** inside a **`@st.fragment`** region. Toggling layers **reruns the fragment only** — it does **not** re-fetch Yahoo OHLC for the main ticker on every overlay flip.
-- Overlay preferences still persist under **`overlay_*`** in `config.json` via a merge onto the latest file-backed config (see **Persisted Keys**).
+- Overlay preferences persist in **session state** (merged via `save_config` into `_cf_app_config`); see **Configuration & persistence**.
 - The **Technical Chart** section still renders **four charts**: **Price & overlays**, **Volume**, **RSI (14)**, and **MACD** (independent zoom/pan, `hovermode: x unified` per panel).
 - **Gold Zone** blends **Volume Profile POC**, **61.8% Fib** (60-bar window), **200-day SMA** when history allows, and **nearest Gann Square of 9** level (mean of available components).
 
 ### ✅ Performance & mobile
-- **Yahoo access:** OHLC and options use **`@st.cache_data`** with TTLs. The app uses **`_yfinance_ticker()`** (fresh `yf.Ticker` per call) to avoid stale sessions and unbounded cached connections on large watchlists.
+- **Yahoo access:** OHLC and options use **`@st.cache_data`** in `app.py` with TTLs; implementations call **`data/yf_engine.py`**, which uses a **thread-local `requests.Session`** (custom User-Agent) and **exponential backoff** on failures. Each call still uses a fresh `yf.Ticker(..., session=...)` to avoid stale state on large watchlists.
 - **Cold load:** The five independent Yahoo calls in `main()` (**equity daily, equity weekly, macro, news, earnings**) run in parallel via **`ThreadPoolExecutor`**.
 - **Options:** `fetch_options(ticker)` with **`exp=None`** returns **expiration strings only** (no `option_chain` download). Call again with a chosen expiry when you need strikes (saves one redundant chain pull per load).
 - **Confluence + Gold Zone:** On the full dataframe, **Gold Zone is computed once** and passed into **`calc_confluence_points(..., gold_zone_price=...)`** so POC/Fib/SMA/Gann are not duplicated for the same bar.
@@ -41,24 +55,23 @@
 - **Glance row:** When **`len(df) >= 7`**, the price sparkline reuses **`df["Close"].tail(7)`** instead of a separate `1mo` history fetch.
 - **Quant Edge:** ATR is computed **once** per score (single `TA.atr(df)` series) for the volatility pillar.
 - **Market Scanner** uses a **thread pool** (up to 8 workers) so watchlist symbols fetch in parallel.
-- **`load_config()`** merges **`st.secrets`** (scalar top-level keys only, for Streamlit Cloud) with **`config.json`**.
-- **`mini_mode`** (**Turbo mode** toggle in Mission Control) persists in `config.json` and **skips heavy Plotly** (`build_chart` and the four technical panels, volume-profile bar chart, simulator equity chart) while keeping the glance row, execution strip, quant dashboard, and scanner. The **`@st.fragment` technical zone returns immediately** in Turbo mode — it does **not** call `build_chart`. It shows a **Turbo · Technical Summary** card: **price**, **structure**, **confluence score**, **Gold Zone** distance, and **Diamond** status. With Turbo on, the app injects **denser main-column CSS** (tighter padding, smaller section headers and cards) so more fits on one phone screen.
-- **CSS:** `touch-action: manipulation`, `min-height: 100dvh` on the app shell, and touch hints on the sticky nav to reduce mobile zoom/jitter.
+- **`load_config()`** returns settings from **`st.session_state`**, seeded from **defaults**, **scalar `st.secrets`** (Streamlit Cloud), and an **optional one-time read** of `config.json` if the file exists.
+- **`mini_mode`** (**Turbo mode** toggle in Mission Control) persists in **session state** and **skips heavy Plotly** (`build_chart` and the four technical panels, volume-profile bar chart, simulator equity chart) while keeping the glance row, execution strip, quant dashboard, and scanner. The **`@st.fragment` technical zone returns immediately** in Turbo mode — it does **not** call `build_chart`. It shows a **Turbo · Technical Summary** card: **price**, **structure**, **confluence score**, **Gold Zone** distance, and **Diamond** status. With Turbo on, the app injects **denser main-column CSS** from `assets/styles.css` (mini-density block) so more fits on one phone screen.
+- **CSS:** Theme lives in **`assets/styles.css`** (imported at runtime). The shell uses `touch-action: manipulation`, `min-height: 100dvh`, and touch hints on the sticky nav to reduce mobile zoom/jitter.
 
-### ✅ Persistent User State (Watchlist + Scan Ordering)
-- `config.json` persistence includes `watchlist`, `scanner_sort_mode`, **Strategy** (`strat_focus`, `strat_horizon`), **Turbo / mini_mode**, and **Chart overlay** toggles (`overlay_*`).
+### ✅ Persistent user state (watchlist + scan ordering)
+- **Session-only persistence:** `watchlist`, `scanner_sort_mode`, **Strategy** (`strat_focus`, `strat_horizon`), **Turbo / `mini_mode`**, and **chart overlay** toggles (`overlay_*`) are stored under **`st.session_state[_cf_app_config]`** via `save_config()`. **Nothing is written back to `config.json`.**
 - **Watchlist editor** (main column → **Edit watchlist symbols** expander):
   - **Textarea** for symbols — **commas, newlines, or semicolons**; duplicates removed; uppercase normalization.
-  - Auto-saves with the usual **`watch_cfg`** merge; **Save and refresh** forces a disk write + rerun.
+  - Auto-saves merge into session config; **Save and refresh** commits the textarea to session state and reruns (no disk write).
   - **Reorder:** **Move up**, **Move down**, **Remove symbol**, **Sort A to Z**, **Quick add** + **Add symbol**.
 - **Scanner order** (`Custom watchlist order` vs `Highest confluence first`) is controlled from **Mission Control** (main column).
 - **Streamlit-safe session updates:** staging keys **`_sb_scanner_sync`**, **`_sb_watch_selected_sync`**, **`_sb_add_ticker_clear`**, **`_open_watchlist_editor`** are applied **before** widgets that own those values are built, avoiding `StreamlitAPIException` on reorder, add, or tape taps.
-- Default bootstrap watchlist (only when config is missing/deleted):
-  - `PLTR,BMNR,AAPL,AMZN,NVDA,AMD,TSLA,SPY,QQQ`
-- `config.json` stores the keys listed under **Persisted Keys** below (legacy keys from older builds are stripped on load).
+- **Default watchlist** (when no legacy file and no secrets override): `PLTR,BMNR,AAPL,AMZN,NVDA,AMD,TSLA,SPY,QQQ`
+- **Optional `config.json`:** if present, read **once per session** on first load to seed state; legacy keys from older builds are stripped. Use the sample in-repo `config.json` only as a **template** or migration aid — the live app does not update it.
 
-### ✅ Institutional Glass UI Infrastructure
-- Global CSS architecture moved to a **high-density terminal aesthetic**:
+### ✅ Institutional glass UI infrastructure
+- Global CSS lives in **`assets/styles.css`** and is injected through **`inject_assets()`** (plus optional mini-density CSS when Turbo is on). The aesthetic is a **high-density terminal** look:
   - glass cards with blur/backdrop filtering,
   - tight spacing between widgets and sections,
   - reduced visual noise and less default Streamlit chrome.
@@ -156,7 +169,7 @@
 ### Prerequisites
 - Python 3.9+
 - `pip`
-- **Streamlit ≥ 1.33** recommended (`st.fragment` for chart layers). **`st.segmented_control`** (Streamlit 1.39+ on many installs) maps to a **button group** in the DOM; the app styles both that widget and horizontal radios for Mission Control. Use **≥ 1.39** if you rely on segmented controls; older builds fall back to horizontal `st.radio`.
+- **Streamlit** is **pinned** in `requirements.txt` (strict `==`) to reduce breakage from Streamlit/React DOM changes around custom CSS and `components.v1.html`. The app targets **`st.fragment`** (chart layers), **`st.segmented_control`** when available (falls back to horizontal `st.radio`), and styles both **`stButtonGroup`** and legacy segmented-control test IDs in CSS.
 
 ### Install
 ```bash
@@ -174,11 +187,17 @@ App URL: `http://localhost:8501`
 
 ---
 
-## Configuration & Persistence
+## Configuration & persistence
 
-All persistent settings are stored in `config.json` via atomic writes.
+Desk settings live in **`st.session_state`** (`_cf_app_config`). They are merged from, in order:
 
-### Persisted Keys
+1. Built-in **defaults** (see `DEFAULT_CONFIG` in `app.py`)
+2. **Scalar top-level keys** from **`st.secrets`** (Streamlit Cloud), when names match persisted keys
+3. **Optional one-time import** from **`config.json`** in the project root, if the file exists when the session first initializes
+
+The app **never writes** `config.json`. Failed saves to session state surface a **toast** (`Failed to save settings`); failed legacy file reads toast once (`Could not read legacy config.json`).
+
+### Persisted keys (session + optional legacy file)
 | Key | Purpose |
 |-----|---------|
 | `watchlist` | Comma-separated scanner tickers |
@@ -193,50 +212,23 @@ All persistent settings are stored in `config.json` via atomic writes.
 | `overlay_super` | Supertrend overlay on |
 | `overlay_diamonds` | Diamond signals overlay on |
 | `overlay_gold` | Gold zone line on price chart |
-| `mini_mode` | **🚀 Turbo** in Mission Control — lighter UI (skips heavy Plotly blocks; shows **Turbo · Technical Summary** instead of the four-chart stack) |
+| `mini_mode` | **Turbo mode** in Mission Control — lighter UI (skips heavy Plotly blocks; shows **Turbo · Technical Summary** instead of the four-chart stack) |
 
 ---
 
-## Migration Notes (Existing Users)
+## Migration notes (existing users)
 
-If you are upgrading from an older version, use this safe sequence:
+1. **Pull** the latest repo (includes `app.py`, `data/`, `assets/`, `requirements.txt`, `README.md`).
+2. **Reinstall deps** (pinned versions): `pip install -r requirements.txt`
+3. **Optional:** Keep a **`config.json`** next to `app.py` if you want the **first session** to import your old watchlist / preferences. After that, changes live only in the browser session (and Cloud secrets where configured).
+4. Run `streamlit run app.py` and confirm **Edit watchlist symbols** / Mission Control match what you expect.
 
-1. Back up your current config:
-   ```bash
-   cp config.json config.backup.json
-   ```
-2. Pull/copy the latest `app.py` and `README.md`.
-3. Launch once with:
-   ```bash
-   streamlit run app.py
-   ```
-4. Expand **Edit watchlist symbols** at the top of the page (or use **Open watchlist editor** under the tape) and confirm your watchlist loaded correctly.
+### About missing keys in `config.json`
+- Partial JSON files are merged with **defaults** on first load; unknown legacy keys are dropped.
+- The in-repo **`config.json`** is a **reference template** — you can delete it, shrink it to only the keys you care about, or omit it entirely.
 
-### About missing keys
-- Old `config.json` files without newer keys are automatically backfilled by the app’s default config merge.
-- New keys are saved automatically the next time the related Mission Control widget, chart-layer toggle, or watchlist flow updates config.
-- No manual JSON editing is required unless you want to seed values ahead of first run.
-
-### Optional manual seed example
-If you want to prefill watchlist before launch:
-
-```json
-{
-  "watchlist": "PLTR,BMNR,AAPL,AMZN,NVDA,AMD,TSLA,SPY,QQQ",
-  "scanner_sort_mode": "Custom watchlist order",
-  "strat_focus": "Hybrid",
-  "strat_horizon": "30 DTE",
-  "overlay_ema": true,
-  "overlay_fib": true,
-  "overlay_gann": true,
-  "overlay_sr": true,
-  "overlay_ichi": false,
-  "overlay_super": false,
-  "overlay_diamonds": true,
-  "overlay_gold": true,
-  "mini_mode": false
-}
-```
+### Optional legacy seed file
+See the root **`config.json`** in this repository for a full example of keys the importer understands. Edit copy/paste as needed; the running app **does not update this file**.
 
 ---
 
@@ -246,7 +238,7 @@ Latest QA sweep performed against current `app.py` included:
 
 - Lint diagnostics: no issues reported on `app.py`.
 - Python syntax parse: `python3 -c "import ast; ast.parse(open('app.py').read())"` (pass).
-- **Plotly 6:** chart layout uses validators-safe patterns (axis `title_text` / `title_font`, `legend.itemwidth` ≥ 30, `hoverlabel.font` as nested `font` dict).
+- **Plotly 5.x** (pinned in `requirements.txt`): chart layout uses validators-safe patterns (axis `title_text` / `title_font`, `legend.itemwidth` ≥ 30, `hoverlabel.font` as nested `font` dict).
 - Runtime boot smoke check (headless Streamlit):
   - app starts successfully and serves local URL
   - no startup exceptions observed.
@@ -262,14 +254,20 @@ Residual manual QA recommended:
 
 ---
 
-## Project Structure
+## Project structure
 
 ```
 cashflow-trader/
-├── app.py           # Main app logic + UI/CSS + engines
-├── config.json      # Persisted runtime/user settings
-├── requirements.txt # Python dependencies
-└── README.md        # Project documentation
+├── app.py              # Streamlit app, UI flow, TA / options / scanner logic, quant engines
+├── assets/
+│   ├── styles.css      # Global theme + mini-mode density (injected via inject_assets)
+│   └── routing.js      # Sticky-nav hash routing + sidebar FAB bootstrap (components.v1.html)
+├── data/
+│   ├── __init__.py
+│   └── yf_engine.py    # Yahoo Finance: session, retries, fetch_* implementations
+├── config.json         # Optional: one-time per-session import template (not written by the app)
+├── requirements.txt    # Pinned Python dependencies
+└── README.md           # This file
 ```
 
 ---
