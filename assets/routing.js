@@ -88,9 +88,9 @@ function cfFindMainDashTabButtons(){
   for(var i=0;i<lists.length;i++){
     var tabs=lists[i].querySelectorAll('[role="tab"]');
     if(tabs.length!==3)continue;
-    var a=(tabs[0].textContent||'').trim();
-    var b=(tabs[1].textContent||'').trim();
-    if(a.indexOf('Setup')>=0&&b.indexOf('Cashflow')>=0)return tabs;
+    var a=((tabs[0].textContent||'')+'').replace(/\s+/g,' ').trim();
+    var b=((tabs[1].textContent||'')+'').replace(/\s+/g,' ').trim();
+    if(a.indexOf('Setup')>=0&&(b.indexOf('Cashflow')>=0||b.indexOf('strikes')>=0))return tabs;
   }
   return null;
 }
@@ -119,11 +119,24 @@ function cfOpenQuickReference(){
 }
 function cfScrollToHashId(id){
   var n=0;
+  var navPad=72;
   function one(){
     var el=pd.getElementById(id);
     if(el){
-      el.scrollIntoView({behavior:'smooth',block:'start'});
-      try{pw.history.replaceState(null,'','#'+id);}catch(e){}
+      var sc=pd.querySelector('[data-testid="stAppViewContainer"]')||pd.scrollingElement||pd.documentElement;
+      try{
+        if(sc&&sc!==pd.documentElement&&sc.scrollHeight>sc.clientHeight){
+          var er=el.getBoundingClientRect();
+          var sr=sc.getBoundingClientRect();
+          var y=sc.scrollTop+(er.top-sr.top)-navPad;
+          sc.scrollTo({top:Math.max(0,y),behavior:'smooth'});
+        }else{
+          el.scrollIntoView({behavior:'smooth',block:'start'});
+        }
+      }catch(e0){
+        try{el.scrollIntoView({behavior:'smooth',block:'start'});}catch(e1){}
+      }
+      try{pw.history.replaceState(null,'','#'+id);}catch(e2){}
       return;
     }
     n++; if(n<50)setTimeout(one,110);
@@ -166,6 +179,11 @@ var CF_NESTED_INTEL_SUBTAB={
   earnings:'Upcoming Earnings'
 };
 function cfNavigateHashFromNav(id){
+  /* Execution + charts live above the main tab row — only scroll, no tab switch */
+  if(id==='execution'||id==='charts'){
+    cfScrollToHashId(id);
+    return;
+  }
   if(id==='guide'){
     cfClickMainDashTab(CF_INTEL_MAIN_IDX,function(){
       setTimeout(function(){
@@ -189,7 +207,7 @@ function cfNavigateHashFromNav(id){
 function cfHashNavKnown(id){
   if(id in CF_NESTED_INTEL_SUBTAB)return true;
   if(id==='guide')return true;
-  return id==='setup'||id==='quant-dashboard'||id==='strategies'||id==='risk'||id==='scanner';
+  return id==='execution'||id==='charts'||id==='setup'||id==='quant-dashboard'||id==='strategies'||id==='risk'||id==='scanner';
 }
 function cfOnStickyNavClick(ev){
   var t=ev.target;

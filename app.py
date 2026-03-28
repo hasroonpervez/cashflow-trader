@@ -317,9 +317,10 @@ def fetch_stock(ticker, period="1y", interval="1d"):
     return yf_engine.fetch_stock(ticker, period, interval)
 
 
-@st.cache_data(ttl=120)
-def _ticker_pct_change_1d(symbol: str):
-    return yf_engine.ticker_pct_change_1d(symbol)
+@st.cache_data(ttl=120, show_spinner=False)
+def _tape_pct_changes(symbols: tuple):
+    """One cache entry per watchlist lineup; avoids N× “Running _ticker_pct_change_1d…” on the tape."""
+    return {sym: yf_engine.ticker_pct_change_1d(sym) for sym in symbols}
 
 
 @st.cache_data(ttl=300)
@@ -2544,13 +2545,14 @@ def main():
     if watch_items:
         st.markdown('<p class="cf-tape-title">Watchlist tape</p>', unsafe_allow_html=True)
         st.caption("Tap a symbol to promote it to the active ticker. Daily move is versus the prior session close (cached).")
+        _tape_pct = _tape_pct_changes(tuple(watch_items))
         _TAPE_CHUNK = 8
         tape_i = 0
         for row_start in range(0, len(watch_items), _TAPE_CHUNK):
             row_tickers = watch_items[row_start : row_start + _TAPE_CHUNK]
             tape_cols = st.columns(len(row_tickers))
             for j, tkr in enumerate(row_tickers):
-                pct = _ticker_pct_change_1d(tkr)
+                pct = _tape_pct.get(tkr)
                 pct_str = f"{pct:+.2f}%" if pct is not None else "n/a"
                 c_pct = "#10b981" if (pct is not None and pct >= 0) else ("#ef4444" if pct is not None else "#64748b")
                 is_active = tkr == ticker
