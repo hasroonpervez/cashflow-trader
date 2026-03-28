@@ -2029,16 +2029,16 @@ def _fragment_technical_zone(
         gold_zone=gold_zone_price if show_gold_zone else None,
         mobile_layout=bool(mobile_chart_layout),
     )
-    st.plotly_chart(fig_p, use_container_width=True, config=_PLOTLY_UI_CONFIG)
+    st.plotly_chart(fig_p, width="stretch", config=_PLOTLY_UI_CONFIG)
     st.divider()
     st.markdown("#### Volume")
-    st.plotly_chart(fig_v, use_container_width=True, config=_PLOTLY_UI_CONFIG)
+    st.plotly_chart(fig_v, width="stretch", config=_PLOTLY_UI_CONFIG)
     st.divider()
     st.markdown("#### RSI (14)")
-    st.plotly_chart(fig_r, use_container_width=True, config=_PLOTLY_UI_CONFIG)
+    st.plotly_chart(fig_r, width="stretch", config=_PLOTLY_UI_CONFIG)
     st.divider()
     st.markdown("#### MACD")
-    st.plotly_chart(fig_m, use_container_width=True, config=_PLOTLY_UI_CONFIG)
+    st.plotly_chart(fig_m, width="stretch", config=_PLOTLY_UI_CONFIG)
 
     chart_mood = "bull" if struct == "BULLISH" else ("bear" if struct == "BEARISH" else "neutral")
 
@@ -2345,10 +2345,10 @@ def main():
                 + "</div>",
                 unsafe_allow_html=True,
             )
-            up_clicked = st.button("Move up", use_container_width=True, key="sb_move_up")
-            down_clicked = st.button("Move down", use_container_width=True, key="sb_move_down")
-            remove_clicked = st.button("Remove symbol", use_container_width=True, key="sb_remove_ticker")
-            sort_az = st.button("Sort A to Z", use_container_width=True, key="sb_sort_az")
+            up_clicked = st.button("Move up", width="stretch", key="sb_move_up")
+            down_clicked = st.button("Move down", width="stretch", key="sb_move_down")
+            remove_clicked = st.button("Remove symbol", width="stretch", key="sb_remove_ticker")
+            sort_az = st.button("Sort A to Z", width="stretch", key="sb_sort_az")
 
             if up_clicked and sel in watch_items_sb:
                 idx = watch_items_sb.index(sel)
@@ -2406,7 +2406,7 @@ def main():
             key="sb_add_ticker",
             label_visibility="collapsed",
         )
-        add_clicked = st.button("Add symbol", use_container_width=True, key="sb_add_watch")
+        add_clicked = st.button("Add symbol", width="stretch", key="sb_add_watch")
         add_ticker = (add_ticker_raw or "").strip().upper()
         if add_clicked:
             if add_ticker:
@@ -2422,7 +2422,7 @@ def main():
             else:
                 st.toast("Enter a ticker in the box above, then tap Add symbol.")
 
-        if st.button("Save and refresh", use_container_width=True, key="sb_save_refresh_main"):
+        if st.button("Save and refresh", width="stretch", key="sb_save_refresh_main"):
             w = _parse_watchlist_string(st.session_state.get("sb_scanner", ""))
             save_config({**load_config(), "watchlist": ",".join(w)})
             st.rerun()
@@ -2548,7 +2548,7 @@ def main():
                     if st.button(
                         tkr,
                         key=f"cf_tape_{tape_i}",
-                        use_container_width=True,
+                        width="stretch",
                         type="primary" if is_active else "secondary",
                     ):
                         st.session_state["_sb_watch_selected_sync"] = tkr
@@ -2557,7 +2557,7 @@ def main():
 
     b1, b2 = st.columns([1, 2])
     with b1:
-        if st.button("Open watchlist editor", use_container_width=True, key="cf_open_watchlist_editor"):
+        if st.button("Open watchlist editor", width="stretch", key="cf_open_watchlist_editor"):
             st.session_state["_open_watchlist_editor"] = True
             st.rerun()
     with b2:
@@ -3235,7 +3235,7 @@ def main():
                     st.dataframe(
                         _style_price_levels_table(_fib_df, mode="fib", spot=price),
                         column_config=_PRICE_LEVEL_COLUMN_CONFIG,
-                        use_container_width=True,
+                        width="stretch",
                         hide_index=True,
                     )
                 _explain("What are Fibonacci levels?",
@@ -3248,7 +3248,7 @@ def main():
                     st.dataframe(
                         _style_price_levels_table(_gann_df, mode="gann", spot=price),
                         column_config=_PRICE_LEVEL_COLUMN_CONFIG,
-                        use_container_width=True,
+                        width="stretch",
                         hide_index=True,
                     )
                 if st.checkbox("Gann Angles", key="exp_2"):
@@ -3415,7 +3415,7 @@ def main():
                         tickformat=",.2f",
                         **_PLOTLY_AXIS_TITLE,
                     )
-                    st.plotly_chart(fig_vp, use_container_width=True, config=_PLOTLY_UI_CONFIG)
+                    st.plotly_chart(fig_vp, width="stretch", config=_PLOTLY_UI_CONFIG)
                 else:
                     st.caption(f"Volume POC (mini mode): **${poc['mid']:.2f}**. Full profile chart stays parked while Turbo is on.")
                 _explain("\U0001f9e0 Volume Profile", f"The Point of Control (POC) is ${poc['mid']:.2f}. This is the most traded price. Think of it as the price point where your store sees the most customers. The stock is pulled toward this price like a magnet. Use it to pick your option strike prices.", "neutral")
@@ -3462,7 +3462,7 @@ def main():
                                 st.dataframe(
                                     _style_propdesk_highlight(_cc_df),
                                     column_config=_options_scan_column_config(put_table=False),
-                                    use_container_width=True,
+                                    width="stretch",
                                     hide_index=True,
                                 )
                         else:
@@ -3482,7 +3482,7 @@ def main():
                                 st.dataframe(
                                     _style_propdesk_highlight(_csp_df),
                                     column_config=_options_scan_column_config(put_table=True),
-                                    use_container_width=True,
+                                    width="stretch",
                                     hide_index=True,
                                 )
                         else:
@@ -3780,7 +3780,7 @@ def main():
                         tickformat=".1f",
                         **_PLOTLY_AXIS_TITLE,
                     )
-                    st.plotly_chart(fig_b, use_container_width=True, config=_PLOTLY_UI_CONFIG)
+                    st.plotly_chart(fig_b, width="stretch", config=_PLOTLY_UI_CONFIG)
                 else:
                     st.caption(
                         f"Mini mode parks the cumulative return chart. Modeled cumulative return landed at **{_cum.iloc[-1]:.1f}%** across {len(br)} trades."
@@ -3931,7 +3931,7 @@ def main():
                     st.dataframe(
                         _style_earnings_next_highlight(earn_cal_df, earn_highlight_idx),
                         column_config=_earnings_calendar_column_config(),
-                        use_container_width=True,
+                        width="stretch",
                         hide_index=True,
                     )
 
