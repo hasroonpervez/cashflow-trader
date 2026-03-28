@@ -1360,6 +1360,125 @@ def fetch_earnings_date(ticker):
     except Exception:
         return None
 
+
+def _earnings_ts_normalize(x):
+    """Naive midnight timestamp for calendar / earnings_dates index values."""
+    if isinstance(x, str) and len(x) >= 10:
+        t = pd.Timestamp(x[:10])
+    else:
+        t = pd.Timestamp(x)
+    if t.tzinfo is not None:
+        t = t.tz_convert("UTC").tz_localize(None)
+    return t.normalize()
+
+
+def _earnings_float_or_none(x):
+    if x is None:
+        return None
+    try:
+        if isinstance(x, str) and not x.strip():
+            return None
+        v = float(x)
+        if np.isnan(v):
+            return None
+        return v
+    except (TypeError, ValueError):
+        return None
+
+
+def _earnings_find_col(df: pd.DataFrame, *candidates: str):
+    cols = list(df.columns)
+    norm = {str(c).strip().lower().replace(" ", ""): c for c in cols}
+    for cand in candidates:
+        key = cand.strip().lower().replace(" ", "")
+        if key in norm:
+            return norm[key]
+        if cand in cols:
+            return cand
+    return None
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_earnings_calendar_display(ticker: str):
+    """Build earnings calendar rows for the desk table. Returns (df, highlight_row_index | None)."""
+    today_d = datetime.now().date()
+    rows = []
+    try:
+        t = _yfinance_ticker(ticker)
+        ed = getattr(t, "earnings_dates", None)
+        if isinstance(ed, pd.DataFrame) and not ed.empty:
+            ed = ed.copy()
+            ed.index = [_earnings_ts_normalize(i) for i in ed.index]
+            ed = ed.sort_index(ascending=True)
+            cutoff = pd.Timestamp(today_d) - pd.Timedelta(days=800)
+            ed = ed[ed.index >= cutoff]
+            if len(ed) > 18:
+                ed = ed.iloc[-18:]
+
+            c_est = _earnings_find_col(ed, "EPS Estimate", "eps estimate")
+            c_rep = _earnings_find_col(ed, "Reported EPS", "Reported Eps")
+            c_sur = _earnings_find_col(ed, "Surprise(%)", "Surprise (%)", "Surprise %")
+
+            for dt_ts, row in ed.iterrows():
+                d = dt_ts.date() if hasattr(dt_ts, "date") else pd.Timestamp(dt_ts).date()
+                est = row[c_est] if c_est else np.nan
+                rep = row[c_rep] if c_rep else np.nan
+                sur = row[c_sur] if c_sur else np.nan
+                has_rep = pd.notna(rep) and str(rep).strip() != ""
+                if has_rep:
+                    status = "Reported"
+                elif d >= today_d:
+                    status = "Upcoming"
+                else:
+                    status = "Past"
+                rows.append(
+                    {
+                        "Earnings date": d,
+                        "EPS estimate": _earnings_float_or_none(est),
+                        "Reported EPS": _earnings_float_or_none(rep),
+                        "Surprise (%)": _earnings_float_or_none(sur),
+                        "Status": status,
+                    }
+                )
+
+        if not rows:
+            raw = fetch_earnings_date(ticker)
+            if raw is not None:
+                try:
+                    dt_ts = _earnings_ts_normalize(raw)
+                    d = dt_ts.date()
+                    status = "Upcoming" if d >= today_d else "Past"
+                    rows.append(
+                        {
+                            "Earnings date": d,
+                            "EPS estimate": None,
+                            "Reported EPS": None,
+                            "Surprise (%)": None,
+                            "Status": status,
+                        }
+                    )
+                except Exception:
+                    pass
+
+        if not rows:
+            return pd.DataFrame(), None
+
+        df = pd.DataFrame(rows)
+        df = df.sort_values("Earnings date", ascending=False, kind="mergesort").reset_index(drop=True)
+
+        future_df = df[df["Earnings date"] >= today_d]
+        highlight_idx = None
+        if not future_df.empty:
+            next_d = future_df["Earnings date"].min()
+            hit = df.index[df["Earnings date"] == next_d]
+            if len(hit):
+                highlight_idx = int(hit[0])
+
+        return df, highlight_idx
+    except Exception:
+        return pd.DataFrame(), None
+
+
 @st.cache_data(ttl=300)
 def fetch_macro():
     data = {}
@@ -3230,6 +3349,40 @@ def _style_price_levels_table(df: pd.DataFrame, *, mode: str, spot: float):
         return sty.hide_index()
 
 
+def _earnings_calendar_column_config():
+    return {
+        "Earnings date": st.column_config.DateColumn("Earnings date", format="MMM DD, YYYY"),
+        "EPS estimate": st.column_config.NumberColumn("EPS estimate", format="$%.2f"),
+        "Reported EPS": st.column_config.NumberColumn("Reported EPS", format="$%.2f"),
+        "Surprise (%)": st.column_config.NumberColumn("Surprise (%)", format="%.2f%%"),
+        "Status": st.column_config.TextColumn("Status"),
+    }
+
+
+def _style_earnings_next_highlight(df: pd.DataFrame, highlight_idx):
+    """Subtle row fill for the next earnings date on or after today."""
+    if df.empty:
+        return df
+    if highlight_idx is None:
+        try:
+            return df.style.hide(axis="index")
+        except (TypeError, ValueError, AttributeError):
+            return df.style.hide_index()
+
+    hi = int(highlight_idx)
+
+    def _row(r):
+        if r.name == hi:
+            return ["background-color: rgba(245, 158, 11, 0.16)"] * len(r)
+        return [""] * len(r)
+
+    sty = df.style.apply(_row, axis=1)
+    try:
+        return sty.hide(axis="index")
+    except (TypeError, ValueError, AttributeError):
+        return sty.hide_index()
+
+
 _PRICE_LEVEL_COLUMN_CONFIG = {
     "Level": st.column_config.TextColumn("Level", width="large"),
     "Price": st.column_config.NumberColumn("Price", format="$%.2f"),
@@ -3662,9 +3815,6 @@ def main():
             earn_glance = f"{days_to_earnings} days: {earnings_dt.strftime('%b %d, %Y')}"
     else:
         earn_glance = "No date from feed"
-
-    if earnings_parse_failed:
-        st.info("Earnings date from the feed could not be parsed; the countdown banner is disabled for this symbol.")
 
     if earnings_near and earnings_dt:
         st.markdown(f"""<div style='background:linear-gradient(135deg,rgba(245,158,11,.15),rgba(217,119,6,.1));
@@ -4900,10 +5050,10 @@ def main():
             #  SECTION 8 \u2014 NEWS & MACRO
             # ══════════════════════════════════════════════════════════════════
             st.markdown('<div id="news" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
-            _section("News and Market Conditions", f"Headlines plus macro crosswinds for {ticker} while the tape is open.",
+            _section("News and Market Conditions", f"Headlines, macro, and earnings calendar for {ticker} while the tape is open.",
                      tip_plain="Stories explain gaps and IV pops. Always read news through price. When headline risk stacks near earnings, favor safer strikes and lighter size.")
-            n1, n2 = st.columns([3, 2])
-            with n1:
+            n_tab, m_tab, e_tab = st.tabs(["🗞️ Market News", "🌍 Macro & Yields", "📅 Upcoming Earnings"])
+            with n_tab:
                 st.markdown(f"#### {ticker} News")
                 if news:
                     for item in news:
@@ -4911,11 +5061,28 @@ def main():
                         st.markdown(f"<div class='ni'><strong style='color:#e2e8f0'>{item['title']}</strong><br><span style='color:#64748b;font-size:.8rem'>{item['pub']} {item['time']}</span>{' | ' + lnk if lnk else ''}</div>", unsafe_allow_html=True)
                 else:
                     st.info("No news found.")
-            with n2:
+            with m_tab:
                 st.markdown("#### Macro Dashboard")
                 for k, v in macro.items():
                     dc = "#10b981" if v["chg"] >= 0 else "#ef4444"
                     st.markdown(f"<div class='tc' style='padding:10px 14px;margin-bottom:6px'><div style='display:flex;justify-content:space-between'><span style='color:#94a3b8'>{k}</span><span class='mono' style='color:#e2e8f0'>{v['price']:.2f} <span style='color:{dc}'>{v['chg']:+.2f}%</span></span></div></div>", unsafe_allow_html=True)
+            with e_tab:
+                st.markdown('<div id="earnings" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
+                st.markdown(f"#### {_html_mod.escape(ticker)} earnings calendar")
+                earn_cal_df, earn_highlight_idx = fetch_earnings_calendar_display(ticker)
+                if earn_cal_df.empty:
+                    _earn_empty = "No upcoming earnings data available for this ticker."
+                    if earnings_parse_failed:
+                        _earn_empty += " The feed returned a value we could not parse into a date."
+                    st.info(_earn_empty)
+                else:
+                    st.caption("Rows are newest-first. The next on-calendar print (today or later) is highlighted.")
+                    st.dataframe(
+                        _style_earnings_next_highlight(earn_cal_df, earn_highlight_idx),
+                        column_config=_earnings_calendar_column_config(),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
 
             with st.expander("Quick Reference Guide", expanded=False):
                 st.markdown('<div id="guide" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
