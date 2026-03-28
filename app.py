@@ -1,6 +1,6 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  CASHFLOW COMMAND CENTER v14.0 · INSTITUTIONAL EDITION                   ║
+║  CASHFLOW COMMAND CENTER v14.1 · INSTITUTIONAL EDITION                   ║
 ║  Glanceable execution desk plus Diamond, Gold Zone, and Quant            ║
 ║  Hurst · Kelly · Black Scholes engines unchanged in this release          ║
 ╚══════════════════════════════════════════════════════════════════════════╝
@@ -160,13 +160,26 @@ def retry_fetch(fn, retries=3, delay=2):
             time.sleep(delay * (attempt + 1))
     return None
 
-st.set_page_config(page_title="CashFlow Command Center v14", page_icon="💰",
+st.set_page_config(page_title="CashFlow Command Center v14.1", page_icon="💰",
                    layout="wide", initial_sidebar_state="collapsed")
 
 
 def _yfinance_ticker(symbol: str):
     """Fresh ``yf.Ticker`` per call — avoids stale sessions and unbounded cached connections on large watchlists."""
     return yf.Ticker(str(symbol).upper().strip())
+
+
+def _client_suggests_mobile_chart():
+    """Best-effort mobile UA hint for tighter Plotly margins (server-side; no layout jank)."""
+    try:
+        from streamlit.web.server.websocket_headers import _get_websocket_headers
+
+        h = _get_websocket_headers() or {}
+        lk = {str(k).lower(): v for k, v in h.items()}
+        ua = str(lk.get("user-agent") or lk.get("user_agent") or "").lower()
+        return any(tok in ua for tok in ("iphone", "ipad", "ipod", "android", "mobile"))
+    except Exception:
+        return False
 
 
 # Plotly toolbar: vertical mode bar avoids clashing with the legend
@@ -231,7 +244,7 @@ _MINI_MODE_DENSITY_CSS = """
 
 # ─────────────────────────────────────────────────────────────────────────
 # CSS (stored as variable, merged with navbar in a single st.markdown call
-# to prevent Streamlit from generating a visible "keyb" widget label)
+# so the first paint stays one consolidated markdown injection)
 # ─────────────────────────────────────────────────────────────────────────
 _CSS = """
 <style>
@@ -560,6 +573,10 @@ div[data-testid="stMetric"] [data-testid="stMetricValue"]{font-family:'JetBrains
   white-space:normal;word-break:break-word;
 }
 .cf-tip:hover .cf-tiptext,.cf-tip:focus-visible .cf-tiptext{visibility:visible;opacity:1}
+.cf-tip.cf-tip-ico{
+  width:auto;min-width:1.5rem;height:auto;padding:2px 9px;border-radius:999px;margin-left:4px;
+}
+.cf-tip-ico .cf-tip-ico-mark{font-size:.9rem;line-height:1;font-weight:900;color:#22d3ee}
 .section-hdr,.section-hdr h2,.section-hdr p,[data-testid="stMarkdownContainer"]{overflow:visible!important}
 .rh-card{background:rgba(139,92,246,.06);border:1px solid rgba(139,92,246,.2);border-radius:10px;padding:16px 20px;margin:8px 0;line-height:2}
 .rr-card{background:rgba(16,185,129,.06);border:1px solid rgba(16,185,129,.2);border-radius:10px;padding:14px 18px;margin:8px 0}
@@ -1011,12 +1028,16 @@ function armSidebarMo(){
     }
   }).observe(sb,{attributes:true,attributeFilter:['style','class']});
 }
-function sobFam(el){while(el){if(el.id==='sob-host')return true;if(el.getAttribute&&el.getAttribute('data-cf-hamburger')==='1')return true;el=el.parentElement}return false}
-function nukeKeyb(){var all=pd.querySelectorAll('header,[data-testid*="eader"],[data-testid*="Header"]');for(var i=0;i<all.length;i++){all[i].style.setProperty('display','none','important');}var tw=pd.createTreeWalker(pd.body,NodeFilter.SHOW_TEXT,null);while(tw.nextNode()){var n=tw.currentNode;if(n.textContent&&n.textContent.indexOf('keyb')>=0&&n.parentElement&&!sobFam(n.parentElement)){var p=n.parentElement;p.style.setProperty('display','none','important');p.style.setProperty('visibility','hidden','important')}}}
+function hideDefaultStreamlitHeader(){
+  var all=pd.querySelectorAll('header,[data-testid*="eader"],[data-testid*="Header"]');
+  for(var i=0;i<all.length;i++){
+    all[i].style.setProperty('display','none','important');
+  }
+}
 ensureToggle();
 armSidebarMo();
 setInterval(function(){ensureToggle();armSidebarMo();syncToggleUi();},400);
-nukeKeyb();setInterval(nukeKeyb,1500);
+hideDefaultStreamlitHeader();setInterval(hideDefaultStreamlitHeader,1500);
 })();"""
 _TOGGLE_SRCDOC = _html_mod.escape("<script>" + _TOGGLE_JS + "</script>", quote=True)
 
@@ -1097,8 +1118,20 @@ def fetch_options(ticker, exp=None):
 
     When ``exp`` is None, returns empty dataframes and only the expiration list (no ``option_chain``
     download). Call again with a concrete expiry when you need strikes. This avoids pulling the
-    nearest expiry chain twice on every dashboard load."""
+    nearest expiry chain twice on every dashboard load.
+
+    If the requested expiry returns empty frames (illiquid / API gap), we walk forward through
+    nearby listed expiries so BLUF and the Execution Strip never assume non-empty strikes."""
     empty = (pd.DataFrame(), pd.DataFrame())
+
+    def _frames_from_chain(chain_obj):
+        if chain_obj is None:
+            return pd.DataFrame(), pd.DataFrame()
+        c_raw, p_raw = chain_obj.calls, chain_obj.puts
+        calls_df = c_raw.copy() if c_raw is not None and not c_raw.empty else pd.DataFrame()
+        puts_df = p_raw.copy() if p_raw is not None and not p_raw.empty else pd.DataFrame()
+        return calls_df, puts_df
+
     try:
         t = _yfinance_ticker(ticker)
         raw_exps = getattr(t, "options", None)
@@ -1109,12 +1142,24 @@ def fetch_options(ticker, exp=None):
             return empty, []
         if exp is None:
             return empty, exps
-        pick = exp if exp in exps else exps[0]
-        chain = t.option_chain(pick)
-        c_raw, p_raw = chain.calls, chain.puts
-        calls_df = c_raw.copy() if c_raw is not None and not c_raw.empty else pd.DataFrame()
-        puts_df = p_raw.copy() if p_raw is not None and not p_raw.empty else pd.DataFrame()
-        return (calls_df, puts_df), exps
+        primary = exp if exp in exps else exps[0]
+        candidates = [primary]
+        for e in exps:
+            if e not in candidates:
+                candidates.append(e)
+            if len(candidates) >= 8:
+                break
+        last_empty = empty
+        for pick in candidates:
+            try:
+                chain = t.option_chain(pick)
+                calls_df, puts_df = _frames_from_chain(chain)
+                if not calls_df.empty or not puts_df.empty:
+                    return (calls_df, puts_df), exps
+                last_empty = (calls_df, puts_df)
+            except Exception:
+                continue
+        return last_empty, exps
     except Exception:
         return empty, []
 
@@ -1750,31 +1795,41 @@ def calc_confluence_points(df, df_wk=None, vix_val=None, gold_zone_price=None):
 #  DIAMOND SIGNAL DETECTION — Blue (buy) & Pink (exit/take-profit)
 # ═════════════════════════════════════════════════════════════════════════
 
+def _blue_diamond_volume_gate(sub):
+    """Blue Diamond participation: last bar volume at or above 90% of the 20-day volume SMA."""
+    if len(sub) < 20 or "Volume" not in sub.columns:
+        return False
+    vol = float(sub["Volume"].iloc[-1])
+    vma = float(sub["Volume"].iloc[-20:].mean())
+    if vma <= 0:
+        return False
+    return vol >= 0.9 * vma
+
+
 def _blue_diamond_institutional_ok(sub):
     """Filter manic blue entries: skip only true blow-offs (ATR in top ~1% of its window)
     with weak participation. Normal trend days often sit near rolling ATR highs — those
     were incorrectly blocked before, so blues never matched the chart while pinks could still fire."""
     if len(sub) < 22:
         return False
+    if not _blue_diamond_volume_gate(sub):
+        return False
     vol = float(sub["Volume"].iloc[-1])
     vma = float(sub["Volume"].iloc[-20:].mean())
-    if vma <= 0:
-        return False
-    vol_ok = vol >= 0.9 * vma
 
     atr = TA.atr(sub)
     ai = float(atr.iloc[-1])
     if pd.isna(ai) or ai <= 0:
-        return vol_ok
+        return True
     win = min(252, len(atr))
     atr_clean = atr.iloc[-win:].dropna()
     if atr_clean.empty:
-        return vol_ok
+        return True
     # Rank of today's ATR in the window (1.0 = at/above everyone) — block only top-tier expansion + weak vol
     rank = float((atr_clean <= ai).sum()) / len(atr_clean)
     if rank >= 0.99 and vol < 1.05 * vma:
         return False
-    return vol_ok
+    return True
 
 
 def _index_pos(idx_obj):
@@ -1789,9 +1844,9 @@ def _index_pos(idx_obj):
 
 @st.cache_data(ttl=300)
 def detect_diamonds(df, df_wk=None, lookback=None):
-    """Blue Diamond: point-in-time confluence **crosses** to 7+ (was <7 prior bar), **daily
-    structure BULLISH**, weekly trend **not BEARISH** (daily + weekly not fighting), plus
-    institutional filters (participation, ATR blow-off guard).
+    """Blue Diamond (strict): point-in-time **daily** confluence **crosses** to 7+ (was <7 prior bar),
+    **daily structure BULLISH**, **weekly trend not BEARISH**, **volume ≥ 90% of 20-day volume SMA**,
+    plus ATR blow-off guard inside the institutional filter.
 
     Pink Diamond: confluence collapse (≤3 after ≥5) **or** RSI > 75 with fading score;
     weekly bias can be **BULLISH** too (take-profit / de-risk in extended runs)."""
@@ -1818,8 +1873,14 @@ def detect_diamonds(df, df_wk=None, lookback=None):
         rsi_i = float(rsi_series.iloc[i]) if not pd.isna(rsi_series.iloc[i]) else 50.0
         pi = float(df["Close"].iloc[i])
 
-        # Blue: 7+ cross + daily BULLISH structure + weekly not bearish (multi-TF agreement)
-        if sc >= 7 and prev_score < 7 and struct_i == "BULLISH" and wk_bias != "BEARISH":
+        # Blue: 7+ cross + daily BULLISH + weekly not BEARISH + explicit 90% vol SMA gate + ATR filter
+        if (
+            sc >= 7
+            and prev_score < 7
+            and struct_i == "BULLISH"
+            and wk_bias != "BEARISH"
+            and _blue_diamond_volume_gate(sub)
+        ):
             if _blue_diamond_institutional_ok(sub):
                 diamonds.append({"date": df.index[i], "price": pi, "type": "blue",
                                  "score": sc, "rsi": rsi_i, "weekly": wk_bias})
@@ -1898,7 +1959,7 @@ def scan_single_ticker(tkr):
 
         qs, _ = quant_edge_score(df)
         gold_zone, _ = calc_gold_zone(df, df_wk)
-        cp_score, cp_max, cp_bd, _ = calc_confluence_points(df, df_wk, gold_zone_price=gold_zone)
+        cp_score, cp_max, cp_bd, _ = calc_confluence_points(df, df_wk, None, gold_zone_price=gold_zone)
         diamonds = detect_diamonds(df, df_wk)
         latest_d = latest_diamond_status(diamonds)
         dist_gz = (price / gold_zone - 1) * 100 if gold_zone else 0
@@ -2123,9 +2184,14 @@ def _chart_hoverlabel():
 
 
 def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_sr=True,
-                show_ichi=False, show_super=False, diamonds=None, gold_zone=None):
-    """Build four separate figures: price (+ overlays), volume, RSI, MACD — easier to read than one stacked chart."""
+                show_ichi=False, show_super=False, diamonds=None, gold_zone=None,
+                mobile_layout=False):
+    """Build four separate figures: price (+ overlays), volume, RSI, MACD — easier to read than one stacked chart.
+
+    When ``mobile_layout`` is True (narrow UA / phone), the price panel drops the legend, tightens margins,
+    fixes height, and pins Fib / Gann / Gold annotations to the left so labels do not sit on the candles."""
     last_px = float(df["Close"].iloc[-1])
+    ann_side = "left" if mobile_layout else "right"
     _grid = "rgba(30,41,59,0.55)"
     _legend_font = dict(size=11, color="#f1f5f9", family="Inter, system-ui, sans-serif")
     _legend_title_font = dict(size=12, color="#e2e8f0", family="Inter, system-ui, sans-serif")
@@ -2214,7 +2280,7 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
             op = 0.62 if lab in fib_labeled else 0.38
             fig_p.add_hline(
                 y=lev, line_dash="dot", line_color="rgba(56,189,248,0.55)", line_width=lw,
-                opacity=op, annotation_text=ann, annotation_position="right",
+                opacity=op, annotation_text=ann, annotation_position=ann_side,
                 annotation_font=dict(size=10, color="rgba(186,230,253,0.95)"),
             )
     if show_gann:
@@ -2223,7 +2289,7 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
         for i, (_lab, lev) in enumerate(near, start=1):
             fig_p.add_hline(
                 y=lev, line_dash="dash", line_color="rgba(250,204,21,0.42)", line_width=1.2,
-                opacity=0.55, annotation_text=f"G{i} ${lev:.0f}", annotation_position="right",
+                opacity=0.55, annotation_text=f"G{i} ${lev:.0f}", annotation_position=ann_side,
                 annotation_font=dict(size=9, color="rgba(253,224,71,0.9)"),
             )
     if show_sr:
@@ -2243,7 +2309,7 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
     if gold_zone is not None:
         fig_p.add_hline(
             y=gold_zone, line_dash="solid", line_color="#eab308", line_width=3, opacity=0.9,
-            annotation_text=f"Gold ${gold_zone:.2f}", annotation_position="right",
+            annotation_text=f"Gold ${gold_zone:.2f}", annotation_position=ann_side,
             annotation_font=dict(color="#fde047", size=11, family="JetBrains Mono"),
         )
 
@@ -2276,7 +2342,8 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
                     name="Blue diamond",
                     legendgroup="diamond_blue",
                     hovertemplate="<b>Blue diamond</b><br>Same marker as on chart when a buy signal fires.<br>"
-                    "Fires on <b>7+ confluence cross up</b> with <b>daily BULLISH structure</b> and weekly trend <b>not BEARISH</b>.<br>"
+                    "Fires on <b>7+ confluence cross up</b>, <b>daily BULLISH structure</b>, weekly trend <b>not BEARISH</b>, "
+                    "<b>volume ≥ 90% of 20d vol SMA</b>, plus ATR participation filter.<br>"
                     "<i>No blue diamond in loaded history yet.</i><extra></extra>",
                 )
             )
@@ -2307,6 +2374,9 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
                 )
             )
 
+    _p_height = 450 if mobile_layout else 540
+    _p_margin = dict(l=5, r=5, t=52, b=40) if mobile_layout else dict(l=56, r=88, t=56, b=44)
+    _p_show_legend = not mobile_layout
     fig_p.update_layout(
         template="plotly_dark",
         paper_bgcolor="#080c14",
@@ -2317,13 +2387,12 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
             x=0.01, xanchor="left", y=0.98, yanchor="top",
             font=dict(size=15, color="#f1f5f9", family="Inter, system-ui, sans-serif"),
         ),
-        height=540,
-        # Legend sits top-left inside plot so right-side Fib / Gold annotations stay readable.
-        margin=dict(l=56, r=88, t=56, b=44),
+        height=_p_height,
+        margin=_p_margin,
         xaxis_rangeslider_visible=False,
         hovermode="x unified",
         uirevision=uirev,
-        showlegend=True,
+        showlegend=_p_show_legend,
         legend=dict(
             orientation="v",
             yanchor="top",
@@ -2360,13 +2429,14 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
             )
         ]
     )
+    _vm = dict(l=5, r=5, t=24, b=36) if mobile_layout else dict(l=56, r=28, t=28, b=44)
     fig_v.update_layout(
         template="plotly_dark",
         paper_bgcolor="#080c14",
         plot_bgcolor="#080c14",
         font=dict(family="JetBrains Mono, monospace", size=11, color="#cbd5e1"),
-        height=240,
-        margin=dict(l=56, r=28, t=28, b=44),
+        height=200 if mobile_layout else 240,
+        margin=_vm,
         hovermode="x unified",
         uirevision=uirev,
         showlegend=False,
@@ -2423,13 +2493,14 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
                     hovertemplate="<b>Pink diamond</b><br>%{x}<br>RSI %{y:.1f}<extra></extra>",
                 )
             )
+    _rm = dict(l=5, r=5, t=24, b=36) if mobile_layout else dict(l=56, r=28, t=28, b=44)
     fig_r.update_layout(
         template="plotly_dark",
         paper_bgcolor="#080c14",
         plot_bgcolor="#080c14",
         font=dict(family="JetBrains Mono, monospace", size=11, color="#cbd5e1"),
-        height=260,
-        margin=dict(l=56, r=28, t=28, b=44),
+        height=220 if mobile_layout else 260,
+        margin=_rm,
         hovermode="x unified",
         uirevision=uirev,
         showlegend=False,
@@ -2459,16 +2530,17 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
         go.Bar(x=df.index, y=hist, marker_color=hc, name="Histogram", opacity=0.55,
                hovertemplate="Hist: %{y:.4f}<extra></extra>")
     )
+    _mm = dict(l=5, r=5, t=28, b=36) if mobile_layout else dict(l=56, r=28, t=36, b=44)
     fig_m.update_layout(
         template="plotly_dark",
         paper_bgcolor="#080c14",
         plot_bgcolor="#080c14",
         font=dict(family="JetBrains Mono, monospace", size=11, color="#cbd5e1"),
-        height=280,
-        margin=dict(l=56, r=28, t=36, b=44),
+        height=240 if mobile_layout else 280,
+        margin=_mm,
         hovermode="x unified",
         uirevision=uirev,
-        showlegend=True,
+        showlegend=not mobile_layout,
         legend=dict(
             orientation="h",
             bgcolor="rgba(15,23,42,0.92)",
@@ -2509,23 +2581,37 @@ def _factor_checklist_labels():
 
 def _confluence_why_trade_plain(cp_breakdown):
     """One-line copy for Recommended Trade tooltip — same 7 headline rows as Diamond checklist."""
+    head = (
+        "7/9 Diamond headline checklist: Supertrend (2), Ichimoku cloud (2), ADX DI (1), OBV (1), "
+        "Divergence (1), Gold Zone (1), Structure (1). "
+    )
     if not cp_breakdown:
         return (
-            "Confluence data not loaded — this strike is from the options desk math and regime text, "
-            "not the live 7-factor checklist."
+            head
+            + "Live factor scores are not on this row yet — the strike comes from the options desk path "
+            "and regime text until confluence hydrates."
         )
     flabels = _factor_checklist_labels()
     greens = [nice for k, nice in flabels.items() if cp_breakdown.get(k, {}).get("pts", 0) > 0]
     passed = len(greens)
     if passed == 0:
         return (
-            "0/7 headline factors green on the Diamond checklist — size smaller; this is a premium-selling "
-            "suggestion from structure and fear-greed, not a full confluence entry."
+            head
+            + "Right now 0/7 of those headline rows are green — lean smaller; this pick leans on premium "
+            "selling context rather than a stacked confluence entry."
         )
     tail = ", ".join(greens[:5])
     if len(greens) > 5:
         tail += ", …"
-    return f"{passed}/7 headline factors green: {tail}. Same checklist as Blue Diamond context."
+    return head + f"Currently {passed}/7 green: {tail}."
+
+
+def _iv_rank_qualitative_words(rank):
+    if rank >= 70:
+        return "Rich premium"
+    if rank < 25:
+        return "Lean premium"
+    return "Fair premium"
 
 
 def _iv_rank_pill_html(ticker, price, ref_iv_pct=None, *, stub=None):
@@ -2565,9 +2651,11 @@ def _iv_rank_pill_html(ticker, price, ref_iv_pct=None, *, stub=None):
     if info is not None:
         rnk = info["rank"]
         rk_color = "#fbbf24" if rnk > 70 else ("#34d399" if rnk < 25 else "#94a3b8")
+        qual = _iv_rank_qualitative_words(rnk)
         return (
             pill_open
-            + f"<span class='mono' style='font-weight:800;color:{rk_color};font-size:1.08rem'>{rnk:.0f}</span>"
+            + f"<span class='mono' style='font-weight:800;color:{rk_color};font-size:1.05rem'>IV Rank: {rnk:.0f}%</span>"
+            + f"<span style='font-size:.78rem;color:#e2e8f0;font-weight:600'> — {qual}</span>"
             + label
             + "<span style='font-size:.68rem;color:#64748b'>vs listed expiries</span></div>"
         )
@@ -2710,34 +2798,43 @@ def _fragment_technical_zone(
     d_n,
     struct,
     mini_mode,
+    mobile_chart_layout,
 ):
     """Charts + overlay toggles + diamond cards + gold zone copy. Reruns without refetching Yahoo data."""
     if mini_mode:
-        mini_cp = sum(v.get("pts", 0) for v in (cp_breakdown or {}).values())
-        gz_pct = ((price / gold_zone_price - 1) * 100) if gold_zone_price else 0.0
-        dia_line = "No active Diamond"
-        if latest_d is not None and len(df) > 0:
+        chg_pct = 0.0
+        if len(df) >= 2:
             try:
-                age = (df.index[-1] - latest_d["date"]).days
-                if age <= 5:
-                    d_emoji = "🔷" if latest_d["type"] == "blue" else "💎"
-                    d_name = "Blue" if latest_d["type"] == "blue" else "Pink"
-                    dia_line = f"{d_emoji} {d_name} Diamond · {latest_d['score']}/9 · {age}d ago"
+                chg_pct = (float(df["Close"].iloc[-1]) / float(df["Close"].iloc[-2]) - 1.0) * 100.0
             except Exception:
-                pass
+                chg_pct = 0.0
+        gz_line = "—"
+        gz_pct = 0.0
+        try:
+            if gold_zone_price:
+                gz_pct = (float(price) / float(gold_zone_price) - 1.0) * 100.0
+                gz_line = f"${float(gold_zone_price):.2f} ({gz_pct:+.1f}% from spot)"
+        except Exception:
+            gz_line = "—"
+        spark7 = _glance_sparkline_svg(df["Close"].tail(7), "#00E5FF", w=220, h=56)
+        chg_c = "#10b981" if chg_pct >= 0 else "#ef4444"
+        tk_e = _html_mod.escape(ticker)
         st.markdown(
-            f"<div class='glass-card' style='margin-bottom:12px'>"
-            f"<div style='font-size:.72rem;font-weight:800;color:#00e5ff;letter-spacing:.12em;margin-bottom:10px'>"
-            f"TURBO · TECHNICAL SUMMARY</div>"
-            f"<div class='mono' style='font-size:1.35rem;font-weight:800;color:#e2e8f0;margin-bottom:6px'>"
-            f"{_html_mod.escape(ticker)} ${price:.2f}</div>"
-            f"<div style='font-size:.85rem;color:#94a3b8;line-height:1.55'>"
-            f"<strong style='color:#cbd5e1'>Structure:</strong> {struct} · "
-            f"<strong style='color:#cbd5e1'>Confluence:</strong> {mini_cp}/9 · "
-            f"<strong style='color:#cbd5e1'>Gold Zone:</strong> ${gold_zone_price:.2f} ({gz_pct:+.1f}% from spot)<br>"
-            f"<strong style='color:#cbd5e1'>Diamond:</strong> {dia_line}</div>"
-            f"<p style='color:#64748b;font-size:.78rem;margin:12px 0 0 0'>"
-            f"Heavy Plotly charts are parked. Turn <strong>Turbo mode</strong> off in Mission Control for the full stack.</p>"
+            f"<div class='glass-card' style='margin-bottom:12px;padding:14px 16px'>"
+            f"<div style='font-size:.68rem;font-weight:800;color:#00e5ff;letter-spacing:.14em;margin-bottom:8px'>"
+            f"TURBO · MOBILE STATUS</div>"
+            f"<div style='display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:12px'>"
+            f"<div style='flex:1;min-width:140px'>"
+            f"<div class='mono' style='font-size:1.42rem;font-weight:800;color:#e2e8f0'>{tk_e} ${price:.2f}</div>"
+            f"<div style='font-size:.92rem;font-weight:700;color:{chg_c};margin-top:4px'>{chg_pct:+.2f}% vs prior close</div>"
+            f"<div style='font-size:.8rem;color:#94a3b8;margin-top:10px;line-height:1.5'>"
+            f"<strong style='color:#cbd5e1'>Structure:</strong> {_html_mod.escape(str(struct))}<br>"
+            f"<strong style='color:#cbd5e1'>Distance to Gold Zone:</strong> {gz_line}</div></div>"
+            f"<div style='flex:0 0 auto;min-width:180px;text-align:right'>"
+            f"<div style='font-size:.62rem;color:#64748b;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px'>"
+            f"7-DAY CLOSE SPARK</div>{spark7}</div></div>"
+            f"<p style='color:#64748b;font-size:.74rem;margin:12px 0 0 0;line-height:1.45'>"
+            f"No Plotly stack in Turbo — flip <strong>Turbo mode</strong> off in Mission Control for full charts.</p>"
             f"</div>",
             unsafe_allow_html=True,
         )
@@ -2775,6 +2872,7 @@ def _fragment_technical_zone(
         show_super,
         diamonds=diamonds if show_diamonds else None,
         gold_zone=gold_zone_price if show_gold_zone else None,
+        mobile_layout=bool(mobile_chart_layout),
     )
     st.plotly_chart(fig_p, use_container_width=True, config=_PLOTLY_UI_CONFIG)
     st.divider()
@@ -2915,7 +3013,7 @@ def main():
     # ── Watchlist editor (must run before Mission Control so sb_scanner is committed same run)
     _wl_expanded = bool(st.session_state.pop("_open_watchlist_editor", False))
     st.caption("CashFlow Command Center · v14.1")
-    with st.expander("Edit watchlist symbols", expanded=_wl_expanded):
+    with st.expander("Edit watchlist symbols", expanded=_wl_expanded, key="cf_watchlist_editor_exp"):
         st.caption(
             "Drop in tickers separated by commas or line breaks. Shuffle the lineup with the controls. "
             "Everything commits when the app saves your config."
@@ -3181,6 +3279,7 @@ def main():
         cfg = prefs_cfg
 
     mini_mode = bool(st.session_state.get("sb_mini_mode", False))
+    mobile_chart_layout = _client_suggests_mobile_chart()
     if mini_mode:
         st.markdown(_MINI_MODE_DENSITY_CSS, unsafe_allow_html=True)
 
@@ -3396,9 +3495,13 @@ def main():
                 bluf_exp, bluf_dte = None, 0
             if bluf_exp:
                 bluf_opt, _ = fetch_options(ticker, bluf_exp)
-                bluf_calls, bluf_puts = bluf_opt if isinstance(bluf_opt, (tuple, list)) and len(bluf_opt) == 2 else (pd.DataFrame(), pd.DataFrame())
-                cc_list = Opt.covered_calls(price, bluf_calls, bluf_dte, rfr)
-                csp_list = Opt.cash_secured_puts(price, bluf_puts, bluf_dte, rfr)
+                bluf_calls, bluf_puts = (
+                    bluf_opt if isinstance(bluf_opt, (tuple, list)) and len(bluf_opt) == 2 else (pd.DataFrame(), pd.DataFrame())
+                )
+                bluf_calls = bluf_calls if isinstance(bluf_calls, pd.DataFrame) else pd.DataFrame()
+                bluf_puts = bluf_puts if isinstance(bluf_puts, pd.DataFrame) else pd.DataFrame()
+                cc_list = Opt.covered_calls(price, bluf_calls, bluf_dte, rfr) if not bluf_calls.empty else []
+                csp_list = Opt.cash_secured_puts(price, bluf_puts, bluf_dte, rfr) if not bluf_puts.empty else []
                 if cc_list:
                     bluf_cc = next((c for c in cc_list if c.get("optimal")), cc_list[0])
                 if csp_list:
@@ -3440,6 +3543,14 @@ def main():
         action_plain = "Defined risk credit spread when sellers control the tape; you cap upside risk on the structure."
 
     why_trade_tip = _html_mod.escape(_confluence_why_trade_plain(cp_breakdown))
+    trade_hdr_html = (
+        "<div style='display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px'>"
+        "<div style='font-size:.72rem;font-weight:800;color:#00e5ff;letter-spacing:.18em'>RECOMMENDED TRADE</div>"
+        "<span class='cf-tip cf-tip-ico' tabindex='0' aria-label='Why this trade'>"
+        "<span class='cf-tip-ico-mark'>ⓘ</span>"
+        f"<span class='cf-tiptext'>{why_trade_tip}</span></span>"
+        "<span style='font-size:.62rem;color:#94a3b8'>Why this trade?</span></div>"
+    )
 
     # ── RECOMMENDED TRADE (optimal strike from options engine) ──
     master_kind, master_b = None, None
@@ -3500,15 +3611,9 @@ def main():
         )
         strike_s = f"{_mstrike:.0f}"
         iv_line = f"IV {_miv:.1f}% · " if _miv > 0 else ""
-        title_row = (
-            f"<div style='display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:8px'>"
-            f"<div style='font-size:.72rem;font-weight:800;color:#00e5ff;letter-spacing:.2em'>PRIMARY MISSION OBJECTIVE</div>"
-            f"<span class='cf-tip' tabindex='0' style='font-size:.62rem;padding:3px 9px'>Why this trade?"
-            f"<span class='cf-tiptext'>{why_trade_tip}</span></span></div>"
-        )
         master_html = (
             f"<div class='trade-master'>"
-            f"{title_row}"
+            f"{trade_hdr_html}"
             f"{iv_badge_html}"
             f"<p style='color:#e2e8f0;font-size:1.05rem;line-height:1.55;margin:0 0 14px 0;font-weight:600'>{headline}</p>"
             f"<div class='strike-big' style='margin:8px 0 6px 0'>${_html_mod.escape(strike_s)}</div>"
@@ -3522,10 +3627,7 @@ def main():
         _iv_off = _iv_rank_pill_html(ticker, price, None, stub="offline")
         master_html = (
             f"<div class='trade-master'>"
-            f"<div style='display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:8px'>"
-            f"<div style='font-size:.72rem;font-weight:800;color:#00e5ff;letter-spacing:.2em'>PRIMARY MISSION OBJECTIVE</div>"
-            f"<span class='cf-tip' tabindex='0' style='font-size:.62rem;padding:3px 9px'>Why this trade?"
-            f"<span class='cf-tiptext'>{why_trade_tip}</span></span></div>"
+            f"{trade_hdr_html}"
             f"{_iv_off}"
             f"<p style='color:#e2e8f0;font-size:1rem;margin:0'>Options chain is offline. Retry when the pit is open or jump to Cash Flow Strategies.</p>"
             f"</div>"
@@ -3534,10 +3636,7 @@ def main():
         _iv_ns = _iv_rank_pill_html(ticker, price, ref_iv_bluf, stub="no_strike" if not ref_iv_bluf else None)
         master_html = (
             f"<div class='trade-master'>"
-            f"<div style='display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:8px'>"
-            f"<div style='font-size:.72rem;font-weight:800;color:#00e5ff;letter-spacing:.2em'>PRIMARY MISSION OBJECTIVE</div>"
-            f"<span class='cf-tip' tabindex='0' style='font-size:.62rem;padding:3px 9px'>Why this trade?"
-            f"<span class='cf-tiptext'>{why_trade_tip}</span></span></div>"
+            f"{trade_hdr_html}"
             f"{_iv_ns}"
             f"<p style='color:#e2e8f0;font-size:1rem;margin:0'>No liquid optimal strike cleared our filters yet. Open Cash Flow Strategies and choose an expiration by hand.</p>"
             f"</div>"
@@ -3651,9 +3750,39 @@ def main():
         unsafe_allow_html=True
     )
 
+    # ── ALERTS BAR ──
+    hi_al = [a for a in al if a["p"] == "HIGH"]
+    if hi_al:
+        st.markdown(f"<div class='ac'>\U0001f514 <strong>{len(al)} Alert{'s' if len(al) > 1 else ''}</strong>: {hi_al[0]['m']}{'<em> +' + str(len(al) - 1) + ' more</em>' if len(al) > 1 else ''}</div>", unsafe_allow_html=True)
+
     # ══════════════════════════════════════════════════════════════════
-    #  PLTR EARNINGS INTELLIGENCE (Palantir-specific — only when PLTR is the dashboard symbol)
+    #  SECTION 1 — TECHNICAL CHART (fragment: overlay toggles without refetching Yahoo)
     # ══════════════════════════════════════════════════════════════════
+    _fragment_technical_zone(
+        df,
+        df_wk,
+        ticker,
+        gold_zone_price,
+        gold_zone_components,
+        price,
+        diamonds,
+        latest_d,
+        cp_breakdown,
+        d_wr,
+        d_n,
+        struct,
+        mini_mode,
+        mobile_chart_layout,
+    )
+    chart_mood = "bull" if struct == "BULLISH" else ("bear" if struct == "BEARISH" else "neutral")
+
+    # ══════════════════════════════════════════════════════════════════
+    #  SECTION 2 \u2014 SETUP ANALYSIS
+    # ══════════════════════════════════════════════════════════════════
+    st.markdown('<div id="setup" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
+    _section("Setup Analysis", "Trend, range, or fade: here is the read and how to play it without guessing.",
+             tip_plain="This block is your bias clock. Uptrends reward measured premium sales with air above price. Ranges invite two sided discipline. Downtrends demand smaller size and wider buffers.")
+
     if ticker == "PLTR":
         next_print = datetime(2026, 5, 4)
         d_to_print = (next_print.date() - datetime.now().date()).days
@@ -3663,7 +3792,7 @@ def main():
             countdown_txt = "Earnings expected today (May 04, 2026)"
         else:
             countdown_txt = f"Last projected print date passed by {abs(d_to_print)} days (May 04, 2026)"
-        with st.expander("📊 STRATEGIC INTELLIGENCE: Q4 2025 / 2026 OUTLOOK", expanded=True):
+        with st.expander("STRATEGIC INTELLIGENCE: PLTR · Q4 2025 / 2026 OUTLOOK", expanded=True, key="cf_pltr_intel_exp"):
             gc, bc = st.columns(2)
             with gc:
                 st.markdown(
@@ -3707,37 +3836,6 @@ def main():
                 unsafe_allow_html=True
             )
 
-    # ── ALERTS BAR ──
-    hi_al = [a for a in al if a["p"] == "HIGH"]
-    if hi_al:
-        st.markdown(f"<div class='ac'>\U0001f514 <strong>{len(al)} Alert{'s' if len(al) > 1 else ''}</strong>: {hi_al[0]['m']}{'<em> +' + str(len(al) - 1) + ' more</em>' if len(al) > 1 else ''}</div>", unsafe_allow_html=True)
-
-    # ══════════════════════════════════════════════════════════════════
-    #  SECTION 1 — TECHNICAL CHART (fragment: overlay toggles without refetching Yahoo)
-    # ══════════════════════════════════════════════════════════════════
-    _fragment_technical_zone(
-        df,
-        df_wk,
-        ticker,
-        gold_zone_price,
-        gold_zone_components,
-        price,
-        diamonds,
-        latest_d,
-        cp_breakdown,
-        d_wr,
-        d_n,
-        struct,
-        mini_mode,
-    )
-    chart_mood = "bull" if struct == "BULLISH" else ("bear" if struct == "BEARISH" else "neutral")
-
-    # ══════════════════════════════════════════════════════════════════
-    #  SECTION 2 \u2014 SETUP ANALYSIS
-    # ══════════════════════════════════════════════════════════════════
-    st.markdown('<div id="setup" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
-    _section("Setup Analysis", "Trend, range, or fade: here is the read and how to play it without guessing.",
-             tip_plain="This block is your bias clock. Uptrends reward measured premium sales with air above price. Ranges invite two sided discipline. Downtrends demand smaller size and wider buffers.")
     sa_left, sa_right = st.columns(2)
     with sa_left:
         cls = "sb" if struct == "BULLISH" else ("sr" if struct == "BEARISH" else "sn")
@@ -3949,7 +4047,9 @@ def main():
         sel_exp = st.selectbox("Expiration", opt_exps[:10], index=min(2, len(opt_exps) - 1), key="sel_exp")
         dte = max(1, (datetime.strptime(sel_exp, "%Y-%m-%d") - datetime.now()).days)
         result_sel, _ = fetch_options(ticker, sel_exp)
-        calls, puts = result_sel
+        calls, puts = result_sel if isinstance(result_sel, (tuple, list)) and len(result_sel) == 2 else (pd.DataFrame(), pd.DataFrame())
+        calls = calls if isinstance(calls, pd.DataFrame) else pd.DataFrame()
+        puts = puts if isinstance(puts, pd.DataFrame) else pd.DataFrame()
         if not calls.empty or not puts.empty:
             s1, s2 = st.columns(2)
             with s1:
@@ -4099,7 +4199,10 @@ def main():
                 "<strong>Volatility Skew</strong> tells you if big institutions are buying crash insurance. When put prices are much higher than call prices, fear is elevated. You get fatter premiums but the risk is also higher. "
                 "<strong>Edge</strong> is the difference between the market price and the mathematically fair price. Positive Edge means the market is overpaying you. That is exactly what you want.", "neutral")
         else:
-            st.warning("Options data currently unavailable. Try again or check market hours.")
+            st.warning(
+                "This expiration returned an empty chain from the feed after walking nearby dates. "
+                "Pick another expiry or retry when the options pit is live."
+            )
     else:
         st.warning("Options data currently unavailable for this ticker.")
 
@@ -4354,7 +4457,7 @@ def main():
     _section("Quick Reference Guide", "Plain language glossary for every signal on this desk. Keep it open during live markets.",
              tip_plain="Reach for this when a label feels fuzzy. Clarity beats impulse every session.")
     edu = [
-        ("Blue Diamond Signal", "A Blue Diamond appears when confluence crosses up to 7+ out of 9, <strong>daily market structure is BULLISH</strong>, and the <strong>weekly MACD/EMA bias is not BEARISH</strong> (multi-timeframe agreement). Institutional volume/ATR filters still apply. Buy on Blue Diamonds."),
+        ("Blue Diamond Signal", "A Blue Diamond appears when confluence crosses up to 7+ out of 9, <strong>daily market structure is BULLISH</strong>, the <strong>weekly MACD/EMA bias is not BEARISH</strong>, and <strong>volume is at least 90% of the 20-day volume SMA</strong> (participation). An ATR blow-off guard still filters manic prints. Buy on Blue Diamonds."),
         ("Pink Diamond Signal", "A Pink Diamond appears when bullish confluence collapses or momentum exhausts (RSI > 75 with weak confluence). Think of it as your dashboard warning lights all turning on. It means the easy money in this move is done. Take profits, sell aggressive covered calls, or tighten your stops. Sell on Pink Diamonds."),
         ("Gold Zone", "The Gold Zone is a single dynamic price level calculated from Volume Profile POC, the 61.8% Fibonacci golden ratio, the 200-day simple moving average, and the nearest Gann Square of 9 level. When the stock is above the Gold Zone, bulls are in control. Below it, bears have the edge. Use the Gold Zone as your anchor for all strike selection."),
         ("Confluence Points (0 to 9)", "The Confluence score checks nine independent bullish factors: Supertrend direction (2pts), Ichimoku cloud position (2pts), ADX trend strength (1pt), OBV accumulation (1pt), bullish divergences (1pt), position versus Gold Zone (1pt), and market structure (1pt). Scores of 7 or higher trigger Blue Diamonds. Scores below 4 signal caution."),
