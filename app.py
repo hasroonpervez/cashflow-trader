@@ -16,15 +16,24 @@ st.set_page_config(
 )
 
 import html as _html_mod
+import json
+import math
+import sys
 import threading
-import pandas as pd
-import numpy as np
+import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
 from datetime import datetime, timedelta
-import plotly.graph_objects as go
-import math, warnings, json
 from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
+
+# Ensure ``import data.yf_engine`` works when cwd is not the app folder (Streamlit Cloud / some runners).
+_APP_DIR = Path(__file__).resolve().parent
+if str(_APP_DIR) not in sys.path:
+    sys.path.insert(0, str(_APP_DIR))
 
 import data.yf_engine as yf_engine
 
@@ -47,7 +56,7 @@ def _submit_with_script_ctx(executor, fn, /, *args, **kwargs):
 # CONFIG — watchlist, scanner, strategy, chart overlays (session_state only; no disk writes)
 # Legacy ``config.json`` is read once per browser session if present (migration).
 # ─────────────────────────────────────────────────────────────────────────
-CONFIG_PATH = Path(__file__).parent / "config.json"
+CONFIG_PATH = _APP_DIR / "config.json"
 _CF_APP_CONFIG_KEY = "_cf_app_config"
 DEFAULT_CONFIG = {
     "watchlist": "PLTR,BMNR,AAPL,AMZN,NVDA,AMD,TSLA,SPY,QQQ",
@@ -241,7 +250,7 @@ _PLOTLY_SLATE = "#64748b"
 # ─────────────────────────────────────────────────────────────────────────
 # Static assets (CSS + JS) — see ``assets/styles.css`` and ``assets/routing.js``
 # ─────────────────────────────────────────────────────────────────────────
-_ASSETS_DIR = Path(__file__).resolve().parent / "assets"
+_ASSETS_DIR = _APP_DIR / "assets"
 _CF_MINI_START = "/* CF_MINI_MODE_START"
 _CF_MINI_END = "/* CF_MINI_MODE_END */"
 
@@ -2351,7 +2360,7 @@ def _apply_cf_nav_click(nid: str):
 
 def _render_cf_nav_bar():
     _init_cf_nav_state()
-    st.markdown('<p id="cf-top-nav-marker"></p>', unsafe_allow_html=True)
+    st.caption("Jump to section")
     nav_items = (
         ("Execution", "execution"),
         ("Charts", "charts"),
@@ -2363,12 +2372,14 @@ def _render_cf_nav_bar():
         ("News", "news"),
         ("Guide", "guide"),
     )
-    cols = st.columns(len(nav_items))
-    for col, (label, nid) in zip(cols, nav_items):
-        with col:
-            if st.button(label, key=f"cf_nav_{nid}", use_container_width=True):
-                _apply_cf_nav_click(nid)
-                st.rerun()
+    for row_start in range(0, len(nav_items), 3):
+        chunk = nav_items[row_start : row_start + 3]
+        cols = st.columns(3)
+        for col, (label, nid) in zip(cols, chunk):
+            with col:
+                if st.button(label, key=f"cf_nav_{nid}", use_container_width=True):
+                    _apply_cf_nav_click(nid)
+                    st.rerun()
 
 
 def main():
