@@ -7,6 +7,42 @@
 """
 
 import streamlit as st
+
+st.set_page_config(
+    page_title="CashFlow Command Center v14.1",
+    page_icon="💰",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
+
+st.markdown(
+    """
+<style>
+/* Production chrome: hide default app menu (hamburger) and footer */
+#MainMenu {
+  visibility: hidden !important;
+  height: 0 !important;
+  max-height: 0 !important;
+  position: fixed !important;
+  top: -9999px !important;
+}
+footer,
+[data-testid="stFooter"],
+.stApp footer {
+  visibility: hidden !important;
+  display: none !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  pointer-events: none !important;
+}
+</style>
+""",
+    unsafe_allow_html=True,
+)
+
 import html as _html_mod
 import pandas as pd
 import numpy as np
@@ -160,9 +196,6 @@ def retry_fetch(fn, retries=3, delay=2):
             time.sleep(delay * (attempt + 1))
     return None
 
-st.set_page_config(page_title="CashFlow Command Center v14.1", page_icon="💰",
-                   layout="wide", initial_sidebar_state="collapsed")
-
 
 def _yfinance_ticker(symbol: str):
     """Fresh ``yf.Ticker`` per call — avoids stale sessions and unbounded cached connections on large watchlists."""
@@ -189,6 +222,19 @@ _PLOTLY_UI_CONFIG = {
     "modeBarOrientation": "v",
     "scrollZoom": False,
 }
+
+# Dashboard theme — transparent canvases, faint grids, premium palette (blues / green / red)
+_PLOTLY_PAPER_BG = "rgba(0,0,0,0)"
+_PLOTLY_PLOT_BG = "rgba(0,0,0,0)"
+_PLOTLY_GRID = "rgba(128,128,128,0.2)"
+_PLOTLY_FONT_MAIN = dict(family="Inter, system-ui, JetBrains Mono, monospace", size=11, color="#cbd5e1")
+_PLOTLY_AXIS_TITLE = dict(title_font=dict(size=11, color="#94a3b8"))
+_PLOTLY_CASH_UP = "#34d399"
+_PLOTLY_CASH_DOWN = "#f87171"
+_PLOTLY_BLUE = "#3b82f6"
+_PLOTLY_BLUE_DEEP = "#2563eb"
+_PLOTLY_BLUE_DEEPER = "#1e40af"
+_PLOTLY_SLATE = "#64748b"
 
 # Injected only when Mini mode is on — tighter main-column density for mobile one-screen scans
 _MINI_MODE_DENSITY_CSS = """
@@ -222,8 +268,14 @@ _MINI_MODE_DENSITY_CSS = """
 .main .tc,.main .ni,.main .ac,.main .scanner-row,.main .glass-card,.main .confluence-meter,.main .rr-card,.main .rh-card,.main .edu-card{padding:7px 9px!important;margin:3px 0!important;border-radius:9px!important}
 .main .diamond-blue,.main .diamond-pink,.main .gold-zone{padding:11px 12px!important;margin:5px 0!important}
 .main .explain{padding:10px 12px!important;margin:6px 0!important;line-height:1.48!important;font-size:.84rem!important}
-.main div[data-testid="stMetric"]{padding:6px 8px!important;border-radius:10px!important}
-.main div[data-testid="stMetric"] label{font-size:.6rem!important}
+.main div[data-testid="stMetric"]{
+  padding:8px 10px!important;border-radius:12px!important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.05),
+    0 1px 3px rgba(0,0,0,.18),
+    0 8px 20px rgba(2,6,23,.38)!important;
+}
+.main div[data-testid="stMetric"] label{font-size:.58rem!important}
 .main div[data-testid="stMetric"] [data-testid="stMetricValue"]{font-size:1.02rem!important}
 .main .stMarkdown p{font-size:.84rem!important;line-height:1.45!important;margin:0 0 .3rem 0!important}
 .main h1{font-size:1.28rem!important;margin:0 0 .2rem 0!important}
@@ -276,11 +328,16 @@ iframe{border:0!important}
 .main [data-testid="stVerticalBlock"] > div:has(> div[data-testid="stMarkdownContainer"] nav.sticky-nav){
   min-height:0!important;margin-top:0!important;margin-bottom:0!important;
 }
-/* Sidebar removed; all controls live in main HUD */
+/* Settings drawer: collapsed by default; FAB script toggles inline display when open */
 section[data-testid="stSidebar"],
 [data-testid="stSidebar"]{
   display:none!important;width:0!important;min-width:0!important;max-width:0!important;
-  border:none!important;overflow:hidden!important;visibility:hidden!important;
+  overflow:hidden!important;visibility:hidden!important;
+  box-sizing:border-box!important;
+  background:linear-gradient(180deg,#080d16 0%,#0f172a 50%,#0a101c 100%)!important;
+  border-right:1px solid rgba(100,116,139,.28)!important;
+  -webkit-font-smoothing:antialiased!important;
+  -moz-osx-font-smoothing:grayscale!important;
 }
 [data-testid="stSidebarNav"]{display:none!important}
 #sob,.cf-vip-fab{display:none!important;visibility:hidden!important;pointer-events:none!important}
@@ -497,7 +554,21 @@ section[data-testid="stSidebar"],
 .main [data-testid="stVerticalBlockBorderWrapper"] [role="radiogroup"] [role="radio"][aria-checked="true"]{
   background:linear-gradient(180deg,#22d3ee,#0ea5e9)!important;color:#fff!important;
 }
-[data-testid="stSidebarUserContent"]{padding-top:100px!important}
+[data-testid="stSidebarUserContent"]{
+  padding:1rem 1.2rem 2rem 1.2rem!important;
+  padding-top:max(5.75rem, calc(0.85rem + env(safe-area-inset-top, 0px)))!important;
+  box-sizing:border-box!important;
+}
+[data-testid="stSidebar"] [data-testid="stVerticalBlock"]{gap:0.55rem!important}
+[data-testid="stSidebar"] .stMarkdown p,
+[data-testid="stSidebar"] .stMarkdown li{
+  font-size:0.9rem!important;line-height:1.55!important;letter-spacing:0.015em!important;
+}
+[data-testid="stSidebar"] [data-testid="stWidgetLabel"] p,
+[data-testid="stSidebar"] [data-testid="stWidgetLabel"] span{
+  font-size:0.76rem!important;font-weight:600!important;letter-spacing:0.07em!important;
+  text-transform:uppercase!important;color:#cbd5e1!important;
+}
 [data-testid="stSidebar"] h2,[data-testid="stSidebar"] h3,[data-testid="stSidebar"] h4{color:#00e5ff!important}
 [data-testid="stSidebar"] h1:not(.cf-sidebar-title){color:#00e5ff!important}
 [data-testid="stSidebar"] label{color:#cbd5e1!important;font-weight:600!important}
@@ -533,9 +604,48 @@ section[data-testid="stSidebar"],
 [data-testid="stSidebar"] textarea{font-family:'JetBrains Mono',monospace!important;font-size:.78rem!important;line-height:1.35!important}
 .stMarkdown,.stText,p,span,label{color:var(--t1)!important;font-family:'Inter',sans-serif!important}
 h1,h2,h3,h4,h5,h6{font-family:'Inter',sans-serif!important;font-weight:700!important;color:var(--cyan-bright)!important}
-div[data-testid="stMetric"]{background:var(--glass-bg)!important;border:1px solid var(--glass-bdr)!important;border-radius:12px!important;padding:10px 12px!important;backdrop-filter:blur(12px)!important;-webkit-backdrop-filter:blur(12px)!important;box-shadow:inset 0 1px 1px rgba(255,255,255,.05),0 10px 26px rgba(2,6,23,.36)!important}
-div[data-testid="stMetric"] label{color:var(--t3)!important;font-size:.75rem!important;text-transform:uppercase!important;letter-spacing:.05em!important}
-div[data-testid="stMetric"] [data-testid="stMetricValue"]{font-family:'JetBrains Mono',monospace!important;font-weight:600!important}
+div[data-testid="stMetric"]{
+  background:linear-gradient(160deg,rgba(15,23,42,.96),rgba(15,23,42,.78))!important;
+  border:1px solid rgba(100,116,139,.38)!important;border-radius:14px!important;
+  padding:14px 16px!important;box-sizing:border-box!important;
+  backdrop-filter:blur(14px)!important;-webkit-backdrop-filter:blur(14px)!important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.07),
+    0 2px 6px rgba(0,0,0,.22),
+    0 14px 32px rgba(2,6,23,.48)!important;
+}
+div[data-testid="stMetric"] label{
+  color:#94a3b8!important;font-size:.72rem!important;text-transform:uppercase!important;
+  letter-spacing:.08em!important;font-weight:600!important;
+}
+div[data-testid="stMetric"] [data-testid="stMetricValue"]{
+  font-family:'JetBrains Mono',monospace!important;font-weight:700!important;
+  font-size:1.5rem!important;letter-spacing:-.02em!important;color:#f8fafc!important;
+}
+[data-testid="stMetricDelta"],
+div[data-testid="stMetric"] [data-testid="stMetricDelta"]{
+  font-family:'JetBrains Mono',monospace!important;font-weight:600!important;font-size:.86rem!important;
+}
+[data-testid="stMetricDeltaIcon-Up"],
+div[data-testid="stMetric"] [data-testid="stMetricDeltaIcon-Up"]{
+  color:#34d399!important;fill:#34d399!important;
+}
+[data-testid="stMetricDeltaIcon-Down"],
+div[data-testid="stMetric"] [data-testid="stMetricDeltaIcon-Down"]{
+  color:#f87171!important;fill:#f87171!important;
+}
+[data-testid="stMetricDelta"]:has([data-testid="stMetricDeltaIcon-Up"]){color:#6ee7b7!important}
+[data-testid="stMetricDelta"]:has([data-testid="stMetricDeltaIcon-Down"]){color:#fca5a5!important}
+[data-testid="stMetricDeltaInverseIcon-Up"],
+div[data-testid="stMetric"] [data-testid="stMetricDeltaInverseIcon-Up"]{
+  color:#f87171!important;fill:#f87171!important;
+}
+[data-testid="stMetricDeltaInverseIcon-Down"],
+div[data-testid="stMetric"] [data-testid="stMetricDeltaInverseIcon-Down"]{
+  color:#34d399!important;fill:#34d399!important;
+}
+[data-testid="stMetricDelta"]:has([data-testid="stMetricDeltaInverseIcon-Up"]){color:#fca5a5!important}
+[data-testid="stMetricDelta"]:has([data-testid="stMetricDeltaInverseIcon-Down"]){color:#6ee7b7!important}
 .stTabs [data-baseweb="tab-list"]{gap:0!important;background:var(--bg1)!important;border-radius:10px!important;padding:4px!important}
 .stTabs [data-baseweb="tab"]{border-radius:8px!important;color:var(--t2)!important;font-weight:500!important;padding:8px 16px!important}
 .stTabs [aria-selected="true"]{background:var(--bg2)!important;color:var(--cyan)!important}
@@ -670,8 +780,6 @@ div[data-baseweb="tooltip"] p {
   border:1px solid #34d399;color:#a7f3d0;font-weight:800;font-size:1.05rem;margin:10px 0;
   font-family:'JetBrains Mono',monospace;
 }
-#MainMenu{display:none!important}
-footer{display:none!important}
 [data-testid="stToolbar"]{display:none!important}
 [data-testid="stDecoration"]{display:none!important}
 [data-testid="stStatusWidget"]{display:none!important}
@@ -728,7 +836,7 @@ header{display:none!important}
 @media(max-width:768px){
   .bluf{padding:16px 14px!important}
   .bluf .mono{font-size:2rem!important}
-  div[data-testid="stMetric"]{padding:10px 12px!important}
+  div[data-testid="stMetric"]{padding:9px 11px!important;border-radius:12px!important}
   .tc{padding:14px!important}
   .mobile-hide{display:none!important}
   .sticky-nav{gap:4px;padding:0 6px 0 58px}
@@ -1616,6 +1724,7 @@ def calc_vol_skew(price, calls_df, puts_df, otm_pct=0.10):
 #  QUANT EDGE SCORE — DE-CORRELATED (no double-counting momentum)
 # ═════════════════════════════════════════════════════════════════════════
 
+@st.cache_data(ttl=120, show_spinner=False)
 def quant_edge_score(df, vix_val=None):
     """Composite 0-100 using five de-correlated dimensions (no Supertrend here — that
     belongs in confluence/diamond context, not double-counted with EMA trend):
@@ -1690,6 +1799,7 @@ def weekly_trend_label(df_wk):
 #  GOLD ZONE — dynamic confluence support/resistance
 # ═════════════════════════════════════════════════════════════════════════
 
+@st.cache_data(ttl=120, show_spinner=False)
 def calc_gold_zone(df, df_wk=None):
     """Gold Zone: mean of POC, Fib 61.8%, Gann Sq9, and 200-day SMA (institutional anchor).
     ``df_wk`` is accepted for API compatibility; SMA 200 replaces weekly S/R in the blend."""
@@ -2140,6 +2250,16 @@ class Backtest:
             i += hold
         return pd.DataFrame(results)
 
+
+@st.cache_data(ttl=120, show_spinner=False)
+def run_cc_sim_cached(ticker: str, period: str, otm_pct: float, hold_days: int, iv_mult: float) -> pd.DataFrame:
+    """Premium simulator: reuse cached OHLC; avoids recomputing the same sweep on every interaction."""
+    df_bt = fetch_stock(ticker, period, "1d")
+    if df_bt is None or len(df_bt) < hold_days + 20:
+        return pd.DataFrame()
+    return Backtest.cc_sim(df_bt, otm_pct, hold_days, iv_mult)
+
+
 class Alerts:
     @staticmethod
     def scan(df, ticker, vix_val=None):
@@ -2180,7 +2300,12 @@ def _levels_nearest(levels, price, n):
 
 
 def _chart_hoverlabel():
-    return dict(bgcolor="#1e293b", font=dict(size=12, family="Inter, system-ui, sans-serif"))
+    return dict(
+        bgcolor="rgba(15, 23, 42, 0.96)",
+        bordercolor="rgba(100, 116, 139, 0.45)",
+        font=dict(size=12, family="Inter, system-ui, sans-serif", color="#f8fafc"),
+        align="left",
+    )
 
 
 def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_sr=True,
@@ -2192,54 +2317,65 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
     fixes height, and pins Fib / Gann / Gold annotations to the left so labels do not sit on the candles."""
     last_px = float(df["Close"].iloc[-1])
     ann_side = "left" if mobile_layout else "right"
-    _grid = "rgba(30,41,59,0.55)"
     _legend_font = dict(size=11, color="#f1f5f9", family="Inter, system-ui, sans-serif")
     _legend_title_font = dict(size=12, color="#e2e8f0", family="Inter, system-ui, sans-serif")
     uirev = f"{ticker}_tech"
+    _tk = _html_mod.escape(str(ticker))
 
     fig_p = go.Figure()
     fig_p.add_trace(
         go.Candlestick(
             x=df.index, open=df["Open"], high=df["High"], low=df["Low"], close=df["Close"],
-            increasing_line_color="#10b981", decreasing_line_color="#ef4444",
-            increasing_fillcolor="#10b981", decreasing_fillcolor="#ef4444",
+            increasing_line_color=_PLOTLY_CASH_UP, decreasing_line_color=_PLOTLY_CASH_DOWN,
+            increasing_fillcolor=_PLOTLY_CASH_UP, decreasing_fillcolor=_PLOTLY_CASH_DOWN,
             increasing_line_width=1.35, decreasing_line_width=1.35,
             name="Price",
+            hovertemplate=(
+                "<b>" + _tk + "</b> · %{x|%Y-%m-%d}<br>"
+                "O <span style='color:#94a3b8'>$%{open:,.2f}</span> &nbsp;H <span style='color:#94a3b8'>$%{high:,.2f}</span><br>"
+                "L <span style='color:#94a3b8'>$%{low:,.2f}</span> &nbsp;C <span style='color:#94a3b8'>$%{close:,.2f}</span><extra></extra>"
+            ),
         )
     )
     if show_ind:
-        for p, c in [(20, "#38bdf8"), (50, "#fbbf24"), (200, "#a78bfa")]:
+        for p, c in [(20, "#60a5fa"), (50, _PLOTLY_BLUE), (200, _PLOTLY_BLUE_DEEPER)]:
             if len(df) >= p:
                 fig_p.add_trace(
                     go.Scatter(
                         x=df.index, y=TA.ema(df["Close"], p), mode="lines",
                         line=dict(color=c, width=1.1), name=f"EMA {p}", opacity=0.92,
-                        hovertemplate=f"EMA {p}: %{{y:.2f}}<extra></extra>",
+                        hovertemplate=f"EMA {p}: $%{{y:,.2f}}<extra></extra>",
                     )
                 )
         u, _m, lo = TA.bollinger(df["Close"])
         fig_p.add_trace(
             go.Scatter(
-                x=df.index, y=u, line=dict(color="rgba(148,163,184,0.45)", width=1),
+                x=df.index, y=u, line=dict(color="rgba(100,116,139,0.55)", width=1),
                 name="Bollinger", legendgroup="bb", showlegend=True,
-                hovertemplate="BB upper: %{y:.2f}<extra></extra>",
+                hovertemplate="BB upper: $%{y:,.2f}<extra></extra>",
             )
         )
         fig_p.add_trace(
             go.Scatter(
-                x=df.index, y=lo, line=dict(color="rgba(148,163,184,0.45)", width=1),
-                fill="tonexty", fillcolor="rgba(148,163,184,0.06)",
+                x=df.index, y=lo, line=dict(color="rgba(100,116,139,0.55)", width=1),
+                fill="tonexty", fillcolor="rgba(59,130,246,0.06)",
                 name="BB lower", legendgroup="bb", showlegend=False,
-                hovertemplate="BB lower: %{y:.2f}<extra></extra>",
+                hovertemplate="BB lower: $%{y:,.2f}<extra></extra>",
             )
         )
     if show_ichi:
         t, k, sa, sb, _ = TA.ichimoku(df)
         fig_p.add_trace(
-            go.Scatter(x=df.index, y=t, line=dict(color="#22d3ee", width=1.1), name="Tenkan", opacity=0.75)
+            go.Scatter(
+                x=df.index, y=t, line=dict(color="#38bdf8", width=1.1), name="Tenkan", opacity=0.85,
+                hovertemplate="Tenkan: $%{y:,.2f}<extra></extra>",
+            )
         )
         fig_p.add_trace(
-            go.Scatter(x=df.index, y=k, line=dict(color="#fb7185", width=1.1), name="Kijun", opacity=0.75)
+            go.Scatter(
+                x=df.index, y=k, line=dict(color="#818cf8", width=1.1), name="Kijun", opacity=0.85,
+                hovertemplate="Kijun: $%{y:,.2f}<extra></extra>",
+            )
         )
         fig_p.add_trace(
             go.Scatter(x=df.index, y=sa, line=dict(color="rgba(16,185,129,0.25)", width=0),
@@ -2247,9 +2383,9 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
         )
         fig_p.add_trace(
             go.Scatter(
-                x=df.index, y=sb, line=dict(color="rgba(239,68,68,0.25)", width=0),
-                fill="tonexty", fillcolor="rgba(34,197,94,0.07)", name="Ichimoku cloud",
-                hovertemplate="Cloud<extra></extra>",
+                x=df.index, y=sb, line=dict(color="rgba(248,113,113,0.22)", width=0),
+                fill="tonexty", fillcolor="rgba(52,211,153,0.06)", name="Ichimoku cloud",
+                hovertemplate="Ichimoku cloud<extra></extra>",
             )
         )
     if show_super:
@@ -2257,8 +2393,8 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
         fig_p.add_trace(
             go.Scatter(
                 x=df.index, y=st_l, mode="lines",
-                line=dict(color="#fb923c", width=2), name="Supertrend",
-                hovertemplate="Supertrend: %{y:.2f}<extra></extra>",
+                line=dict(color=_PLOTLY_BLUE_DEEP, width=2), name="Supertrend",
+                hovertemplate="Supertrend: $%{y:,.2f}<extra></extra>",
             )
         )
     if show_fib and len(df) >= 50:
@@ -2279,9 +2415,9 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
             lw = 1.9 if lab in fib_labeled else 1.1
             op = 0.62 if lab in fib_labeled else 0.38
             fig_p.add_hline(
-                y=lev, line_dash="dot", line_color="rgba(56,189,248,0.55)", line_width=lw,
+                y=lev, line_dash="dot", line_color="rgba(59,130,246,0.5)", line_width=lw,
                 opacity=op, annotation_text=ann, annotation_position=ann_side,
-                annotation_font=dict(size=10, color="rgba(186,230,253,0.95)"),
+                annotation_font=dict(size=10, color="rgba(147,197,253,0.95)"),
             )
     if show_gann:
         gl = TA.gann_sq9(last_px)
@@ -2327,7 +2463,7 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
                     marker={**_dm, "color": "#2563eb"},
                     name="Blue diamond",
                     legendgroup="diamond_blue",
-                    hovertemplate="<b>Blue diamond</b><br>%{x}<br>$%{customdata:.2f}<br>7+ confluence cross up (buy / add zone)<extra></extra>",
+                    hovertemplate="<b>Blue diamond</b><br>%{x|%Y-%m-%d}<br><b>$%{customdata:,.2f}</b><br>7+ confluence cross up (buy / add zone)<extra></extra>",
                     customdata=[d["price"] for d in blue_d],
                 )
             )
@@ -2353,10 +2489,10 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
                     x=[d["date"] for d in pink_d],
                     y=[d["price"] * 1.015 for d in pink_d],
                     mode="markers",
-                    marker={**_dm, "color": "#db2777"},
+                    marker={**_dm, "color": "#e11d48"},
                     name="Pink diamond",
                     legendgroup="diamond_pink",
-                    hovertemplate="<b>Pink diamond</b><br>%{x}<br>$%{customdata:.2f}<br>Exit / de-risk (confluence fade or RSI exhaustion)<extra></extra>",
+                    hovertemplate="<b>Pink diamond</b><br>%{x|%Y-%m-%d}<br><b>$%{customdata:,.2f}</b><br>Exit / de-risk (confluence fade or RSI exhaustion)<extra></extra>",
                     customdata=[d["price"] for d in pink_d],
                 )
             )
@@ -2366,7 +2502,7 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
                     x=[df.index[-1]],
                     y=[last_px * 0.996],
                     mode="markers",
-                    marker={**_dm, "color": "#db2777", "size": 8, "opacity": 0.35},
+                    marker={**_dm, "color": "#e11d48", "size": 8, "opacity": 0.35},
                     name="Pink diamond",
                     legendgroup="diamond_pink",
                     hovertemplate="<b>Pink diamond</b><br>Same marker as on chart for take-profit / defensive posture.<br>"
@@ -2379,9 +2515,9 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
     _p_show_legend = not mobile_layout
     fig_p.update_layout(
         template="plotly_dark",
-        paper_bgcolor="#080c14",
-        plot_bgcolor="#080c14",
-        font=dict(family="JetBrains Mono, monospace", size=11, color="#cbd5e1"),
+        paper_bgcolor=_PLOTLY_PAPER_BG,
+        plot_bgcolor=_PLOTLY_PLOT_BG,
+        font=_PLOTLY_FONT_MAIN,
         title=dict(
             text=f"<b>{ticker}</b> · price & overlays",
             x=0.01, xanchor="left", y=0.98, yanchor="top",
@@ -2400,8 +2536,8 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
             xanchor="left",
             x=0.01,
             font=_legend_font,
-            bgcolor="rgba(2,6,23,0.97)",
-            bordercolor="rgba(100,116,139,0.65)",
+            bgcolor="rgba(15, 23, 42, 0.78)",
+            bordercolor="rgba(100,116,139,0.45)",
             borderwidth=1,
             traceorder="normal",
             itemwidth=34,
@@ -2412,29 +2548,40 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
         hoverlabel=_chart_hoverlabel(),
     )
     fig_p.update_xaxes(
-        gridcolor=_grid, zeroline=False, tickformat="%b %d<br>%Y",
-        title_text="Date", title_font=dict(size=11, color="#94a3b8"),
+        showgrid=True,
+        gridcolor=_PLOTLY_GRID,
+        gridwidth=1,
+        zeroline=False,
+        tickformat="%b %d<br>%Y",
+        title_text="Date",
+        **_PLOTLY_AXIS_TITLE,
     )
     fig_p.update_yaxes(
-        gridcolor=_grid, zeroline=False,
-        title_text="Price ($)", title_font=dict(size=11, color="#94a3b8"),
+        showgrid=True,
+        gridcolor=_PLOTLY_GRID,
+        gridwidth=1,
+        zeroline=False,
+        title_text="Price",
+        tickprefix="$",
+        tickformat=",.2f",
+        **_PLOTLY_AXIS_TITLE,
     )
 
-    vc = ["#10b981" if c >= o else "#ef4444" for c, o in zip(df["Close"], df["Open"])]
+    vc = [_PLOTLY_CASH_UP if c >= o else _PLOTLY_CASH_DOWN for c, o in zip(df["Close"], df["Open"])]
     fig_v = go.Figure(
         data=[
             go.Bar(
-                x=df.index, y=df["Volume"], marker_color=vc, name="Volume", opacity=0.55,
-                hovertemplate="Volume: %{y:,.0f}<extra></extra>",
+                x=df.index, y=df["Volume"], marker_color=vc, name="Volume", opacity=0.58,
+                hovertemplate="Volume: %{y:,.0f} shares<extra></extra>",
             )
         ]
     )
     _vm = dict(l=5, r=5, t=24, b=36) if mobile_layout else dict(l=56, r=28, t=28, b=44)
     fig_v.update_layout(
         template="plotly_dark",
-        paper_bgcolor="#080c14",
-        plot_bgcolor="#080c14",
-        font=dict(family="JetBrains Mono, monospace", size=11, color="#cbd5e1"),
+        paper_bgcolor=_PLOTLY_PAPER_BG,
+        plot_bgcolor=_PLOTLY_PLOT_BG,
+        font=_PLOTLY_FONT_MAIN,
         height=200 if mobile_layout else 240,
         margin=_vm,
         hovermode="x unified",
@@ -2443,22 +2590,34 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
         hoverlabel=_chart_hoverlabel(),
     )
     fig_v.update_xaxes(
-        gridcolor=_grid, zeroline=False, tickformat="%b %d<br>%Y",
-        title_text="Date", title_font=dict(size=11, color="#94a3b8"),
+        showgrid=True,
+        gridcolor=_PLOTLY_GRID,
+        gridwidth=1,
+        zeroline=False,
+        tickformat="%b %d<br>%Y",
+        title_text="Date",
+        **_PLOTLY_AXIS_TITLE,
     )
     fig_v.update_yaxes(
-        gridcolor=_grid, zeroline=False,
-        title_text="Shares", title_font=dict(size=11, color="#94a3b8"),
+        showgrid=True,
+        gridcolor=_PLOTLY_GRID,
+        gridwidth=1,
+        zeroline=False,
+        title_text="Volume (shares)",
+        tickformat=",.0f",
+        **_PLOTLY_AXIS_TITLE,
     )
 
     fig_r = go.Figure()
     fig_r.add_trace(
-        go.Scatter(x=df.index, y=TA.rsi(df["Close"]), line=dict(color="#c4b5fd", width=1.8), name="RSI",
-                   hovertemplate="RSI: %{y:.1f}<extra></extra>")
+        go.Scatter(
+            x=df.index, y=TA.rsi(df["Close"]), line=dict(color=_PLOTLY_BLUE_DEEP, width=2), name="RSI",
+            hovertemplate="<b>RSI (14)</b><br>%{y:.1f}<extra></extra>",
+        )
     )
-    fig_r.add_hline(y=70, line_dash="dot", line_color="rgba(248,113,113,0.4)")
-    fig_r.add_hline(y=50, line_dash="dot", line_color="rgba(148,163,184,0.3)")
-    fig_r.add_hline(y=30, line_dash="dot", line_color="rgba(52,211,153,0.4)")
+    fig_r.add_hline(y=70, line_dash="dot", line_color="rgba(248,113,113,0.35)")
+    fig_r.add_hline(y=50, line_dash="dot", line_color=_PLOTLY_GRID)
+    fig_r.add_hline(y=30, line_dash="dot", line_color="rgba(52,211,153,0.35)")
     if diamonds:
         rsi_track = TA.rsi(df["Close"])
         bx, by, px, py = [], [], [], []
@@ -2481,24 +2640,24 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
                     x=bx, y=by, mode="markers",
                     marker={**_dm_rsi, "color": "#2563eb"},
                     name="Blue diamond", showlegend=False,
-                    hovertemplate="<b>Blue diamond</b><br>%{x}<br>RSI %{y:.1f}<extra></extra>",
+                    hovertemplate="<b>Blue diamond</b><br>%{x|%Y-%m-%d}<br>RSI %{y:.1f}<extra></extra>",
                 )
             )
         if px:
             fig_r.add_trace(
                 go.Scatter(
                     x=px, y=py, mode="markers",
-                    marker={**_dm_rsi, "color": "#db2777"},
+                    marker={**_dm_rsi, "color": "#e11d48"},
                     name="Pink diamond", showlegend=False,
-                    hovertemplate="<b>Pink diamond</b><br>%{x}<br>RSI %{y:.1f}<extra></extra>",
+                    hovertemplate="<b>Pink diamond</b><br>%{x|%Y-%m-%d}<br>RSI %{y:.1f}<extra></extra>",
                 )
             )
     _rm = dict(l=5, r=5, t=24, b=36) if mobile_layout else dict(l=56, r=28, t=28, b=44)
     fig_r.update_layout(
         template="plotly_dark",
-        paper_bgcolor="#080c14",
-        plot_bgcolor="#080c14",
-        font=dict(family="JetBrains Mono, monospace", size=11, color="#cbd5e1"),
+        paper_bgcolor=_PLOTLY_PAPER_BG,
+        plot_bgcolor=_PLOTLY_PLOT_BG,
+        font=_PLOTLY_FONT_MAIN,
         height=220 if mobile_layout else 260,
         margin=_rm,
         hovermode="x unified",
@@ -2507,35 +2666,51 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
         hoverlabel=_chart_hoverlabel(),
     )
     fig_r.update_yaxes(
-        range=[0, 100], gridcolor=_grid, zeroline=False,
-        title_text="RSI", title_font=dict(size=11, color="#94a3b8"),
+        range=[0, 100],
+        showgrid=True,
+        gridcolor=_PLOTLY_GRID,
+        gridwidth=1,
+        zeroline=False,
+        title_text="RSI",
+        **_PLOTLY_AXIS_TITLE,
     )
     fig_r.update_xaxes(
-        gridcolor=_grid, zeroline=False, tickformat="%b %d<br>%Y",
-        title_text="Date", title_font=dict(size=11, color="#94a3b8"),
+        showgrid=True,
+        gridcolor=_PLOTLY_GRID,
+        gridwidth=1,
+        zeroline=False,
+        tickformat="%b %d<br>%Y",
+        title_text="Date",
+        **_PLOTLY_AXIS_TITLE,
     )
 
     ml, sl, hist = TA.macd(df["Close"])
-    hc = ["#34d399" if v >= 0 else "#f87171" for v in hist]
+    hc = [_PLOTLY_CASH_UP if v >= 0 else _PLOTLY_CASH_DOWN for v in hist]
     fig_m = go.Figure()
     fig_m.add_trace(
-        go.Scatter(x=df.index, y=ml, line=dict(color="#60a5fa", width=1.5), name="MACD",
-                   hovertemplate="MACD: %{y:.4f}<extra></extra>")
+        go.Scatter(
+            x=df.index, y=ml, line=dict(color=_PLOTLY_BLUE_DEEP, width=1.6), name="MACD",
+            hovertemplate="<b>MACD</b><br>%{y:.4f}<extra></extra>",
+        )
     )
     fig_m.add_trace(
-        go.Scatter(x=df.index, y=sl, line=dict(color="#fcd34d", width=1.1), name="Signal",
-                   hovertemplate="Signal: %{y:.4f}<extra></extra>")
+        go.Scatter(
+            x=df.index, y=sl, line=dict(color=_PLOTLY_SLATE, width=1.1), name="Signal",
+            hovertemplate="<b>Signal</b><br>%{y:.4f}<extra></extra>",
+        )
     )
     fig_m.add_trace(
-        go.Bar(x=df.index, y=hist, marker_color=hc, name="Histogram", opacity=0.55,
-               hovertemplate="Hist: %{y:.4f}<extra></extra>")
+        go.Bar(
+            x=df.index, y=hist, marker_color=hc, name="Histogram", opacity=0.58,
+            hovertemplate="<b>Histogram</b><br>%{y:+.4f}<extra></extra>",
+        )
     )
     _mm = dict(l=5, r=5, t=28, b=36) if mobile_layout else dict(l=56, r=28, t=36, b=44)
     fig_m.update_layout(
         template="plotly_dark",
-        paper_bgcolor="#080c14",
-        plot_bgcolor="#080c14",
-        font=dict(family="JetBrains Mono, monospace", size=11, color="#cbd5e1"),
+        paper_bgcolor=_PLOTLY_PAPER_BG,
+        plot_bgcolor=_PLOTLY_PLOT_BG,
+        font=_PLOTLY_FONT_MAIN,
         height=240 if mobile_layout else 280,
         margin=_mm,
         hovermode="x unified",
@@ -2543,7 +2718,7 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
         showlegend=not mobile_layout,
         legend=dict(
             orientation="h",
-            bgcolor="rgba(15,23,42,0.92)",
+            bgcolor="rgba(15,23,42,0.78)",
             bordercolor="rgba(148,163,184,0.35)",
             borderwidth=1,
             x=0.99, xanchor="right", y=0.99, yanchor="top",
@@ -2552,12 +2727,23 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
         hoverlabel=_chart_hoverlabel(),
     )
     fig_m.update_xaxes(
-        gridcolor=_grid, zeroline=False, tickformat="%b %d<br>%Y",
-        title_text="Date", title_font=dict(size=11, color="#94a3b8"),
+        showgrid=True,
+        gridcolor=_PLOTLY_GRID,
+        gridwidth=1,
+        zeroline=False,
+        tickformat="%b %d<br>%Y",
+        title_text="Date",
+        **_PLOTLY_AXIS_TITLE,
     )
     fig_m.update_yaxes(
-        gridcolor=_grid, zeroline=True, zerolinecolor="rgba(148,163,184,0.25)",
-        title_text="MACD", title_font=dict(size=11, color="#94a3b8"),
+        showgrid=True,
+        gridcolor=_PLOTLY_GRID,
+        gridwidth=1,
+        zeroline=True,
+        zerolinecolor="rgba(128,128,128,0.25)",
+        zerolinewidth=1,
+        title_text="MACD",
+        **_PLOTLY_AXIS_TITLE,
     )
 
     return fig_p, fig_v, fig_r, fig_m
@@ -2999,6 +3185,122 @@ def _fragment_technical_zone(
 
 
 # ═════════════════════════════════════════════════════════════════════════
+#  DATAFRAME PRESENTATION — column_config, numeric types, row highlights
+# ═════════════════════════════════════════════════════════════════════════
+
+_KEY_FIB_LEVEL_NAMES = frozenset({"50.0%", "61.8%"})
+
+
+def _df_price_levels(levels: dict, spot: float) -> pd.DataFrame:
+    """Build a numeric table for Fib / Gann level maps (label → price)."""
+    rows = [
+        {
+            "Level": k,
+            "Price": float(v),
+            "vs spot (%)": (float(v) / spot - 1.0) * 100.0,
+        }
+        for k, v in levels.items()
+    ]
+    return pd.DataFrame(rows)
+
+
+def _style_price_levels_table(df: pd.DataFrame, *, mode: str, spot: float):
+    """Highlight key Fib retracements or the Gann level nearest spot."""
+    if df.empty:
+        return df
+    if mode == "fib":
+        def _fib_row(row):
+            if row["Level"] in _KEY_FIB_LEVEL_NAMES:
+                return ["background-color: rgba(245, 158, 11, 0.22); font-weight: 700"] * len(row)
+            return [""] * len(row)
+
+        sty = df.style.apply(_fib_row, axis=1)
+    else:
+        nearest_label = (df["Price"] - float(spot)).abs().idxmin()
+
+        def _gann_row(row):
+            if row.name == nearest_label:
+                return ["background-color: rgba(34, 211, 238, 0.16); font-weight: 700"] * len(row)
+            return [""] * len(row)
+
+        sty = df.style.apply(_gann_row, axis=1)
+    try:
+        return sty.hide(axis="index")
+    except (TypeError, ValueError, AttributeError):
+        return sty.hide_index()
+
+
+_PRICE_LEVEL_COLUMN_CONFIG = {
+    "Level": st.column_config.TextColumn("Level", width="large"),
+    "Price": st.column_config.NumberColumn("Price", format="$%.2f"),
+    "vs spot (%)": st.column_config.NumberColumn("vs spot", format="%+.2f%%"),
+}
+
+
+def _options_scan_dataframe(rows: list, *, put_table: bool) -> pd.DataFrame:
+    """Normalize CC / CSP rows for display with stable column order."""
+    cols = ["strike", "mid", "delta", "otm_pct", "prem_100", "ann_yield", "iv", "volume", "oi"]
+    if put_table:
+        cols.append("eff_buy")
+    cols.append("optimal")
+    dfp = pd.DataFrame(rows)[cols].copy()
+    dfp["optimal"] = dfp["optimal"].astype(bool)
+    rename = {
+        "strike": "K",
+        "mid": "Mid",
+        "delta": "\u0394",
+        "otm_pct": "OTM %",
+        "prem_100": "$/100 sh",
+        "ann_yield": "Ann %",
+        "iv": "IV",
+        "volume": "Vol",
+        "oi": "OI",
+        "optimal": "Prop desk",
+    }
+    if put_table:
+        rename["eff_buy"] = "Eff. buy"
+    return dfp.rename(columns=rename)
+
+
+def _options_scan_column_config(*, put_table: bool):
+    cfg = {
+        "K": st.column_config.NumberColumn("Strike", format="$%.2f"),
+        "Mid": st.column_config.NumberColumn("Mid", format="$%.2f"),
+        "\u0394": st.column_config.NumberColumn("Delta", format="%.3f"),
+        "OTM %": st.column_config.NumberColumn("OTM", format="%.2f%%"),
+        "$/100 sh": st.column_config.NumberColumn("$/100 sh", format="$%.2f"),
+        "Ann %": st.column_config.NumberColumn("Ann. yield", format="%.1f%%"),
+        "IV": st.column_config.NumberColumn("IV", format="%.1f%%"),
+        "Vol": st.column_config.NumberColumn("Volume", format="%.0f"),
+        "OI": st.column_config.NumberColumn("OI", format="%.0f"),
+    }
+    if put_table:
+        cfg["Eff. buy"] = st.column_config.NumberColumn("Eff. buy", format="$%.2f")
+    cfg["Prop desk"] = st.column_config.CheckboxColumn(
+        "Prop desk",
+        help="Desk-preferred strike for this chain",
+        disabled=True,
+    )
+    return cfg
+
+
+def _style_propdesk_highlight(df: pd.DataFrame):
+    """Emphasize the Prop desk optimal row (summary-style)."""
+    col = "Prop desk"
+
+    def _row(r):
+        if bool(r[col]):
+            return ["background-color: rgba(6, 182, 212, 0.2); font-weight: 700"] * len(r)
+        return [""] * len(r)
+
+    sty = df.style.apply(_row, axis=1)
+    try:
+        return sty.hide(axis="index")
+    except (TypeError, ValueError, AttributeError):
+        return sty.hide_index()
+
+
+# ═════════════════════════════════════════════════════════════════════════
 #  MAIN
 # ═════════════════════════════════════════════════════════════════════════
 
@@ -3283,16 +3585,20 @@ def main():
     if mini_mode:
         st.markdown(_MINI_MODE_DENSITY_CSS, unsafe_allow_html=True)
 
-    # ── FETCH (parallel I/O: independent Yahoo endpoints) ──
+    # ── FETCH (parallel I/O: independent Yahoo endpoints + sparkline series) ──
     with st.spinner(f"Loading {ticker}..."):
-        with ThreadPoolExecutor(max_workers=5) as _pool:
+        with ThreadPoolExecutor(max_workers=7) as _pool:
             _f_df = _pool.submit(fetch_stock, ticker, "1y", "1d")
             _f_wk = _pool.submit(fetch_stock, ticker, "2y", "1wk")
+            _f_1mo = _pool.submit(fetch_stock, ticker, "1mo", "1d")
+            _f_vix_m = _pool.submit(fetch_stock, "^VIX", "1mo", "1d")
             _f_macro = _pool.submit(fetch_macro)
             _f_news = _pool.submit(fetch_news, ticker)
             _f_earn = _pool.submit(fetch_earnings_date, ticker)
             df = _f_df.result()
             df_wk = _f_wk.result()
+            df_1mo_spark = _f_1mo.result()
+            vix_1mo_df = _f_vix_m.result()
             macro = _f_macro.result()
             news = _f_news.result()
             earnings_date_raw = _f_earn.result()
@@ -3330,6 +3636,7 @@ def main():
     earnings_near = False
     earnings_dt = None
     days_to_earnings = None
+    earnings_parse_failed = False
     if earnings_date_raw is not None:
         try:
             if isinstance(earnings_date_raw, str):
@@ -3342,6 +3649,7 @@ def main():
             if 0 <= days_to_earnings <= 14:
                 earnings_near = True
         except Exception:
+            earnings_parse_failed = True
             earnings_dt = None
             days_to_earnings = None
 
@@ -3354,6 +3662,9 @@ def main():
             earn_glance = f"{days_to_earnings} days: {earnings_dt.strftime('%b %d, %Y')}"
     else:
         earn_glance = "No date from feed"
+
+    if earnings_parse_failed:
+        st.info("Earnings date from the feed could not be parsed; the countdown banner is disabled for this symbol.")
 
     if earnings_near and earnings_dt:
         st.markdown(f"""<div style='background:linear-gradient(135deg,rgba(245,158,11,.15),rgba(217,119,6,.1));
@@ -3383,14 +3694,16 @@ def main():
     if len(df) >= 7:
         price_spark = df["Close"].tail(7)
     else:
-        price_7d_df = fetch_stock(ticker, "1mo", "1d")
         price_spark = (
-            price_7d_df["Close"].tail(7)
-            if price_7d_df is not None and not price_7d_df.empty
+            df_1mo_spark["Close"].tail(7)
+            if df_1mo_spark is not None and not df_1mo_spark.empty
             else df["Close"].tail(min(7, len(df)))
         )
-    vix_7d_df = fetch_stock("^VIX", "1mo", "1d")
-    vix_spark = vix_7d_df["Close"].tail(7) if vix_7d_df is not None and not vix_7d_df.empty else pd.Series([vix_v, vix_v, vix_v, vix_v, vix_v, vix_v, vix_v])
+    vix_spark = (
+        vix_1mo_df["Close"].tail(7)
+        if vix_1mo_df is not None and not vix_1mo_df.empty
+        else pd.Series([vix_v, vix_v, vix_v, vix_v, vix_v, vix_v, vix_v])
+    )
     if days_to_earnings is not None:
         earn_anchor = max(1, min(30, days_to_earnings if days_to_earnings >= 0 else 1))
         earnings_spark = pd.Series(np.linspace(earn_anchor + 1, max(0, earn_anchor - 1), 7))
@@ -3506,8 +3819,11 @@ def main():
                     bluf_cc = next((c for c in cc_list if c.get("optimal")), cc_list[0])
                 if csp_list:
                     bluf_csp = next((c for c in csp_list if c.get("optimal")), csp_list[0])
-    except Exception:
+    except Exception as e:
         opt_exps, bluf_cc, bluf_csp, bluf_exp, bluf_dte = [], None, None, None, 0
+        st.warning(
+            f"Options chain could not be loaded for {tk_hdr}. Strike suggestions and IV context may be limited. ({type(e).__name__})"
+        )
 
     ref_iv_bluf = None
     if bluf_cc and bluf_cc.get("iv"):
@@ -3776,714 +4092,863 @@ def main():
     )
     chart_mood = "bull" if struct == "BULLISH" else ("bear" if struct == "BEARISH" else "neutral")
 
-    # ══════════════════════════════════════════════════════════════════
-    #  SECTION 2 \u2014 SETUP ANALYSIS
-    # ══════════════════════════════════════════════════════════════════
-    st.markdown('<div id="setup" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
-    _section("Setup Analysis", "Trend, range, or fade: here is the read and how to play it without guessing.",
-             tip_plain="This block is your bias clock. Uptrends reward measured premium sales with air above price. Ranges invite two sided discipline. Downtrends demand smaller size and wider buffers.")
-
-    if ticker == "PLTR":
-        next_print = datetime(2026, 5, 4)
-        d_to_print = (next_print.date() - datetime.now().date()).days
-        if d_to_print > 0:
-            countdown_txt = f"{d_to_print} days to earnings ({next_print.strftime('%b %d, %Y')})"
-        elif d_to_print == 0:
-            countdown_txt = "Earnings expected today (May 04, 2026)"
-        else:
-            countdown_txt = f"Last projected print date passed by {abs(d_to_print)} days (May 04, 2026)"
-        with st.expander("STRATEGIC INTELLIGENCE: PLTR · Q4 2025 / 2026 OUTLOOK", expanded=True, key="cf_pltr_intel_exp"):
-            gc, bc = st.columns(2)
-            with gc:
-                st.markdown(
-                    """
-                    <div class='earn-col earn-good'>
-                        <h4>THE GOOD (THE CATALYST)</h4>
-                        <ul>
-                            <li><strong>Hyper Growth:</strong> Q4 2025 revenue grew 70% Y/Y to $1.41B. U.S. Commercial surged 137%.</li>
-                            <li><strong>Rule of 40:</strong> Palantir is operating at an elite Rule of 40 score of 127%.</li>
-                            <li><strong>2026 Guidance:</strong> Management guided to roughly 61% Y/Y growth with a $7.2B target.</li>
-                            <li><strong>Profitability:</strong> GAAP Net Income reached $609M (43% margin); FCF hit $791M.</li>
-                        </ul>
-                    </div>
-                    """,
-                    unsafe_allow_html=True
-                )
-            with bc:
-                st.markdown(
-                    f"""
-                    <div class='earn-col earn-bad'>
-                        <h4>THE BAD (THE RISK)</h4>
-                        <ul>
-                            <li><strong>Valuation:</strong> Trading near 125x to 248x P/E, priced for near perfection.</li>
-                            <li><strong>International Lag:</strong> U.S. commercial +137% vs international commercial +2%.</li>
-                            <li><strong>SBC &amp; Dilution:</strong> Heavy stock based compensation remains a key bear argument.</li>
-                            <li><strong>Upcoming Print:</strong> {countdown_txt}. Street EPS projection is $0.26 to $0.29.</li>
-                        </ul>
-                    </div>
-                    """,
-                    unsafe_allow_html=True
-                )
-            st.markdown(
-                """
-                <div class='earn-meta'>
-                    <span class='earn-pill'>Q4 2025 Revenue: $1.41B</span>
-                    <span class='earn-pill'>U.S. Commercial: +137% Y/Y</span>
-                    <span class='earn-pill'>2026 Guide: $7.2B</span>
-                    <span class='earn-pill'>Projected EPS: $0.26-$0.29</span>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
-
-    sa_left, sa_right = st.columns(2)
-    with sa_left:
-        cls = "sb" if struct == "BULLISH" else ("sr" if struct == "BEARISH" else "sn")
-        st.markdown(f"<div class='{cls}'><strong>Market Structure: {struct}</strong></div>", unsafe_allow_html=True)
-        struct_explain = {
-            "BULLISH": "The stock is making higher highs and higher lows. Think of a store where sales grow every single quarter. The trend is your friend. Sell covered calls at the highs to collect rent on your shares.",
-            "BEARISH": "The stock is making lower highs and lower lows. Think of a store where foot traffic drops every month. Be careful. Widen your safety buffers or wait for the bottom before selling options.",
-            "RANGING": "The stock is bouncing between a ceiling and a floor. Think of a business in a steady market. This is actually great for selling options on both sides and collecting cash."}
-        _explain("Why this matters for your trade", struct_explain[struct], chart_mood)
-
-        # Hurst Exponent — market regime filter
-        hurst_val = TA.hurst(df["Close"])
-        if hurst_val > 0.55:
-            h_label, h_color = "TRENDING", "#10b981"
-        elif hurst_val < 0.45:
-            h_label, h_color = "MEAN REVERTING", "#8b5cf6"
-        else:
-            h_label, h_color = "RANDOM WALK", "#f59e0b"
-        st.markdown(f"<div class='tc' style='text-align:center;margin-bottom:12px'>"
-            f"<div style='font-size:.7rem;color:#64748b;text-transform:uppercase'>Hurst Exponent (R/S)</div>"
-            f"<div class='mono' style='font-size:1.3rem;color:{h_color}'>{hurst_val:.3f} = {h_label}</div></div>", unsafe_allow_html=True)
-        if 0.45 <= hurst_val <= 0.55:
-            _explain("\u26a0\ufe0f Random Walk Warning",
-                f"Hurst is {hurst_val:.3f}. That means the price is moving randomly right now. Like flipping a coin. "
-                "Trend tools like Supertrend, ADX, and MACD are not reliable when this happens. "
-                "Your best move is to wait for a clear direction or use strategies that profit from sideways movement.", "bear")
-        elif hurst_val > 0.55:
-            _explain("Hurst says: Trending Market",
-                f"Hurst is {hurst_val:.3f}. The stock has strong trending behavior. Whatever direction it is going, it is likely to keep going. "
-                "Think of a business with sales growing every quarter. You can trust the trend. "
-                "Trend tools like Supertrend and MACD are working correctly right now.", "bull")
-        else:
-            _explain("Hurst says: Prices Snap Back",
-                f"Hurst is {hurst_val:.3f}. Prices are snapping back to the average faster than normal. "
-                "Big moves tend to reverse quickly. This is perfect for selling options at extremes. "
-                "You collect the premium and the stock comes back to you. Time decay works in your favor.", "bull")
-
-        st.markdown(f"""<div class='qe'>
-            <div style='font-size:.75rem;color:#8b5cf6;text-transform:uppercase;letter-spacing:.1em'>QUANT EDGE SCORE</div>
-            <div style='font-size:3rem;font-weight:800;color:{qs_color};font-family:JetBrains Mono,monospace'>{qs:.0f}</div>
-            <div style='font-size:.85rem;color:#94a3b8'>Your overall score from 5 independent checks</div></div>""", unsafe_allow_html=True)
-        for k, v in qb.items():
-            clr = "#10b981" if v > 70 else ("#f59e0b" if v > 50 else "#ef4444")
-            st.markdown(f"<div style='display:flex;align-items:center;margin:3px 0'><span style='width:85px;color:#94a3b8;font-size:.8rem;text-transform:capitalize'>{k}</span><div style='flex:1;background:#1e293b;border-radius:4px;height:7px;margin:0 8px'><div style='width:{v}%;background:{clr};border-radius:4px;height:7px'></div></div><span class='mono' style='color:#e2e8f0;font-size:.8rem'>{v:.0f}</span></div>", unsafe_allow_html=True)
-
-        # ── CONFLUENCE POINTS (0-9 visual meter) ──
-        st.markdown(f"""<div class='confluence-meter' style='margin-top:16px'>
-            <div style='font-size:.75rem;color:{cp_color};text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px'>💎 CONFLUENCE POINTS</div>
-            <div style='font-size:2.2rem;font-weight:800;color:{cp_color};font-family:JetBrains Mono,monospace'>{cp_score}/{cp_max} {cp_label}</div>
-            <div style='font-size:.8rem;color:#94a3b8;margin-top:2px'>{"🔷 Blue Diamond territory: strong buy signal active" if cp_score >= 7 else ("Approaching diamond zone: watch closely" if cp_score >= 5 else "Not enough confluence for a diamond signal")}</div>
-        </div>""", unsafe_allow_html=True)
-        for comp_name, comp_data in cp_breakdown.items():
-            pts = comp_data["pts"]
-            mx = comp_data["max"]
-            detail = comp_data["detail"]
-            bar_pct = (pts / mx * 100) if mx > 0 else 0
-            clr = "#10b981" if pts == mx else ("#f59e0b" if pts > 0 else "#334155")
-            st.markdown(f"<div style='display:flex;align-items:center;margin:3px 0'>"
-                f"<span style='width:95px;color:#94a3b8;font-size:.78rem'>{comp_name}</span>"
-                f"<div style='flex:1;background:#1e293b;border-radius:4px;height:7px;margin:0 8px'>"
-                f"<div style='width:{bar_pct}%;background:{clr};border-radius:4px;height:7px'></div></div>"
-                f"<span class='mono' style='color:#e2e8f0;font-size:.78rem;width:30px;text-align:right'>{pts}/{mx}</span>"
-                f"<span style='color:#64748b;font-size:.72rem;margin-left:8px;width:120px'>{detail}</span></div>",
-                unsafe_allow_html=True)
-
-    with sa_right:
-        st.markdown("**Key Price Levels**")
-        if len(df) >= 50:
-            rec = df.iloc[-60:]
-            fl = TA.fib_retracement(rec["High"].max(), rec["Low"].min())
-            st.dataframe(pd.DataFrame([{"Level": k, "Price": f"${v:.2f}", "Dist": f"{(v / price - 1) * 100:+.1f}%"} for k, v in fl.items()]), width="stretch", hide_index=True)
-        _explain("What are Fibonacci levels?",
-            "After a big move, stocks tend to pull back to specific levels before continuing. The key levels are 38.2%, 50%, and 61.8%. "
-            "The 61.8% level is called the golden ratio. It is the most watched level by professional traders. "
-            "Why you care: set your put strikes near Fibonacci support. You collect cash AND you buy at a natural price floor.", "neutral")
-        if st.checkbox("Gann Square of 9", key="exp_1"):
-            gl = TA.gann_sq9(price)
-            st.dataframe(pd.DataFrame([{"Level": k, "Price": f"${v:.2f}", "Dist": f"{(v / price - 1) * 100:+.1f}%"} for k, v in gl.items()]), width="stretch", hide_index=True)
-        if st.checkbox("Gann Angles", key="exp_2"):
-            ang, sp = TA.gann_angles(df)
-            st.markdown(f"**Swing Low:** ${sp:.2f}")
-            for n_g, p_v in ang.items():
-                st.markdown(f"* **{n_g}** maps to ${p_v:.2f} ({(p_v / price - 1) * 100:+.1f}%)")
-        if st.checkbox("Gann Time Cycles", key="exp_3"):
-            for cyc in TA.gann_time_cycles(df):
-                st.markdown(
-                    f"* **{cyc['cycle']} bar cycle** lands {cyc['date'].strftime('%Y-%m-%d')} ({cyc['status']})"
-                )
-
-    # ══════════════════════════════════════════════════════════════════
-    #  SECTION 3 \u2014 QUANT DASHBOARD (two-column: metric + explanation)
-    # ══════════════════════════════════════════════════════════════════
-    st.markdown('<div id="quant-dashboard" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
-    _section("Quant Dashboard", "Every dial translated into English. Meaning first. Action second.",
-             tip_plain="Treat this like an aircraft panel. Strong green bars confirm edge. Thin readings mean throttle back. Confluence and Gold Zone still own the headline.")
-    rv2 = TA.rsi2(df["Close"]).iloc[-1] if len(df) > 5 else 50
-    adx_v, dip, din = TA.adx(df)
-    cci_v = TA.cci(df).iloc[-1]
-    st_l, st_d = TA.supertrend(df)
-    _, kj, sa_ich, sb_ich, _ = TA.ichimoku(df)
-    an = adx_v.iloc[-1] if not pd.isna(adx_v.iloc[-1]) else 0
-
-    # RSI
-    il, ir = st.columns([1, 2])
-    with il:
-        st.markdown(f"<div class='tc' style='text-align:center'><div style='font-size:.7rem;color:#64748b;text-transform:uppercase'>RSI (14)</div><div class='mono' style='font-size:1.5rem;color:{'#ef4444' if rsi_v > 70 else ('#10b981' if rsi_v < 30 else '#e2e8f0')}'>{rsi_v:.1f}</div><div style='font-size:.7rem;color:#64748b;margin-top:6px'>RSI 2 bar: {rv2:.1f}</div></div>", unsafe_allow_html=True)
-    with ir:
-        if rsi_v > 70:
-            _explain("RSI: Stock is Overheated", f"RSI is {rsi_v:.0f}. The stock ran up too fast. Think of a product flying off shelves after a viral review. Buyers are overpaying right now. This is the ideal time to sell Covered Calls and collect cash at peak excitement.", "bear")
-        elif rsi_v < 30:
-            _explain("RSI: Stock is On Sale", f"RSI is {rsi_v:.0f}. Sellers have panicked. Think of a clearance sale that went too deep. This is your signal to sell Cash Secured Puts. You get paid cash today and you might buy shares at a bargain price.", "bull")
-        else:
-            _explain("RSI: Stock is Resting", f"RSI is {rsi_v:.0f}. The stock is calm. Buyers are not panicking. Sellers are not panicking. This is the perfect zone to collect cash from selling options.", "neutral")
-
-    # MACD
-    il, ir = st.columns([1, 2])
-    with il:
-        st.markdown(f"<div class='tc' style='text-align:center'><div style='font-size:.7rem;color:#64748b;text-transform:uppercase'>MACD</div><div class='mono' style='font-size:1.2rem;color:{'#10b981' if macd_bull else '#ef4444'}'>{'BULLISH' if macd_bull else 'BEARISH'}</div><div style='font-size:.7rem;color:#64748b;margin-top:6px'>Hist: {h_v.iloc[-1]:.3f}</div></div>", unsafe_allow_html=True)
-    with ir:
-        if macd_bull:
-            _explain("MACD: Buyers Are Winning", "Recent momentum is stronger than the longer term average. Think of a store where this month's sales beat the quarterly average. Buyers are in charge. You can sell Covered Calls at higher strikes with more confidence.", "bull")
-        else:
-            _explain("MACD: Sellers Are Winning", "Recent momentum dropped below the longer term average. Think of a store where this month's sales fell below the quarterly trend. Be more careful when picking your strike prices.", "bear")
-
-    # ADX
-    il, ir = st.columns([1, 2])
-    with il:
-        st.markdown(f"<div class='tc' style='text-align:center'><div style='font-size:.7rem;color:#64748b;text-transform:uppercase'>ADX</div><div class='mono' style='font-size:1.5rem;color:{'#10b981' if an > 25 else '#f59e0b'}'>{an:.1f}</div><div style='font-size:.7rem;color:#64748b;margin-top:6px'>Plus DI {dip.iloc[-1]:.1f} · Minus DI {din.iloc[-1]:.1f}</div></div>", unsafe_allow_html=True)
-    with ir:
-        di_w = "Buyers via plus DI" if dip.iloc[-1] > din.iloc[-1] else "Sellers via minus DI"
-        if an > 25:
-            _explain("ADX: Strong Trend Detected", f"ADX is {an:.0f}. That is above 25 which means a strong trend is happening. The winner right now is: {di_w}. Think of a business with a clear growth direction. Sell your options in the direction of the trend for the safest play.", "bull" if dip.iloc[-1] > din.iloc[-1] else "bear")
-        else:
-            _explain("ADX: No Clear Trend", f"ADX is {an:.0f}. That is below 25 which means the market has no clear direction right now. Think of a business in a holding pattern. This is a good time for strategies that profit from sideways movement.", "neutral")
-
-    # CCI + Supertrend row
-    il, ir = st.columns([1, 2])
-    stb = st_d.iloc[-1] == 1
-    with il:
-        st.markdown(f"<div class='tc' style='text-align:center'><div style='font-size:.7rem;color:#64748b;text-transform:uppercase'>CCI (20)</div><div class='mono' style='font-size:1.5rem;color:{'#ef4444' if not pd.isna(cci_v) and cci_v > 100 else ('#10b981' if not pd.isna(cci_v) and cci_v < -100 else '#e2e8f0')}'>{cci_v:.0f}</div></div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='tc' style='text-align:center;margin-top:8px'><div style='font-size:.7rem;color:#64748b;text-transform:uppercase'>Supertrend</div><div class='mono' style='font-size:1.2rem;color:{'#10b981' if stb else '#ef4444'}'>{'BULLISH' if stb else 'BEARISH'}</div><div style='font-size:.7rem;color:#64748b;margin-top:6px'>${st_l.iloc[-1]:.2f}</div></div>", unsafe_allow_html=True)
-    with ir:
-        cci_txt = f"CCI is {cci_v:.0f}. " + (
-            "That is above positive 100. The stock is stretched versus its average. Great moment to lean on call sales. "
-            if not pd.isna(cci_v) and cci_v > 100
-            else (
-                "That is below negative 100. The stock washed out under its average. Sellers overdid it. Look at put sales for income. "
-                if not pd.isna(cci_v) and cci_v < -100
-                else "That is in the neutral pocket. No extreme edge to harvest yet. "
-            )
-        )
-        st_price = st_l.iloc[-1]
-        st_txt = f"The Supertrend is your price floor. It is BULLISH at ${st_price:.2f}. As long as the stock stays above this green line, your shares are safe." if stb else f"The Supertrend is BEARISH at ${st_price:.2f}. It is acting as a falling ceiling above the price. The trend is down. Be defensive and protect your shares."
-        _explain("CCI and Supertrend", cci_txt + st_txt, "bull" if stb else "bear")
-
-    # Ichimoku + OBV row
-    above_cloud = not pd.isna(sa_ich.iloc[-1]) and not pd.isna(sb_ich.iloc[-1]) and price > max(sa_ich.iloc[-1], sb_ich.iloc[-1])
-    ou = obv_s.iloc[-1] > obv_s.iloc[-20] if len(obv_s) >= 20 else True
-    il, ir = st.columns([1, 2])
-    with il:
-        st.markdown(f"<div class='tc' style='text-align:center'><div style='font-size:.7rem;color:#64748b;text-transform:uppercase'>Ichimoku</div><div class='mono' style='font-size:1.2rem;color:{'#10b981' if above_cloud else '#ef4444'}'>{'ABOVE CLOUD' if above_cloud else 'IN/BELOW'}</div><div style='font-size:.7rem;color:#64748b;margin-top:6px'>Kijun: ${kj.iloc[-1]:.2f}</div></div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='tc' style='text-align:center;margin-top:8px'><div style='font-size:.7rem;color:#64748b;text-transform:uppercase'>OBV</div><div class='mono' style='font-size:1.2rem;color:{'#10b981' if ou else '#ef4444'}'>{'RISING' if ou else 'FALLING'}</div><div style='font-size:.7rem;color:#64748b;margin-top:6px'>{'Accumulation' if ou else 'Distribution'}</div></div>", unsafe_allow_html=True)
-    with ir:
-        ich_txt = "The price is above the Ichimoku Cloud. The cloud acts as a thick safety net below the stock. When the price floats above it, the trend is strongly in your favor. Your shares are protected. " if above_cloud else "The price is inside or below the cloud. The trend is unclear right now. Think of it like driving through fog. Wait for visibility before you sell options aggressively. "
-        obv_txt = "OBV is rising. Big institutional players are quietly buying up shares. Think of your biggest wholesale customers stocking up before a price increase. That is a bullish sign. " if ou else "OBV is falling. Big money is selling into rallies. Think of your best customers reducing their orders. The price may follow them down. Be careful. "
-        _explain("Ichimoku Cloud and Volume Flow", ich_txt + obv_txt, "bull" if above_cloud and ou else ("bear" if not above_cloud and not ou else "neutral"))
-
-    # Divergence Scanner
-    st.markdown("#### Divergence Scanner")
-    rsi_s = TA.rsi(df["Close"])
-    divs_rsi = TA.detect_divergences(df["Close"], rsi_s)
-    obv_divs = TA.detect_divergences(df["Close"], obv_s)
-    all_divs = [(d, "RSI") for d in divs_rsi] + [(d, "OBV") for d in obv_divs]
-    if all_divs:
-        for d, src in all_divs[-5:]:
-            st.markdown(f"<div class='ac'>{'🟢' if d['type'] == 'bullish' else '🔴'} <strong>{d['type'].title()} {src} divergence</strong> near ${d['price']:.2f} on {d['idx'].strftime('%Y-%m-%d')}</div>", unsafe_allow_html=True)
-        _explain("What is a divergence?", "The price makes a new high or low but the indicator does not agree. Think of a company reporting record revenue but declining profits. The numbers do not match. That is an early warning that the trend might reverse soon.", "neutral")
-    else:
-        st.info("No divergences found. All indicators agree with the current trend.")
-
-    # Volume Profile
-    vp = TA.volume_profile(df)
-    if not vp.empty:
-        poc = vp.loc[vp["volume"].idxmax()]
-        if not mini_mode:
-            fig_vp = go.Figure(go.Bar(x=vp["volume"], y=vp["mid"], orientation="h",
-                marker_color=["#10b981" if v == vp["volume"].max() else "#3b82f6" for v in vp["volume"]]))
-            fig_vp.add_hline(y=poc["mid"], line_dash="solid", line_color="#f59e0b", annotation_text=f"POC ${poc['mid']:.2f}")
-            fig_vp.update_layout(template="plotly_dark", paper_bgcolor="#080c14", plot_bgcolor="#080c14", height=300,
-                margin=dict(l=60, r=20, t=20, b=40), yaxis_title="Price", xaxis_title="Volume", font=dict(family="JetBrains Mono", color="#94a3b8"))
-            st.plotly_chart(fig_vp, use_container_width=True, config=_PLOTLY_UI_CONFIG)
-        else:
-            st.caption(f"Volume POC (mini mode): **${poc['mid']:.2f}**. Full profile chart stays parked while Turbo is on.")
-        _explain("\U0001f9e0 Volume Profile", f"The Point of Control (POC) is ${poc['mid']:.2f}. This is the most traded price. Think of it as the price point where your store sees the most customers. The stock is pulled toward this price like a magnet. Use it to pick your option strike prices.", "neutral")
-
-    # ══════════════════════════════════════════════════════════════════
-    #  SECTION 4 \u2014 CASH-FLOW STRATEGIES
-    # ══════════════════════════════════════════════════════════════════
-    st.markdown('<div id="strategies" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
-    _section("Cash Flow Strategies", f"Concrete strikes for {ticker} at ${price:.2f}. Lift them straight into your ticket.",
-             tip_plain="Start with the optimal line the desk highlights. Covered calls need stock on hand. Cash secured puts monetize patience. Spreads are for when you want a hard loss ceiling.")
-    st.markdown(
-        f"<div class='tc'><div style='text-align:center'><span style='color:#64748b;font-size:.8rem'>ANALYZING</span><br>"
-        f"<span style='font-size:1.4rem;font-weight:700;color:#e2e8f0'>{_html_mod.escape(ticker)} @ ${price:.2f}</span></div></div>",
-        unsafe_allow_html=True,
+    dash_tab_setup, dash_tab_cashflow, dash_tab_intel = st.tabs(
+        [
+            "Setup & quant",
+            "Cashflow & strikes",
+            "Risk, scanner & intel",
+        ]
     )
 
-    if opt_exps:
-        sel_exp = st.selectbox("Expiration", opt_exps[:10], index=min(2, len(opt_exps) - 1), key="sel_exp")
-        dte = max(1, (datetime.strptime(sel_exp, "%Y-%m-%d") - datetime.now()).days)
-        result_sel, _ = fetch_options(ticker, sel_exp)
-        calls, puts = result_sel if isinstance(result_sel, (tuple, list)) and len(result_sel) == 2 else (pd.DataFrame(), pd.DataFrame())
-        calls = calls if isinstance(calls, pd.DataFrame) else pd.DataFrame()
-        puts = puts if isinstance(puts, pd.DataFrame) else pd.DataFrame()
-        if not calls.empty or not puts.empty:
-            s1, s2 = st.columns(2)
-            with s1:
-                st.markdown("#### Covered Calls")
-                cc = Opt.covered_calls(price, calls, dte, rfr)
-                if cc:
-                    opt_cc = next((c for c in cc if c.get("optimal")), cc[0])
-                    b = opt_cc; nc_s = 1
-                    opt_html = '<div style="font-size:.7rem;font-weight:700;color:#06b6d4;margin-bottom:6px">\U0001f3af OPTIMAL PROP-DESK STRIKE</div>' if b.get("optimal") else ""
-                    in_zone = Opt.DELTA_LOW <= abs(b["delta"]) <= Opt.DELTA_HIGH
-                    delta_color = "#10b981" if in_zone else "#f59e0b"
-                    st.markdown(f"<div class='sb'>{opt_html}<strong>SELL {nc_s}x ${b['strike']:.0f}C @ ${b['mid']:.2f}</strong><br><span style='font-size:.85rem;color:#94a3b8'>Exp: {sel_exp} ({dte}DTE) | IV: {b['iv']:.1f}% | <strong style='color:{delta_color}'>\u0394 {b['delta']:.2f}</strong><br>Premium: <strong style='color:#10b981'>${b['prem_100'] * nc_s:,.0f}</strong> | OTM: {b['otm_pct']:.1f}% | Ann: {b['ann_yield']:.1f}% | OI: {b['oi']:,}</span></div>", unsafe_allow_html=True)
-                    if st.checkbox("All CC strikes", key="exp_5"):
-                        st.dataframe(pd.DataFrame(cc)[["strike", "mid", "delta", "otm_pct", "prem_100", "ann_yield", "iv", "volume", "oi", "optimal"]].rename(columns={"strike": "K", "mid": "Mid", "delta": "\u0394", "otm_pct": "OTM%", "prem_100": "$/K", "ann_yield": "Ann%", "iv": "IV%", "volume": "Vol", "oi": "OI", "optimal": "PropDesk"}), width="stretch", hide_index=True)
+    with dash_tab_setup:
+            # ══════════════════════════════════════════════════════════════════
+            #  SECTION 2 \u2014 SETUP ANALYSIS
+            # ══════════════════════════════════════════════════════════════════
+            st.markdown('<div id="setup" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
+            _section("Setup Analysis", "Trend, range, or fade: here is the read and how to play it without guessing.",
+                     tip_plain="This block is your bias clock. Uptrends reward measured premium sales with air above price. Ranges invite two sided discipline. Downtrends demand smaller size and wider buffers.")
+
+            if ticker == "PLTR":
+                next_print = datetime(2026, 5, 4)
+                d_to_print = (next_print.date() - datetime.now().date()).days
+                if d_to_print > 0:
+                    countdown_txt = f"{d_to_print} days to earnings ({next_print.strftime('%b %d, %Y')})"
+                elif d_to_print == 0:
+                    countdown_txt = "Earnings expected today (May 04, 2026)"
                 else:
-                    st.info("No liquid covered call strikes found. We need at least 100 open interest and 10 volume.")
-            with s2:
-                st.markdown("#### Cash Secured Puts")
-                csp = Opt.cash_secured_puts(price, puts, dte, rfr)
-                if csp:
-                    opt_csp = next((c for c in csp if c.get("optimal")), csp[0])
-                    b = opt_csp
-                    opt_html_p = '<div style="font-size:.7rem;font-weight:700;color:#06b6d4;margin-bottom:6px">\U0001f3af OPTIMAL PROP-DESK STRIKE</div>' if b.get("optimal") else ""
-                    in_zone_p = Opt.DELTA_LOW <= abs(b["delta"]) <= Opt.DELTA_HIGH
-                    delta_color_p = "#10b981" if in_zone_p else "#f59e0b"
-                    st.markdown(f"<div class='sb'>{opt_html_p}<strong>SELL 1x ${b['strike']:.0f}P @ ${b['mid']:.2f}</strong><br><span style='font-size:.85rem;color:#94a3b8'>Exp: {sel_exp} ({dte}DTE) | IV: {b['iv']:.1f}% | <strong style='color:{delta_color_p}'>\u0394 {b['delta']:.2f}</strong><br>Premium: <strong style='color:#10b981'>${b['prem_100']:,.0f}</strong> | OTM: {b['otm_pct']:.1f}% | Eff buy: ${b['eff_buy']:.2f} | OI: {b['oi']:,}</span></div>", unsafe_allow_html=True)
-                    if st.checkbox("All CSP strikes", key="exp_6"):
-                        st.dataframe(pd.DataFrame(csp)[["strike", "mid", "delta", "otm_pct", "prem_100", "ann_yield", "iv", "volume", "oi", "eff_buy", "optimal"]].rename(columns={"strike": "K", "mid": "Mid", "delta": "\u0394", "otm_pct": "OTM%", "prem_100": "$/K", "ann_yield": "Ann%", "iv": "IV%", "volume": "Vol", "oi": "OI", "eff_buy": "EffBuy", "optimal": "PropDesk"}), width="stretch", hide_index=True)
-                else:
-                    st.info("No liquid put strikes found. We need at least 100 open interest and 10 volume.")
-
-            _explain("\U0001f9e0 What are Delta and Theta?",
-                "<strong>Delta is your win probability.</strong> A Delta of 0.16 means you have an 84 percent chance to keep all the cash and keep your shares. Lower Delta means safer. "
-                "<strong>Theta is your daily paycheck.</strong> Every day that passes, the option loses value. That lost value goes straight into your pocket. Time is literally paying you. "
-                "<strong>OI is how busy the market is.</strong> Higher OI means more traders are active. That means you get better prices when you sell. We filter out anything below 100 OI to protect you.", "neutral")
-
-            st.divider()
-            sp1, sp2 = st.columns(2)
-            with sp1:
-                st.markdown("#### Bull Put Spread")
-                ps = Opt.credit_spreads(price, puts, "put_credit")
-                if ps:
-                    b = ps[0]
-                    st.markdown(f"<div class='sb'><strong>${b['short']:.0f}P/${b['long']:.0f}P</strong> | Cr: ${b['credit_100']:.0f} | ML: ${b['max_loss']:.0f} | POP: {b['pop']:.0f}%</div>", unsafe_allow_html=True)
-            with sp2:
-                st.markdown("#### Bear Call Spread")
-                cs = Opt.credit_spreads(price, calls, "call_credit")
-                if cs:
-                    b = cs[0]
-                    st.markdown(f"<div class='sr'><strong>${b['short']:.0f}C/${b['long']:.0f}C</strong> | Cr: ${b['credit_100']:.0f} | ML: ${b['max_loss']:.0f} | POP: {b['pop']:.0f}%</div>", unsafe_allow_html=True)
-
-            _explain("\U0001f9e0 What is a credit spread?",
-                "A credit spread is like selling insurance with a cap on your worst case. You sell one option and collect cash. Then you buy a cheaper one further away to limit your risk. "
-                "<strong>POP</strong> is your Probability of Profit. <strong>ML</strong> is your Max Loss, the absolute worst case. <strong>Cr</strong> is the cash you receive today. "
-                "A 75% POP means you win roughly 3 out of every 4 times you make this trade.", "neutral")
-
-            if latest_d and (df.index[-1] - latest_d["date"]).days <= 5:
-                st.divider()
-                if latest_d["type"] == "blue":
-                    st.markdown(f"""<div class='diamond-blue'>
-                        <div style='font-size:1rem;font-weight:700;margin-bottom:8px'>🔷 BLUE DIAMOND AUTO SUGGESTIONS</div>
-                        <div style='color:#94a3b8;font-size:.85rem;margin-bottom:10px'>
-                            A Blue Diamond fired {(df.index[-1] - latest_d['date']).days} day(s) ago at ${latest_d['price']:.2f} with confluence {latest_d['score']}/9.
-                            Historical probability of profit: <strong style='color:#10b981'>{d_wr:.0f}%</strong> ({d_n} signals backtested).
+                    countdown_txt = f"Last projected print date passed by {abs(d_to_print)} days (May 04, 2026)"
+                with st.expander("STRATEGIC INTELLIGENCE: PLTR · Q4 2025 / 2026 OUTLOOK", expanded=True, key="cf_pltr_intel_exp"):
+                    gc, bc = st.columns(2)
+                    with gc:
+                        st.markdown(
+                            """
+                            <div class='earn-col earn-good'>
+                                <h4>THE GOOD (THE CATALYST)</h4>
+                                <ul>
+                                    <li><strong>Hyper Growth:</strong> Q4 2025 revenue grew 70% Y/Y to $1.41B. U.S. Commercial surged 137%.</li>
+                                    <li><strong>Rule of 40:</strong> Palantir is operating at an elite Rule of 40 score of 127%.</li>
+                                    <li><strong>2026 Guidance:</strong> Management guided to roughly 61% Y/Y growth with a $7.2B target.</li>
+                                    <li><strong>Profitability:</strong> GAAP Net Income reached $609M (43% margin); FCF hit $791M.</li>
+                                </ul>
+                            </div>
+                            """,
+                            unsafe_allow_html=True
+                        )
+                    with bc:
+                        st.markdown(
+                            f"""
+                            <div class='earn-col earn-bad'>
+                                <h4>THE BAD (THE RISK)</h4>
+                                <ul>
+                                    <li><strong>Valuation:</strong> Trading near 125x to 248x P/E, priced for near perfection.</li>
+                                    <li><strong>International Lag:</strong> U.S. commercial +137% vs international commercial +2%.</li>
+                                    <li><strong>SBC &amp; Dilution:</strong> Heavy stock based compensation remains a key bear argument.</li>
+                                    <li><strong>Upcoming Print:</strong> {countdown_txt}. Street EPS projection is $0.26 to $0.29.</li>
+                                </ul>
+                            </div>
+                            """,
+                            unsafe_allow_html=True
+                        )
+                    st.markdown(
+                        """
+                        <div class='earn-meta'>
+                            <span class='earn-pill'>Q4 2025 Revenue: $1.41B</span>
+                            <span class='earn-pill'>U.S. Commercial: +137% Y/Y</span>
+                            <span class='earn-pill'>2026 Guide: $7.2B</span>
+                            <span class='earn-pill'>Projected EPS: $0.26-$0.29</span>
                         </div>
-                        <div style='color:#e2e8f0;font-size:.9rem;line-height:1.8'>""", unsafe_allow_html=True)
-                    suggestions = []
-                    if cc:
-                        b = cc[0]
-                        suggestions.append(f"<strong>Covered Call:</strong> Sell {nc}x ${b['strike']:.0f}C exp {sel_exp} @ ${b['mid']:.2f} (collect ${b['prem_100']*nc:,.0f})")
-                    if csp:
-                        b = csp[0]
-                        suggestions.append(f"<strong>Cash Secured Put:</strong> Sell 1x ${b['strike']:.0f}P exp {sel_exp} @ ${b['mid']:.2f} (collect ${b['prem_100']:,.0f})")
-                    if ps:
-                        b = ps[0]
-                        suggestions.append(f"<strong>Bull Put Spread:</strong> ${b['short']:.0f}/${b['long']:.0f}P exp {sel_exp} credit ${b['credit_100']:,.0f} POP {b['pop']:.0f}%")
-                    for sug in suggestions:
-                        st.markdown(f"<div style='margin:4px 0'>• {sug}</div>", unsafe_allow_html=True)
-                    st.markdown("</div></div>", unsafe_allow_html=True)
-                    _explain("Why these trades on a Blue Diamond?",
-                        f"The Blue Diamond means {latest_d['score']} out of 9 confluence factors aligned bullish. "
-                        "Historically, similar setups have a strong track record. "
-                        "Covered Calls collect premium while riding the trend. "
-                        "Cash Secured Puts let you buy the dip if it comes. "
-                        "Bull Put Spreads give you bullish exposure with capped risk. "
-                        "Pick the strategy that matches your capital and conviction.", "bull")
-                else:
-                    st.markdown(f"""<div class='diamond-pink'>
-                        <div style='font-size:1rem;font-weight:700;margin-bottom:8px'>💎 PINK DIAMOND: DEFENSIVE POSTURE</div>
-                        <div style='color:#94a3b8;font-size:.85rem;margin-bottom:10px'>
-                            A Pink Diamond fired {(df.index[-1] - latest_d['date']).days} day(s) ago at ${latest_d['price']:.2f}.
-                            Confluence dropped to {latest_d['score']}/9. Momentum is exhausting.
-                        </div>
-                        <div style='color:#e2e8f0;font-size:.9rem;line-height:1.8'>""", unsafe_allow_html=True)
-                    if cs:
-                        b = cs[0]
-                        st.markdown(f"<div style='margin:4px 0'>• <strong>Bear Call Spread:</strong> ${b['short']:.0f}/${b['long']:.0f}C credit ${b['credit_100']:,.0f} POP {b['pop']:.0f}%</div>", unsafe_allow_html=True)
-                    if cc:
-                        b = cc[0]
-                        st.markdown(f"<div style='margin:4px 0'>• <strong>Aggressive Covered Call:</strong> Sell ATM or near-ATM ${b['strike']:.0f}C to maximize premium capture</div>", unsafe_allow_html=True)
-                    st.markdown(f"<div style='margin:4px 0'>• <strong>Tighten Stops:</strong> If below Gold Zone ${gold_zone_price:.2f}, consider reducing exposure</div>", unsafe_allow_html=True)
-                    st.markdown("</div></div>", unsafe_allow_html=True)
-                    _explain("Why go defensive on a Pink Diamond?",
-                        "The Pink Diamond means bullish momentum has exhausted or confluence collapsed. "
-                        "This does not mean crash. It means the easy money in the current leg is done. "
-                        "Bear Call Spreads profit from a pullback. Aggressive CCs lock in premium at the top. "
-                        "Wait for the next Blue Diamond before entering again aggressively.", "bear")
+                        """,
+                        unsafe_allow_html=True
+                    )
 
-            # Greeks, EV & Vol Skew
-            st.divider()
-            st.markdown("#### Greeks, Expected Value & Volatility Skew")
-            gk1, gk2, gk3 = st.columns(3)
-            with gk1:
-                if cc:
-                    b0 = cc[0]; iv_d = b0["iv"] / 100 if b0["iv"] > 0 else 0.5; T_y = dte / 365
-                    gr = bs_greeks(price, b0["strike"], T_y, rfr, iv_d, "call")
-                    fv = bs_price(price, b0["strike"], T_y, rfr, iv_d, "call")
-                    edge = b0["mid"] - fv
-                    edge_c = "#10b981" if edge > 0 else "#ef4444"
-                    st.markdown(f"<div class='tc'><div style='font-size:.7rem;color:#64748b;text-transform:uppercase'>TOP CC GREEKS (r={rfr * 100:.2f}%)</div><div style='margin-top:8px;color:#94a3b8;font-size:.85rem'>Delta: <strong style='color:#e2e8f0'>{gr['delta']:.3f}</strong><br>Theta: <strong style='color:#10b981'>${gr['theta']:.3f}/day</strong><br>Vega: <strong style='color:#e2e8f0'>${gr['vega']:.3f}/1%IV</strong><br>Fair: <strong style='color:#e2e8f0'>${fv:.2f}</strong> | Edge: <strong style='color:{edge_c}'>${edge:+.2f}</strong></div></div>", unsafe_allow_html=True)
-                else:
-                    st.markdown("<div class='tc'><span style='color:#64748b'>No CC data for Greeks</span></div>", unsafe_allow_html=True)
-            with gk2:
-                ev_lines = []
-                if cc:
-                    b0 = cc[0]; pop_cc = min(85, max(50, 100 - b0["otm_pct"] * 5))
-                    ev_cc = calc_ev(b0["prem_100"], b0["prem_100"] * 3, pop_cc)
-                    ec = "#10b981" if ev_cc > 0 else "#ef4444"
-                    ev_lines.append(f"CC ${b0['strike']:.0f}: <strong style='color:{ec}'>${ev_cc:+.0f}</strong> (POP ~{pop_cc:.0f}%)")
-                if ps:
-                    b0 = ps[0]; ev_ps = calc_ev(b0["credit_100"], b0["max_loss"], b0["pop"])
-                    ec = "#10b981" if ev_ps > 0 else "#ef4444"
-                    ev_lines.append(f"Put Spread: <strong style='color:{ec}'>${ev_ps:+.0f}</strong> (POP {b0['pop']:.0f}%)")
-                joined = "<br>".join(ev_lines) if ev_lines else "N/A"
-                st.markdown(f"<div class='tc'><div style='font-size:.7rem;color:#64748b;text-transform:uppercase'>EXPECTED VALUE</div><div style='margin-top:8px;color:#94a3b8;font-size:.85rem'>{joined}</div><div style='color:#64748b;font-size:.75rem;margin-top:6px'>Positive means edge. Negative means walk away.</div></div>", unsafe_allow_html=True)
-            with gk3:
-                skew, p_iv, c_iv = calc_vol_skew(price, calls, puts)
-                if skew is not None:
-                    sc = "#ef4444" if skew > 10 else ("#f59e0b" if skew > 5 else "#10b981")
-                    sm = "Institutions hedging heavily" if skew > 10 else ("Mild put skew" if skew > 5 else "Balanced")
-                    st.markdown(f"<div class='tc'><div style='font-size:.7rem;color:#64748b;text-transform:uppercase'>VOL SKEW</div><div class='mono' style='font-size:1.3rem;color:{sc};margin-top:8px'>{skew:+.1f}%</div><div style='color:#94a3b8;font-size:.85rem;margin-top:4px'>Put IV: {p_iv:.1f}% | Call IV: {c_iv:.1f}%</div><div style='color:#64748b;font-size:.75rem;margin-top:6px'>{sm}</div></div>", unsafe_allow_html=True)
-                else:
-                    st.markdown("<div class='tc'><div style='font-size:.7rem;color:#64748b'>VOL SKEW</div><div style='color:#94a3b8;margin-top:8px'>Insufficient IV data</div></div>", unsafe_allow_html=True)
+            sa_left, sa_right = st.columns(2)
+            with sa_left:
+                cls = "sb" if struct == "BULLISH" else ("sr" if struct == "BEARISH" else "sn")
+                st.markdown(f"<div class='{cls}'><strong>Market Structure: {struct}</strong></div>", unsafe_allow_html=True)
+                struct_explain = {
+                    "BULLISH": "The stock is making higher highs and higher lows. Think of a store where sales grow every single quarter. The trend is your friend. Sell covered calls at the highs to collect rent on your shares.",
+                    "BEARISH": "The stock is making lower highs and lower lows. Think of a store where foot traffic drops every month. Be careful. Widen your safety buffers or wait for the bottom before selling options.",
+                    "RANGING": "The stock is bouncing between a ceiling and a floor. Think of a business in a steady market. This is actually great for selling options on both sides and collecting cash."}
+                _explain("Why this matters for your trade", struct_explain[struct], chart_mood)
 
-            _explain("\U0001f9e0 What do these numbers mean for me?",
-                "<strong>Expected Value (EV)</strong> is your long term profit margin. Think of it like calculating net profit per product after returns. Positive EV means you have a real edge. Negative means avoid the trade. "
-                "<strong>Volatility Skew</strong> tells you if big institutions are buying crash insurance. When put prices are much higher than call prices, fear is elevated. You get fatter premiums but the risk is also higher. "
-                "<strong>Edge</strong> is the difference between the market price and the mathematically fair price. Positive Edge means the market is overpaying you. That is exactly what you want.", "neutral")
-        else:
+                # Hurst Exponent — market regime filter
+                hurst_val = TA.hurst(df["Close"])
+                if hurst_val > 0.55:
+                    h_label, h_color = "TRENDING", "#10b981"
+                elif hurst_val < 0.45:
+                    h_label, h_color = "MEAN REVERTING", "#8b5cf6"
+                else:
+                    h_label, h_color = "RANDOM WALK", "#f59e0b"
+                st.markdown(f"<div class='tc' style='text-align:center;margin-bottom:12px'>"
+                    f"<div style='font-size:.7rem;color:#64748b;text-transform:uppercase'>Hurst Exponent (R/S)</div>"
+                    f"<div class='mono' style='font-size:1.3rem;color:{h_color}'>{hurst_val:.3f} = {h_label}</div></div>", unsafe_allow_html=True)
+                if 0.45 <= hurst_val <= 0.55:
+                    _explain("\u26a0\ufe0f Random Walk Warning",
+                        f"Hurst is {hurst_val:.3f}. That means the price is moving randomly right now. Like flipping a coin. "
+                        "Trend tools like Supertrend, ADX, and MACD are not reliable when this happens. "
+                        "Your best move is to wait for a clear direction or use strategies that profit from sideways movement.", "bear")
+                elif hurst_val > 0.55:
+                    _explain("Hurst says: Trending Market",
+                        f"Hurst is {hurst_val:.3f}. The stock has strong trending behavior. Whatever direction it is going, it is likely to keep going. "
+                        "Think of a business with sales growing every quarter. You can trust the trend. "
+                        "Trend tools like Supertrend and MACD are working correctly right now.", "bull")
+                else:
+                    _explain("Hurst says: Prices Snap Back",
+                        f"Hurst is {hurst_val:.3f}. Prices are snapping back to the average faster than normal. "
+                        "Big moves tend to reverse quickly. This is perfect for selling options at extremes. "
+                        "You collect the premium and the stock comes back to you. Time decay works in your favor.", "bull")
+
+                st.markdown(f"""<div class='qe'>
+                    <div style='font-size:.75rem;color:#8b5cf6;text-transform:uppercase;letter-spacing:.1em'>QUANT EDGE SCORE</div>
+                    <div style='font-size:3rem;font-weight:800;color:{qs_color};font-family:JetBrains Mono,monospace'>{qs:.0f}</div>
+                    <div style='font-size:.85rem;color:#94a3b8'>Your overall score from 5 independent checks</div></div>""", unsafe_allow_html=True)
+                for k, v in qb.items():
+                    clr = "#10b981" if v > 70 else ("#f59e0b" if v > 50 else "#ef4444")
+                    st.markdown(f"<div style='display:flex;align-items:center;margin:3px 0'><span style='width:85px;color:#94a3b8;font-size:.8rem;text-transform:capitalize'>{k}</span><div style='flex:1;background:#1e293b;border-radius:4px;height:7px;margin:0 8px'><div style='width:{v}%;background:{clr};border-radius:4px;height:7px'></div></div><span class='mono' style='color:#e2e8f0;font-size:.8rem'>{v:.0f}</span></div>", unsafe_allow_html=True)
+
+                # ── CONFLUENCE POINTS (0-9 visual meter) ──
+                st.markdown(f"""<div class='confluence-meter' style='margin-top:16px'>
+                    <div style='font-size:.75rem;color:{cp_color};text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px'>💎 CONFLUENCE POINTS</div>
+                    <div style='font-size:2.2rem;font-weight:800;color:{cp_color};font-family:JetBrains Mono,monospace'>{cp_score}/{cp_max} {cp_label}</div>
+                    <div style='font-size:.8rem;color:#94a3b8;margin-top:2px'>{"🔷 Blue Diamond territory: strong buy signal active" if cp_score >= 7 else ("Approaching diamond zone: watch closely" if cp_score >= 5 else "Not enough confluence for a diamond signal")}</div>
+                </div>""", unsafe_allow_html=True)
+                for comp_name, comp_data in cp_breakdown.items():
+                    pts = comp_data["pts"]
+                    mx = comp_data["max"]
+                    detail = comp_data["detail"]
+                    bar_pct = (pts / mx * 100) if mx > 0 else 0
+                    clr = "#10b981" if pts == mx else ("#f59e0b" if pts > 0 else "#334155")
+                    st.markdown(f"<div style='display:flex;align-items:center;margin:3px 0'>"
+                        f"<span style='width:95px;color:#94a3b8;font-size:.78rem'>{comp_name}</span>"
+                        f"<div style='flex:1;background:#1e293b;border-radius:4px;height:7px;margin:0 8px'>"
+                        f"<div style='width:{bar_pct}%;background:{clr};border-radius:4px;height:7px'></div></div>"
+                        f"<span class='mono' style='color:#e2e8f0;font-size:.78rem;width:30px;text-align:right'>{pts}/{mx}</span>"
+                        f"<span style='color:#64748b;font-size:.72rem;margin-left:8px;width:120px'>{detail}</span></div>",
+                        unsafe_allow_html=True)
+
+            with sa_right:
+                st.markdown("**Key Price Levels**")
+                if len(df) >= 50:
+                    rec = df.iloc[-60:]
+                    fl = TA.fib_retracement(rec["High"].max(), rec["Low"].min())
+                    _fib_df = _df_price_levels(fl, price)
+                    st.dataframe(
+                        _style_price_levels_table(_fib_df, mode="fib", spot=price),
+                        column_config=_PRICE_LEVEL_COLUMN_CONFIG,
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                _explain("What are Fibonacci levels?",
+                    "After a big move, stocks tend to pull back to specific levels before continuing. The key levels are 38.2%, 50%, and 61.8%. "
+                    "The 61.8% level is called the golden ratio. It is the most watched level by professional traders. "
+                    "Why you care: set your put strikes near Fibonacci support. You collect cash AND you buy at a natural price floor.", "neutral")
+                if st.checkbox("Gann Square of 9", key="exp_1"):
+                    gl = TA.gann_sq9(price)
+                    _gann_df = _df_price_levels(gl, price)
+                    st.dataframe(
+                        _style_price_levels_table(_gann_df, mode="gann", spot=price),
+                        column_config=_PRICE_LEVEL_COLUMN_CONFIG,
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                if st.checkbox("Gann Angles", key="exp_2"):
+                    ang, sp = TA.gann_angles(df)
+                    st.markdown(f"**Swing Low:** ${sp:.2f}")
+                    for n_g, p_v in ang.items():
+                        st.markdown(f"* **{n_g}** maps to ${p_v:.2f} ({(p_v / price - 1) * 100:+.1f}%)")
+                if st.checkbox("Gann Time Cycles", key="exp_3"):
+                    for cyc in TA.gann_time_cycles(df):
+                        st.markdown(
+                            f"* **{cyc['cycle']} bar cycle** lands {cyc['date'].strftime('%Y-%m-%d')} ({cyc['status']})"
+                        )
+
+            # ══════════════════════════════════════════════════════════════════
+            #  SECTION 3 \u2014 QUANT DASHBOARD (two-column: metric + explanation)
+            # ══════════════════════════════════════════════════════════════════
+            st.markdown('<div id="quant-dashboard" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
+            _section("Quant Dashboard", "Every dial translated into English. Meaning first. Action second.",
+                     tip_plain="Treat this like an aircraft panel. Strong green bars confirm edge. Thin readings mean throttle back. Confluence and Gold Zone still own the headline.")
+            rv2 = TA.rsi2(df["Close"]).iloc[-1] if len(df) > 5 else 50
+            adx_v, dip, din = TA.adx(df)
+            cci_v = TA.cci(df).iloc[-1]
+            st_l, st_d = TA.supertrend(df)
+            _, kj, sa_ich, sb_ich, _ = TA.ichimoku(df)
+            an = adx_v.iloc[-1] if not pd.isna(adx_v.iloc[-1]) else 0
+
+            # RSI
+            il, ir = st.columns([1, 2])
+            with il:
+                st.markdown(f"<div class='tc' style='text-align:center'><div style='font-size:.7rem;color:#64748b;text-transform:uppercase'>RSI (14)</div><div class='mono' style='font-size:1.5rem;color:{'#ef4444' if rsi_v > 70 else ('#10b981' if rsi_v < 30 else '#e2e8f0')}'>{rsi_v:.1f}</div><div style='font-size:.7rem;color:#64748b;margin-top:6px'>RSI 2 bar: {rv2:.1f}</div></div>", unsafe_allow_html=True)
+            with ir:
+                if rsi_v > 70:
+                    _explain("RSI: Stock is Overheated", f"RSI is {rsi_v:.0f}. The stock ran up too fast. Think of a product flying off shelves after a viral review. Buyers are overpaying right now. This is the ideal time to sell Covered Calls and collect cash at peak excitement.", "bear")
+                elif rsi_v < 30:
+                    _explain("RSI: Stock is On Sale", f"RSI is {rsi_v:.0f}. Sellers have panicked. Think of a clearance sale that went too deep. This is your signal to sell Cash Secured Puts. You get paid cash today and you might buy shares at a bargain price.", "bull")
+                else:
+                    _explain("RSI: Stock is Resting", f"RSI is {rsi_v:.0f}. The stock is calm. Buyers are not panicking. Sellers are not panicking. This is the perfect zone to collect cash from selling options.", "neutral")
+
+            # MACD
+            il, ir = st.columns([1, 2])
+            with il:
+                st.markdown(f"<div class='tc' style='text-align:center'><div style='font-size:.7rem;color:#64748b;text-transform:uppercase'>MACD</div><div class='mono' style='font-size:1.2rem;color:{'#10b981' if macd_bull else '#ef4444'}'>{'BULLISH' if macd_bull else 'BEARISH'}</div><div style='font-size:.7rem;color:#64748b;margin-top:6px'>Hist: {h_v.iloc[-1]:.3f}</div></div>", unsafe_allow_html=True)
+            with ir:
+                if macd_bull:
+                    _explain("MACD: Buyers Are Winning", "Recent momentum is stronger than the longer term average. Think of a store where this month's sales beat the quarterly average. Buyers are in charge. You can sell Covered Calls at higher strikes with more confidence.", "bull")
+                else:
+                    _explain("MACD: Sellers Are Winning", "Recent momentum dropped below the longer term average. Think of a store where this month's sales fell below the quarterly trend. Be more careful when picking your strike prices.", "bear")
+
+            # ADX
+            il, ir = st.columns([1, 2])
+            with il:
+                st.markdown(f"<div class='tc' style='text-align:center'><div style='font-size:.7rem;color:#64748b;text-transform:uppercase'>ADX</div><div class='mono' style='font-size:1.5rem;color:{'#10b981' if an > 25 else '#f59e0b'}'>{an:.1f}</div><div style='font-size:.7rem;color:#64748b;margin-top:6px'>Plus DI {dip.iloc[-1]:.1f} · Minus DI {din.iloc[-1]:.1f}</div></div>", unsafe_allow_html=True)
+            with ir:
+                di_w = "Buyers via plus DI" if dip.iloc[-1] > din.iloc[-1] else "Sellers via minus DI"
+                if an > 25:
+                    _explain("ADX: Strong Trend Detected", f"ADX is {an:.0f}. That is above 25 which means a strong trend is happening. The winner right now is: {di_w}. Think of a business with a clear growth direction. Sell your options in the direction of the trend for the safest play.", "bull" if dip.iloc[-1] > din.iloc[-1] else "bear")
+                else:
+                    _explain("ADX: No Clear Trend", f"ADX is {an:.0f}. That is below 25 which means the market has no clear direction right now. Think of a business in a holding pattern. This is a good time for strategies that profit from sideways movement.", "neutral")
+
+            # CCI + Supertrend row
+            il, ir = st.columns([1, 2])
+            stb = st_d.iloc[-1] == 1
+            with il:
+                st.markdown(f"<div class='tc' style='text-align:center'><div style='font-size:.7rem;color:#64748b;text-transform:uppercase'>CCI (20)</div><div class='mono' style='font-size:1.5rem;color:{'#ef4444' if not pd.isna(cci_v) and cci_v > 100 else ('#10b981' if not pd.isna(cci_v) and cci_v < -100 else '#e2e8f0')}'>{cci_v:.0f}</div></div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='tc' style='text-align:center;margin-top:8px'><div style='font-size:.7rem;color:#64748b;text-transform:uppercase'>Supertrend</div><div class='mono' style='font-size:1.2rem;color:{'#10b981' if stb else '#ef4444'}'>{'BULLISH' if stb else 'BEARISH'}</div><div style='font-size:.7rem;color:#64748b;margin-top:6px'>${st_l.iloc[-1]:.2f}</div></div>", unsafe_allow_html=True)
+            with ir:
+                cci_txt = f"CCI is {cci_v:.0f}. " + (
+                    "That is above positive 100. The stock is stretched versus its average. Great moment to lean on call sales. "
+                    if not pd.isna(cci_v) and cci_v > 100
+                    else (
+                        "That is below negative 100. The stock washed out under its average. Sellers overdid it. Look at put sales for income. "
+                        if not pd.isna(cci_v) and cci_v < -100
+                        else "That is in the neutral pocket. No extreme edge to harvest yet. "
+                    )
+                )
+                st_price = st_l.iloc[-1]
+                st_txt = f"The Supertrend is your price floor. It is BULLISH at ${st_price:.2f}. As long as the stock stays above this green line, your shares are safe." if stb else f"The Supertrend is BEARISH at ${st_price:.2f}. It is acting as a falling ceiling above the price. The trend is down. Be defensive and protect your shares."
+                _explain("CCI and Supertrend", cci_txt + st_txt, "bull" if stb else "bear")
+
+            # Ichimoku + OBV row
+            above_cloud = not pd.isna(sa_ich.iloc[-1]) and not pd.isna(sb_ich.iloc[-1]) and price > max(sa_ich.iloc[-1], sb_ich.iloc[-1])
+            ou = obv_s.iloc[-1] > obv_s.iloc[-20] if len(obv_s) >= 20 else True
+            il, ir = st.columns([1, 2])
+            with il:
+                st.markdown(f"<div class='tc' style='text-align:center'><div style='font-size:.7rem;color:#64748b;text-transform:uppercase'>Ichimoku</div><div class='mono' style='font-size:1.2rem;color:{'#10b981' if above_cloud else '#ef4444'}'>{'ABOVE CLOUD' if above_cloud else 'IN/BELOW'}</div><div style='font-size:.7rem;color:#64748b;margin-top:6px'>Kijun: ${kj.iloc[-1]:.2f}</div></div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='tc' style='text-align:center;margin-top:8px'><div style='font-size:.7rem;color:#64748b;text-transform:uppercase'>OBV</div><div class='mono' style='font-size:1.2rem;color:{'#10b981' if ou else '#ef4444'}'>{'RISING' if ou else 'FALLING'}</div><div style='font-size:.7rem;color:#64748b;margin-top:6px'>{'Accumulation' if ou else 'Distribution'}</div></div>", unsafe_allow_html=True)
+            with ir:
+                ich_txt = "The price is above the Ichimoku Cloud. The cloud acts as a thick safety net below the stock. When the price floats above it, the trend is strongly in your favor. Your shares are protected. " if above_cloud else "The price is inside or below the cloud. The trend is unclear right now. Think of it like driving through fog. Wait for visibility before you sell options aggressively. "
+                obv_txt = "OBV is rising. Big institutional players are quietly buying up shares. Think of your biggest wholesale customers stocking up before a price increase. That is a bullish sign. " if ou else "OBV is falling. Big money is selling into rallies. Think of your best customers reducing their orders. The price may follow them down. Be careful. "
+                _explain("Ichimoku Cloud and Volume Flow", ich_txt + obv_txt, "bull" if above_cloud and ou else ("bear" if not above_cloud and not ou else "neutral"))
+
+            # Divergence Scanner
+            st.markdown("#### Divergence Scanner")
+            rsi_s = TA.rsi(df["Close"])
+            divs_rsi = TA.detect_divergences(df["Close"], rsi_s)
+            obv_divs = TA.detect_divergences(df["Close"], obv_s)
+            all_divs = [(d, "RSI") for d in divs_rsi] + [(d, "OBV") for d in obv_divs]
+            if all_divs:
+                for d, src in all_divs[-5:]:
+                    st.markdown(f"<div class='ac'>{'🟢' if d['type'] == 'bullish' else '🔴'} <strong>{d['type'].title()} {src} divergence</strong> near ${d['price']:.2f} on {d['idx'].strftime('%Y-%m-%d')}</div>", unsafe_allow_html=True)
+                _explain("What is a divergence?", "The price makes a new high or low but the indicator does not agree. Think of a company reporting record revenue but declining profits. The numbers do not match. That is an early warning that the trend might reverse soon.", "neutral")
+            else:
+                st.info("No divergences found. All indicators agree with the current trend.")
+
+            # Volume Profile
+            vp = TA.volume_profile(df)
+            if not vp.empty:
+                poc = vp.loc[vp["volume"].idxmax()]
+                if not mini_mode:
+                    vmax = vp["volume"].max()
+                    fig_vp = go.Figure(
+                        go.Bar(
+                            x=vp["volume"],
+                            y=vp["mid"],
+                            orientation="h",
+                            marker_color=[_PLOTLY_CASH_UP if v == vmax else _PLOTLY_BLUE for v in vp["volume"]],
+                            opacity=0.72,
+                            hovertemplate=(
+                                "<b>Volume profile</b><br>"
+                                "Price <b>$%{y:,.2f}</b><br>"
+                                "Volume <b>%{x:,.0f}</b><extra></extra>"
+                            ),
+                        )
+                    )
+                    fig_vp.add_hline(
+                        y=poc["mid"],
+                        line_dash="solid",
+                        line_color="rgba(245, 158, 11, 0.85)",
+                        line_width=1.5,
+                        annotation_text=f"POC ${poc['mid']:,.2f}",
+                        annotation_font=dict(size=11, color="#fbbf24"),
+                    )
+                    fig_vp.update_layout(
+                        template="plotly_dark",
+                        paper_bgcolor=_PLOTLY_PAPER_BG,
+                        plot_bgcolor=_PLOTLY_PLOT_BG,
+                        font=_PLOTLY_FONT_MAIN,
+                        height=300,
+                        margin=dict(l=60, r=20, t=28, b=40),
+                        hoverlabel=_chart_hoverlabel(),
+                        title=dict(
+                            text="Volume by price (horizontal)",
+                            x=0,
+                            xanchor="left",
+                            font=dict(size=13, color="#e2e8f0", family="Inter, system-ui, sans-serif"),
+                        ),
+                    )
+                    fig_vp.update_xaxes(
+                        showgrid=True,
+                        gridcolor=_PLOTLY_GRID,
+                        gridwidth=1,
+                        zeroline=False,
+                        title_text="Volume (shares)",
+                        tickformat=",.0f",
+                        **_PLOTLY_AXIS_TITLE,
+                    )
+                    fig_vp.update_yaxes(
+                        showgrid=True,
+                        gridcolor=_PLOTLY_GRID,
+                        gridwidth=1,
+                        zeroline=False,
+                        title_text="Price",
+                        tickprefix="$",
+                        tickformat=",.2f",
+                        **_PLOTLY_AXIS_TITLE,
+                    )
+                    st.plotly_chart(fig_vp, use_container_width=True, config=_PLOTLY_UI_CONFIG)
+                else:
+                    st.caption(f"Volume POC (mini mode): **${poc['mid']:.2f}**. Full profile chart stays parked while Turbo is on.")
+                _explain("\U0001f9e0 Volume Profile", f"The Point of Control (POC) is ${poc['mid']:.2f}. This is the most traded price. Think of it as the price point where your store sees the most customers. The stock is pulled toward this price like a magnet. Use it to pick your option strike prices.", "neutral")
+
+            # ══════════════════════════════════════════════════════════════════
+
+    with dash_tab_cashflow:
+            #  SECTION 4 \u2014 CASH-FLOW STRATEGIES
+            # ══════════════════════════════════════════════════════════════════
+            st.markdown('<div id="strategies" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
+            _section("Cash Flow Strategies", f"Concrete strikes for {ticker} at ${price:.2f}. Lift them straight into your ticket.",
+                     tip_plain="Start with the optimal line the desk highlights. Covered calls need stock on hand. Cash secured puts monetize patience. Spreads are for when you want a hard loss ceiling.")
+            st.markdown(
+                f"<div class='tc'><div style='text-align:center'><span style='color:#64748b;font-size:.8rem'>ANALYZING</span><br>"
+                f"<span style='font-size:1.4rem;font-weight:700;color:#e2e8f0'>{_html_mod.escape(ticker)} @ ${price:.2f}</span></div></div>",
+                unsafe_allow_html=True,
+            )
+
+            if opt_exps:
+                sel_exp = st.selectbox("Expiration", opt_exps[:10], index=min(2, len(opt_exps) - 1), key="sel_exp")
+                dte = max(1, (datetime.strptime(sel_exp, "%Y-%m-%d") - datetime.now()).days)
+                try:
+                    result_sel, _ = fetch_options(ticker, sel_exp)
+                except Exception as e:
+                    st.warning(f"Could not load the option chain for expiration {sel_exp}. ({type(e).__name__})")
+                    result_sel = (pd.DataFrame(), pd.DataFrame())
+                calls, puts = result_sel if isinstance(result_sel, (tuple, list)) and len(result_sel) == 2 else (pd.DataFrame(), pd.DataFrame())
+                calls = calls if isinstance(calls, pd.DataFrame) else pd.DataFrame()
+                puts = puts if isinstance(puts, pd.DataFrame) else pd.DataFrame()
+                if not calls.empty or not puts.empty:
+                    s1, s2 = st.columns(2)
+                    with s1:
+                        st.markdown("#### Covered Calls")
+                        cc = Opt.covered_calls(price, calls, dte, rfr)
+                        if cc:
+                            opt_cc = next((c for c in cc if c.get("optimal")), cc[0])
+                            b = opt_cc; nc_s = 1
+                            opt_html = '<div style="font-size:.7rem;font-weight:700;color:#06b6d4;margin-bottom:6px">\U0001f3af OPTIMAL PROP-DESK STRIKE</div>' if b.get("optimal") else ""
+                            in_zone = Opt.DELTA_LOW <= abs(b["delta"]) <= Opt.DELTA_HIGH
+                            delta_color = "#10b981" if in_zone else "#f59e0b"
+                            st.markdown(f"<div class='sb'>{opt_html}<strong>SELL {nc_s}x ${b['strike']:.0f}C @ ${b['mid']:.2f}</strong><br><span style='font-size:.85rem;color:#94a3b8'>Exp: {sel_exp} ({dte}DTE) | IV: {b['iv']:.1f}% | <strong style='color:{delta_color}'>\u0394 {b['delta']:.2f}</strong><br>Premium: <strong style='color:#10b981'>${b['prem_100'] * nc_s:,.0f}</strong> | OTM: {b['otm_pct']:.1f}% | Ann: {b['ann_yield']:.1f}% | OI: {b['oi']:,}</span></div>", unsafe_allow_html=True)
+                            if st.checkbox("All CC strikes", key="exp_5"):
+                                _cc_df = _options_scan_dataframe(cc, put_table=False)
+                                st.dataframe(
+                                    _style_propdesk_highlight(_cc_df),
+                                    column_config=_options_scan_column_config(put_table=False),
+                                    use_container_width=True,
+                                    hide_index=True,
+                                )
+                        else:
+                            st.info("No liquid covered call strikes found. We need at least 100 open interest and 10 volume.")
+                    with s2:
+                        st.markdown("#### Cash Secured Puts")
+                        csp = Opt.cash_secured_puts(price, puts, dte, rfr)
+                        if csp:
+                            opt_csp = next((c for c in csp if c.get("optimal")), csp[0])
+                            b = opt_csp
+                            opt_html_p = '<div style="font-size:.7rem;font-weight:700;color:#06b6d4;margin-bottom:6px">\U0001f3af OPTIMAL PROP-DESK STRIKE</div>' if b.get("optimal") else ""
+                            in_zone_p = Opt.DELTA_LOW <= abs(b["delta"]) <= Opt.DELTA_HIGH
+                            delta_color_p = "#10b981" if in_zone_p else "#f59e0b"
+                            st.markdown(f"<div class='sb'>{opt_html_p}<strong>SELL 1x ${b['strike']:.0f}P @ ${b['mid']:.2f}</strong><br><span style='font-size:.85rem;color:#94a3b8'>Exp: {sel_exp} ({dte}DTE) | IV: {b['iv']:.1f}% | <strong style='color:{delta_color_p}'>\u0394 {b['delta']:.2f}</strong><br>Premium: <strong style='color:#10b981'>${b['prem_100']:,.0f}</strong> | OTM: {b['otm_pct']:.1f}% | Eff buy: ${b['eff_buy']:.2f} | OI: {b['oi']:,}</span></div>", unsafe_allow_html=True)
+                            if st.checkbox("All CSP strikes", key="exp_6"):
+                                _csp_df = _options_scan_dataframe(csp, put_table=True)
+                                st.dataframe(
+                                    _style_propdesk_highlight(_csp_df),
+                                    column_config=_options_scan_column_config(put_table=True),
+                                    use_container_width=True,
+                                    hide_index=True,
+                                )
+                        else:
+                            st.info("No liquid put strikes found. We need at least 100 open interest and 10 volume.")
+
+                    _explain("\U0001f9e0 What are Delta and Theta?",
+                        "<strong>Delta is your win probability.</strong> A Delta of 0.16 means you have an 84 percent chance to keep all the cash and keep your shares. Lower Delta means safer. "
+                        "<strong>Theta is your daily paycheck.</strong> Every day that passes, the option loses value. That lost value goes straight into your pocket. Time is literally paying you. "
+                        "<strong>OI is how busy the market is.</strong> Higher OI means more traders are active. That means you get better prices when you sell. We filter out anything below 100 OI to protect you.", "neutral")
+
+                    st.divider()
+                    sp1, sp2 = st.columns(2)
+                    with sp1:
+                        st.markdown("#### Bull Put Spread")
+                        ps = Opt.credit_spreads(price, puts, "put_credit")
+                        if ps:
+                            b = ps[0]
+                            st.markdown(f"<div class='sb'><strong>${b['short']:.0f}P/${b['long']:.0f}P</strong> | Cr: ${b['credit_100']:.0f} | ML: ${b['max_loss']:.0f} | POP: {b['pop']:.0f}%</div>", unsafe_allow_html=True)
+                    with sp2:
+                        st.markdown("#### Bear Call Spread")
+                        cs = Opt.credit_spreads(price, calls, "call_credit")
+                        if cs:
+                            b = cs[0]
+                            st.markdown(f"<div class='sr'><strong>${b['short']:.0f}C/${b['long']:.0f}C</strong> | Cr: ${b['credit_100']:.0f} | ML: ${b['max_loss']:.0f} | POP: {b['pop']:.0f}%</div>", unsafe_allow_html=True)
+
+                    _explain("\U0001f9e0 What is a credit spread?",
+                        "A credit spread is like selling insurance with a cap on your worst case. You sell one option and collect cash. Then you buy a cheaper one further away to limit your risk. "
+                        "<strong>POP</strong> is your Probability of Profit. <strong>ML</strong> is your Max Loss, the absolute worst case. <strong>Cr</strong> is the cash you receive today. "
+                        "A 75% POP means you win roughly 3 out of every 4 times you make this trade.", "neutral")
+
+                    if latest_d and (df.index[-1] - latest_d["date"]).days <= 5:
+                        st.divider()
+                        if latest_d["type"] == "blue":
+                            st.markdown(f"""<div class='diamond-blue'>
+                                <div style='font-size:1rem;font-weight:700;margin-bottom:8px'>🔷 BLUE DIAMOND AUTO SUGGESTIONS</div>
+                                <div style='color:#94a3b8;font-size:.85rem;margin-bottom:10px'>
+                                    A Blue Diamond fired {(df.index[-1] - latest_d['date']).days} day(s) ago at ${latest_d['price']:.2f} with confluence {latest_d['score']}/9.
+                                    Historical probability of profit: <strong style='color:#10b981'>{d_wr:.0f}%</strong> ({d_n} signals backtested).
+                                </div>
+                                <div style='color:#e2e8f0;font-size:.9rem;line-height:1.8'>""", unsafe_allow_html=True)
+                            suggestions = []
+                            if cc:
+                                b = cc[0]
+                                suggestions.append(f"<strong>Covered Call:</strong> Sell {nc}x ${b['strike']:.0f}C exp {sel_exp} @ ${b['mid']:.2f} (collect ${b['prem_100']*nc:,.0f})")
+                            if csp:
+                                b = csp[0]
+                                suggestions.append(f"<strong>Cash Secured Put:</strong> Sell 1x ${b['strike']:.0f}P exp {sel_exp} @ ${b['mid']:.2f} (collect ${b['prem_100']:,.0f})")
+                            if ps:
+                                b = ps[0]
+                                suggestions.append(f"<strong>Bull Put Spread:</strong> ${b['short']:.0f}/${b['long']:.0f}P exp {sel_exp} credit ${b['credit_100']:,.0f} POP {b['pop']:.0f}%")
+                            for sug in suggestions:
+                                st.markdown(f"<div style='margin:4px 0'>• {sug}</div>", unsafe_allow_html=True)
+                            st.markdown("</div></div>", unsafe_allow_html=True)
+                            _explain("Why these trades on a Blue Diamond?",
+                                f"The Blue Diamond means {latest_d['score']} out of 9 confluence factors aligned bullish. "
+                                "Historically, similar setups have a strong track record. "
+                                "Covered Calls collect premium while riding the trend. "
+                                "Cash Secured Puts let you buy the dip if it comes. "
+                                "Bull Put Spreads give you bullish exposure with capped risk. "
+                                "Pick the strategy that matches your capital and conviction.", "bull")
+                        else:
+                            st.markdown(f"""<div class='diamond-pink'>
+                                <div style='font-size:1rem;font-weight:700;margin-bottom:8px'>💎 PINK DIAMOND: DEFENSIVE POSTURE</div>
+                                <div style='color:#94a3b8;font-size:.85rem;margin-bottom:10px'>
+                                    A Pink Diamond fired {(df.index[-1] - latest_d['date']).days} day(s) ago at ${latest_d['price']:.2f}.
+                                    Confluence dropped to {latest_d['score']}/9. Momentum is exhausting.
+                                </div>
+                                <div style='color:#e2e8f0;font-size:.9rem;line-height:1.8'>""", unsafe_allow_html=True)
+                            if cs:
+                                b = cs[0]
+                                st.markdown(f"<div style='margin:4px 0'>• <strong>Bear Call Spread:</strong> ${b['short']:.0f}/${b['long']:.0f}C credit ${b['credit_100']:,.0f} POP {b['pop']:.0f}%</div>", unsafe_allow_html=True)
+                            if cc:
+                                b = cc[0]
+                                st.markdown(f"<div style='margin:4px 0'>• <strong>Aggressive Covered Call:</strong> Sell ATM or near-ATM ${b['strike']:.0f}C to maximize premium capture</div>", unsafe_allow_html=True)
+                            st.markdown(f"<div style='margin:4px 0'>• <strong>Tighten Stops:</strong> If below Gold Zone ${gold_zone_price:.2f}, consider reducing exposure</div>", unsafe_allow_html=True)
+                            st.markdown("</div></div>", unsafe_allow_html=True)
+                            _explain("Why go defensive on a Pink Diamond?",
+                                "The Pink Diamond means bullish momentum has exhausted or confluence collapsed. "
+                                "This does not mean crash. It means the easy money in the current leg is done. "
+                                "Bear Call Spreads profit from a pullback. Aggressive CCs lock in premium at the top. "
+                                "Wait for the next Blue Diamond before entering again aggressively.", "bear")
+
+                    # Greeks, EV & Vol Skew
+                    st.divider()
+                    st.markdown("#### Greeks, Expected Value & Volatility Skew")
+                    gk1, gk2, gk3 = st.columns(3)
+                    with gk1:
+                        if cc:
+                            b0 = cc[0]; iv_d = b0["iv"] / 100 if b0["iv"] > 0 else 0.5; T_y = dte / 365
+                            gr = bs_greeks(price, b0["strike"], T_y, rfr, iv_d, "call")
+                            fv = bs_price(price, b0["strike"], T_y, rfr, iv_d, "call")
+                            edge = b0["mid"] - fv
+                            edge_c = "#10b981" if edge > 0 else "#ef4444"
+                            st.markdown(f"<div class='tc'><div style='font-size:.7rem;color:#64748b;text-transform:uppercase'>TOP CC GREEKS (r={rfr * 100:.2f}%)</div><div style='margin-top:8px;color:#94a3b8;font-size:.85rem'>Delta: <strong style='color:#e2e8f0'>{gr['delta']:.3f}</strong><br>Theta: <strong style='color:#10b981'>${gr['theta']:.3f}/day</strong><br>Vega: <strong style='color:#e2e8f0'>${gr['vega']:.3f}/1%IV</strong><br>Fair: <strong style='color:#e2e8f0'>${fv:.2f}</strong> | Edge: <strong style='color:{edge_c}'>${edge:+.2f}</strong></div></div>", unsafe_allow_html=True)
+                        else:
+                            st.markdown("<div class='tc'><span style='color:#64748b'>No CC data for Greeks</span></div>", unsafe_allow_html=True)
+                    with gk2:
+                        ev_lines = []
+                        if cc:
+                            b0 = cc[0]; pop_cc = min(85, max(50, 100 - b0["otm_pct"] * 5))
+                            ev_cc = calc_ev(b0["prem_100"], b0["prem_100"] * 3, pop_cc)
+                            ec = "#10b981" if ev_cc > 0 else "#ef4444"
+                            ev_lines.append(f"CC ${b0['strike']:.0f}: <strong style='color:{ec}'>${ev_cc:+.0f}</strong> (POP ~{pop_cc:.0f}%)")
+                        if ps:
+                            b0 = ps[0]; ev_ps = calc_ev(b0["credit_100"], b0["max_loss"], b0["pop"])
+                            ec = "#10b981" if ev_ps > 0 else "#ef4444"
+                            ev_lines.append(f"Put Spread: <strong style='color:{ec}'>${ev_ps:+.0f}</strong> (POP {b0['pop']:.0f}%)")
+                        joined = "<br>".join(ev_lines) if ev_lines else "N/A"
+                        st.markdown(f"<div class='tc'><div style='font-size:.7rem;color:#64748b;text-transform:uppercase'>EXPECTED VALUE</div><div style='margin-top:8px;color:#94a3b8;font-size:.85rem'>{joined}</div><div style='color:#64748b;font-size:.75rem;margin-top:6px'>Positive means edge. Negative means walk away.</div></div>", unsafe_allow_html=True)
+                    with gk3:
+                        skew, p_iv, c_iv = calc_vol_skew(price, calls, puts)
+                        if skew is not None:
+                            sc = "#ef4444" if skew > 10 else ("#f59e0b" if skew > 5 else "#10b981")
+                            sm = "Institutions hedging heavily" if skew > 10 else ("Mild put skew" if skew > 5 else "Balanced")
+                            st.markdown(f"<div class='tc'><div style='font-size:.7rem;color:#64748b;text-transform:uppercase'>VOL SKEW</div><div class='mono' style='font-size:1.3rem;color:{sc};margin-top:8px'>{skew:+.1f}%</div><div style='color:#94a3b8;font-size:.85rem;margin-top:4px'>Put IV: {p_iv:.1f}% | Call IV: {c_iv:.1f}%</div><div style='color:#64748b;font-size:.75rem;margin-top:6px'>{sm}</div></div>", unsafe_allow_html=True)
+                        else:
+                            st.markdown("<div class='tc'><div style='font-size:.7rem;color:#64748b'>VOL SKEW</div><div style='color:#94a3b8;margin-top:8px'>Insufficient IV data</div></div>", unsafe_allow_html=True)
+
+                    _explain("\U0001f9e0 What do these numbers mean for me?",
+                        "<strong>Expected Value (EV)</strong> is your long term profit margin. Think of it like calculating net profit per product after returns. Positive EV means you have a real edge. Negative means avoid the trade. "
+                        "<strong>Volatility Skew</strong> tells you if big institutions are buying crash insurance. When put prices are much higher than call prices, fear is elevated. You get fatter premiums but the risk is also higher. "
+                        "<strong>Edge</strong> is the difference between the market price and the mathematically fair price. Positive Edge means the market is overpaying you. That is exactly what you want.", "neutral")
+                else:
+                    st.warning(
+                        "This expiration returned an empty chain from the feed after walking nearby dates. "
+                        "Pick another expiry or retry when the options pit is live."
+                    )
+            else:
+                st.warning("Options data currently unavailable for this ticker.")
+
+            # ══════════════════════════════════════════════════════════════════
+
+    with dash_tab_intel:
+            #  SECTION 5 \u2014 PSYCHOLOGY & RISK MANAGEMENT
+            # ══════════════════════════════════════════════════════════════════
+            st.markdown('<div id="risk" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
+            _section("Psychology and Risk Management", "Sentiment, sizing, guardrails. The stuff that keeps pros solvent.",
+                     tip_plain="Fear and Greed shows how the crowd is priced. Kelly and ATR frame responsible size. When stories disagree, shrink the bet and wait for a cleaner tape.")
+            p1, p2 = st.columns(2)
+            with p1:
+                gc = "#10b981" if fg < 30 else ("#f59e0b" if fg < 60 else "#ef4444")
+                st.markdown(f"<div class='tc' style='text-align:center'><div style='font-size:.75rem;color:#64748b;text-transform:uppercase;letter-spacing:.1em'>FEAR & GREED</div><div style='font-size:3.5rem;font-weight:800;color:{gc};margin:12px 0;font-family:JetBrains Mono,monospace'>{fg:.0f}</div><div style='font-size:1.1rem;color:{gc}'>{fg_emoji} {fg_label}</div><div style='color:#94a3b8;margin-top:8px;font-size:.85rem'>{fg_advice}</div></div>", unsafe_allow_html=True)
+                _explain("Why sentiment matters",
+                    "Fear and Greed is like reading the room before you set your prices. "
+                    "<strong style='color:#10b981'>High fear (low score)</strong>: Customers are panicking. They will pay you extra for protection. Sell options aggressively and collect fat premiums. "
+                    "<strong style='color:#ef4444'>High greed (high score)</strong>: Everyone is euphoric. Premiums get thinner and the risk of losing your shares goes up. Be very selective.",
+                    "bull" if fg < 40 else ("bear" if fg > 60 else "neutral"))
+                st.markdown("#### Macro Environment")
+                for k, v in macro.items():
+                    dc = "#10b981" if v["chg"] >= 0 else "#ef4444"
+                    st.markdown(f"<div style='display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #1e293b'><span style='color:#94a3b8'>{k}</span><span class='mono' style='color:#e2e8f0'>{v['price']:.2f} <span style='color:{dc}'>{v['chg']:+.2f}%</span></span></div>", unsafe_allow_html=True)
+            with p2:
+                mrt = REF_NOTIONAL * RISK_PCT_EXAMPLE / 100
+                st.markdown(
+                    f"<div class='tc'><div style='font-size:.75rem;color:#64748b'>EXAMPLE MAX RISK/TRADE</div>"
+                    f"<div class='mono' style='font-size:1.3rem;color:#e2e8f0'>${mrt:,.0f}</div>"
+                    f"<div style='font-size:.65rem;color:#64748b;margin-top:6px'>{RISK_PCT_EXAMPLE:.0f}% of ${REF_NOTIONAL:,.0f} reference (illustrative)</div></div>",
+                    unsafe_allow_html=True,
+                )
+                atr_v = TA.atr(df).iloc[-1]
+                if pd.isna(atr_v) or atr_v <= 0:
+                    atr_v = price * .03
+                sh_atr = int(mrt / (atr_v * 2)) if atr_v > 0 else 0
+                st.markdown(f"<div class='tc'><div style='font-size:.75rem;color:#64748b'>ATR SIZING</div><div style='color:#94a3b8;font-size:.85rem;margin-top:8px'>ATR: ${atr_v:.2f} | Max shares: {sh_atr} | Contracts: {sh_atr // 100}</div></div>", unsafe_allow_html=True)
+                _explain("Position sizing in plain English",
+                    f"ATR is ${atr_v:.2f}. That is how much this stock moves on an average day. Think of it as the normal daily price swing. "
+                    f"Using an illustrative {RISK_PCT_EXAMPLE:.0f}% risk budget on a ${REF_NOTIONAL:,.0f} reference account (${mrt:,.0f} max loss per trade), "
+                    f"you could size up to about {sh_atr} shares or {max(0, sh_atr // 100)} option contracts. Scale to your own account and rules.", "neutral")
+
+                # Kelly Criterion — mathematically optimal allocation
+                k_full, k_half = 0.0, 0.0
+                k_source = ""
+                if bluf_cc:
+                    k_pop = min(85, max(50, 100 - bluf_cc["otm_pct"] * 5))
+                    k_win = bluf_cc["prem_100"]
+                    k_loss = k_win * 3
+                    k_full, k_half = kelly_criterion(k_pop, k_win, k_loss)
+                    k_source = f"CC ${bluf_cc['strike']:.0f}"
+                elif bluf_csp:
+                    k_pop = min(85, max(50, 100 - bluf_csp["otm_pct"] * 5))
+                    k_win = bluf_csp["prem_100"]
+                    k_loss = bluf_csp["strike"] * 100 - k_win
+                    k_full, k_half = kelly_criterion(k_pop, k_win, k_loss)
+                    k_source = f"CSP ${bluf_csp['strike']:.0f}"
+                if k_half > 0:
+                    k_cap = KELLY_DISPLAY_CAP_PCT
+                    k_show = min(k_half, k_cap)
+                    k_dollars = REF_NOTIONAL * k_show / 100
+                    capped_note = (
+                        f" Half Kelly math landed at {k_half:.1f}%; <strong>we cap the headline at {k_cap:.0f}%</strong> for portfolio heat. Never treat Kelly as a target allocation."
+                        if k_half > k_cap
+                        else ""
+                    )
+                    kc = "#10b981" if k_show <= RISK_PCT_EXAMPLE * 2 else "#f59e0b"
+                    st.markdown(
+                        f"<div class='tc'><div style='font-size:.75rem;color:#64748b'>KELLY HALF MODE · UI CAP</div>"
+                        f"<div class='mono' style='font-size:1.3rem;color:{kc}'>{k_show:.1f}% = ${k_dollars:,.0f}</div>"
+                        f"<div style='font-size:.7rem;color:#64748b;margin-top:4px'>Raw half Kelly {k_half:.1f}% · full Kelly {k_full:.1f}% · {k_source}. "
+                        f"Display max {k_cap:.0f}% for risk hygiene.{capped_note}</div></div>",
+                        unsafe_allow_html=True)
+                    _explain("Kelly Criterion in plain English",
+                        f"The Kelly formula can suggest large fractions; here we show <strong>Half Kelly</strong> then <strong>cap the headline at {k_cap:.0f}%</strong> "
+                        f"so the desk view stays conservative (raw half-Kelly was {k_half:.1f}%). "
+                        f"On a <strong>${REF_NOTIONAL:,.0f}</strong> illustrative reference, the capped line is <strong>${k_dollars:,.0f}</strong>. "
+                        "Scale to your own capital; Kelly is a theoretical optimum, not an order size.", "neutral")
+                else:
+                    st.markdown("<div class='tc'><div style='font-size:.75rem;color:#64748b'>KELLY CRITERION</div>"
+                        "<div style='color:#94a3b8;font-size:.85rem;margin-top:6px'>Not enough data yet. No liquid option strikes available to calculate your optimal bet size.</div></div>",
+                        unsafe_allow_html=True)
+
+                st.markdown("#### Active Alerts")
+                if al:
+                    for a in al:
+                        ic = "\U0001f7e2" if a["t"] == "bullish" else ("\U0001f534" if a["t"] == "bearish" else "\U0001f7e1")
+                        st.markdown(f"<div class='ac'>{ic} [{a['p']}] {a['m']}</div>", unsafe_allow_html=True)
+                else:
+                    st.info("No alerts.")
+
+            # ══════════════════════════════════════════════════════════════════
+            #  SECTION 6 \u2014 PREMIUM SIMULATOR
+            # ══════════════════════════════════════════════════════════════════
+            st.markdown('<div id="simulator" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
+            _section("Premium Simulator", "Replay a year of covered calls with your assumptions before you commit capital.",
+                     tip_plain="Dial OTM, hold time, and IV multiplier. Hunt for settings that still look sane in both calm and chaotic tapes.")
             st.warning(
-                "This expiration returned an empty chain from the feed after walking nearby dates. "
-                "Pick another expiry or retry when the options pit is live."
+                "Premiums here are modeled from historical volatility. They are illustrative, not a promise. Treat the run as a dress rehearsal; live fills will differ."
             )
-    else:
-        st.warning("Options data currently unavailable for this ticker.")
-
-    # ══════════════════════════════════════════════════════════════════
-    #  SECTION 5 \u2014 PSYCHOLOGY & RISK MANAGEMENT
-    # ══════════════════════════════════════════════════════════════════
-    st.markdown('<div id="risk" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
-    _section("Psychology and Risk Management", "Sentiment, sizing, guardrails. The stuff that keeps pros solvent.",
-             tip_plain="Fear and Greed shows how the crowd is priced. Kelly and ATR frame responsible size. When stories disagree, shrink the bet and wait for a cleaner tape.")
-    p1, p2 = st.columns(2)
-    with p1:
-        gc = "#10b981" if fg < 30 else ("#f59e0b" if fg < 60 else "#ef4444")
-        st.markdown(f"<div class='tc' style='text-align:center'><div style='font-size:.75rem;color:#64748b;text-transform:uppercase;letter-spacing:.1em'>FEAR & GREED</div><div style='font-size:3.5rem;font-weight:800;color:{gc};margin:12px 0;font-family:JetBrains Mono,monospace'>{fg:.0f}</div><div style='font-size:1.1rem;color:{gc}'>{fg_emoji} {fg_label}</div><div style='color:#94a3b8;margin-top:8px;font-size:.85rem'>{fg_advice}</div></div>", unsafe_allow_html=True)
-        _explain("Why sentiment matters",
-            "Fear and Greed is like reading the room before you set your prices. "
-            "<strong style='color:#10b981'>High fear (low score)</strong>: Customers are panicking. They will pay you extra for protection. Sell options aggressively and collect fat premiums. "
-            "<strong style='color:#ef4444'>High greed (high score)</strong>: Everyone is euphoric. Premiums get thinner and the risk of losing your shares goes up. Be very selective.",
-            "bull" if fg < 40 else ("bear" if fg > 60 else "neutral"))
-        st.markdown("#### Macro Environment")
-        for k, v in macro.items():
-            dc = "#10b981" if v["chg"] >= 0 else "#ef4444"
-            st.markdown(f"<div style='display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #1e293b'><span style='color:#94a3b8'>{k}</span><span class='mono' style='color:#e2e8f0'>{v['price']:.2f} <span style='color:{dc}'>{v['chg']:+.2f}%</span></span></div>", unsafe_allow_html=True)
-    with p2:
-        mrt = REF_NOTIONAL * RISK_PCT_EXAMPLE / 100
-        st.markdown(
-            f"<div class='tc'><div style='font-size:.75rem;color:#64748b'>EXAMPLE MAX RISK/TRADE</div>"
-            f"<div class='mono' style='font-size:1.3rem;color:#e2e8f0'>${mrt:,.0f}</div>"
-            f"<div style='font-size:.65rem;color:#64748b;margin-top:6px'>{RISK_PCT_EXAMPLE:.0f}% of ${REF_NOTIONAL:,.0f} reference (illustrative)</div></div>",
-            unsafe_allow_html=True,
-        )
-        atr_v = TA.atr(df).iloc[-1]
-        if pd.isna(atr_v) or atr_v <= 0:
-            atr_v = price * .03
-        sh_atr = int(mrt / (atr_v * 2)) if atr_v > 0 else 0
-        st.markdown(f"<div class='tc'><div style='font-size:.75rem;color:#64748b'>ATR SIZING</div><div style='color:#94a3b8;font-size:.85rem;margin-top:8px'>ATR: ${atr_v:.2f} | Max shares: {sh_atr} | Contracts: {sh_atr // 100}</div></div>", unsafe_allow_html=True)
-        _explain("Position sizing in plain English",
-            f"ATR is ${atr_v:.2f}. That is how much this stock moves on an average day. Think of it as the normal daily price swing. "
-            f"Using an illustrative {RISK_PCT_EXAMPLE:.0f}% risk budget on a ${REF_NOTIONAL:,.0f} reference account (${mrt:,.0f} max loss per trade), "
-            f"you could size up to about {sh_atr} shares or {max(0, sh_atr // 100)} option contracts. Scale to your own account and rules.", "neutral")
-
-        # Kelly Criterion — mathematically optimal allocation
-        k_full, k_half = 0.0, 0.0
-        k_source = ""
-        if bluf_cc:
-            k_pop = min(85, max(50, 100 - bluf_cc["otm_pct"] * 5))
-            k_win = bluf_cc["prem_100"]
-            k_loss = k_win * 3
-            k_full, k_half = kelly_criterion(k_pop, k_win, k_loss)
-            k_source = f"CC ${bluf_cc['strike']:.0f}"
-        elif bluf_csp:
-            k_pop = min(85, max(50, 100 - bluf_csp["otm_pct"] * 5))
-            k_win = bluf_csp["prem_100"]
-            k_loss = bluf_csp["strike"] * 100 - k_win
-            k_full, k_half = kelly_criterion(k_pop, k_win, k_loss)
-            k_source = f"CSP ${bluf_csp['strike']:.0f}"
-        if k_half > 0:
-            k_cap = KELLY_DISPLAY_CAP_PCT
-            k_show = min(k_half, k_cap)
-            k_dollars = REF_NOTIONAL * k_show / 100
-            capped_note = (
-                f" Half Kelly math landed at {k_half:.1f}%; <strong>we cap the headline at {k_cap:.0f}%</strong> for portfolio heat. Never treat Kelly as a target allocation."
-                if k_half > k_cap
-                else ""
-            )
-            kc = "#10b981" if k_show <= RISK_PCT_EXAMPLE * 2 else "#f59e0b"
-            st.markdown(
-                f"<div class='tc'><div style='font-size:.75rem;color:#64748b'>KELLY HALF MODE · UI CAP</div>"
-                f"<div class='mono' style='font-size:1.3rem;color:{kc}'>{k_show:.1f}% = ${k_dollars:,.0f}</div>"
-                f"<div style='font-size:.7rem;color:#64748b;margin-top:4px'>Raw half Kelly {k_half:.1f}% · full Kelly {k_full:.1f}% · {k_source}. "
-                f"Display max {k_cap:.0f}% for risk hygiene.{capped_note}</div></div>",
-                unsafe_allow_html=True)
-            _explain("Kelly Criterion in plain English",
-                f"The Kelly formula can suggest large fractions; here we show <strong>Half Kelly</strong> then <strong>cap the headline at {k_cap:.0f}%</strong> "
-                f"so the desk view stays conservative (raw half-Kelly was {k_half:.1f}%). "
-                f"On a <strong>${REF_NOTIONAL:,.0f}</strong> illustrative reference, the capped line is <strong>${k_dollars:,.0f}</strong>. "
-                "Scale to your own capital; Kelly is a theoretical optimum, not an order size.", "neutral")
-        else:
-            st.markdown("<div class='tc'><div style='font-size:.75rem;color:#64748b'>KELLY CRITERION</div>"
-                "<div style='color:#94a3b8;font-size:.85rem;margin-top:6px'>Not enough data yet. No liquid option strikes available to calculate your optimal bet size.</div></div>",
-                unsafe_allow_html=True)
-
-        st.markdown("#### Active Alerts")
-        if al:
-            for a in al:
-                ic = "\U0001f7e2" if a["t"] == "bullish" else ("\U0001f534" if a["t"] == "bearish" else "\U0001f7e1")
-                st.markdown(f"<div class='ac'>{ic} [{a['p']}] {a['m']}</div>", unsafe_allow_html=True)
-        else:
-            st.info("No alerts.")
-
-    # ══════════════════════════════════════════════════════════════════
-    #  SECTION 6 \u2014 PREMIUM SIMULATOR
-    # ══════════════════════════════════════════════════════════════════
-    st.markdown('<div id="simulator" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
-    _section("Premium Simulator", "Replay a year of covered calls with your assumptions before you commit capital.",
-             tip_plain="Dial OTM, hold time, and IV multiplier. Hunt for settings that still look sane in both calm and chaotic tapes.")
-    st.warning(
-        "Premiums here are modeled from historical volatility. They are illustrative, not a promise. Treat the run as a dress rehearsal; live fills will differ."
-    )
-    bc1, bc2, bc3, bc4 = st.columns(4)
-    bt_otm = bc1.slider("OTM%", 2, 15, 5, key="sim_otm") / 100
-    bt_hold = bc2.slider("Hold (d)", 7, 45, 30, key="sim_hold")
-    bt_per = bc3.selectbox("Period", ["6mo", "1y"], index=1, key="sim_period")
-    bt_iv = bc4.slider("IV Mult", .5, 2.0, 1.0, .1, key="sim_iv")
-    bt_df = fetch_stock(ticker, bt_per, "1d")
-    if bt_df is not None and len(bt_df) > bt_hold + 20:
-        br = Backtest.cc_sim(bt_df, bt_otm, bt_hold, bt_iv)
-        if not br.empty:
-            tp = br["premium"].sum() * 1
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Trades", len(br))
-            m2.metric("Win Rate", f"{(br['profit'] > 0).mean() * 100:.0f}%")
-            m3.metric("Avg Ret", f"{br['ret_pct'].mean():.1f}%")
-            m4.metric("Est Premium", f"${tp:,.0f}")
-            br["cum"] = br["ret_pct"].cumsum()
-            if not mini_mode:
-                fig_b = go.Figure(go.Scatter(x=br["entry_date"], y=br["cum"], mode="lines+markers",
-                    line=dict(color="#10b981", width=2), marker=dict(size=5)))
-                fig_b.update_layout(template="plotly_dark", paper_bgcolor="#080c14", plot_bgcolor="#080c14",
-                    height=300, margin=dict(l=40, r=20, t=20, b=40), yaxis_title="Cum Ret %",
-                    font=dict(family="JetBrains Mono", color="#94a3b8"))
-                st.plotly_chart(fig_b, use_container_width=True, config=_PLOTLY_UI_CONFIG)
-            else:
-                st.caption(
-                    f"Mini mode parks the cumulative return chart. Modeled cumulative return landed at **{br['cum'].iloc[-1]:.1f}%** across {len(br)} trades."
-                )
-            wr = (br["profit"] > 0).mean() * 100
-            _explain("\U0001f9e0 What does this backtest tell me?",
-                f"Over {len(br)} simulated trades, selling {bt_otm * 100:.0f}% out of the money covered calls every {bt_hold} days would have made roughly <strong>${tp:,.0f}</strong> in premium cash. "
-                f"The win rate was {wr:.0f}%. That means most of your options expired worthless and you kept all the cash. "
-                "Think of this as reviewing last year's sales numbers before planning this year's budget. It is your proof of concept.",
-                "bull" if wr > 60 else "neutral")
-
-    # ══════════════════════════════════════════════════════════════════
-    #  SECTION 7 — MARKET SCANNER (multi-ticker diamond & confluence scan)
-    # ══════════════════════════════════════════════════════════════════
-    st.markdown('<div id="scanner" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
-    _section("🔎 Market Scanner", "One pass across the list for Diamonds, confluence stacks, and Gold Zone distance.",
-             tip_plain="Sort mentally by confluence, then hunt for a live Blue Diamond. If nothing clears the bar, flat is a position.")
-
-    watchlist_tickers = [t.strip().upper() for t in scanner_watchlist.split(",") if t.strip()]
-    if watchlist_tickers:
-        if st.button("Scan Watchlist", key="run_scanner"):
-            scanner_results = []
-            n_scan = len(watchlist_tickers)
-            workers = min(8, max(1, n_scan))
-            scan_progress = st.progress(0)
-            done_ct = 0
-            with ThreadPoolExecutor(max_workers=workers) as pool:
-                future_map = {pool.submit(scan_single_ticker, tkr): tkr for tkr in watchlist_tickers}
-                for fut in as_completed(future_map):
-                    done_ct += 1
-                    tkr = future_map[fut]
-                    scan_progress.progress(done_ct / n_scan, text=f"Scanning {tkr}… ({done_ct}/{n_scan})")
-                    try:
-                        result = fut.result()
-                        if result:
-                            scanner_results.append(result)
-                    except Exception:
-                        pass
-            scan_progress.empty()
-
-            if scanner_results:
-                if scanner_sort_mode == "Highest confluence first":
-                    scanner_results.sort(key=lambda x: x["cp_score"], reverse=True)
+            bc1, bc2, bc3, bc4 = st.columns(4)
+            bt_otm = bc1.slider("OTM%", 2, 15, 5, key="sim_otm") / 100
+            bt_hold = bc2.slider("Hold (d)", 7, 45, 30, key="sim_hold")
+            bt_per = bc3.selectbox("Period", ["6mo", "1y"], index=1, key="sim_period")
+            bt_iv = bc4.slider("IV Mult", .5, 2.0, 1.0, .1, key="sim_iv")
+            br = run_cc_sim_cached(ticker, bt_per, bt_otm, bt_hold, bt_iv)
+            if not br.empty:
+                tp = br["premium"].sum() * 1
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("Trades", len(br))
+                m2.metric("Win Rate", f"{(br['profit'] > 0).mean() * 100:.0f}%")
+                m3.metric("Avg Ret", f"{br['ret_pct'].mean():.1f}%")
+                m4.metric("Est Premium", f"${tp:,.0f}")
+                _cum = br["ret_pct"].cumsum().astype(float)
+                if not mini_mode:
+                    fig_b = go.Figure()
+                    _colors = [_PLOTLY_CASH_UP if (i == 0 or _cum.iloc[i] >= _cum.iloc[i - 1]) else _PLOTLY_CASH_DOWN for i in range(len(_cum))]
+                    fig_b.add_trace(
+                        go.Scatter(
+                            x=br["entry_date"],
+                            y=_cum,
+                            mode="lines+markers",
+                            line=dict(color=_PLOTLY_CASH_UP, width=2.2),
+                            marker=dict(size=6, color=_colors, line=dict(width=0)),
+                            fill="tozeroy",
+                            fillcolor="rgba(52, 211, 153, 0.12)",
+                            name="Cumulative return",
+                            hovertemplate=(
+                                "<b>Covered-call sim</b><br>"
+                                "Entry %{x|%Y-%m-%d}<br>"
+                                "Cumulative <b>%{y:+.2f}%</b><extra></extra>"
+                            ),
+                        )
+                    )
+                    fig_b.update_layout(
+                        template="plotly_dark",
+                        paper_bgcolor=_PLOTLY_PAPER_BG,
+                        plot_bgcolor=_PLOTLY_PLOT_BG,
+                        font=_PLOTLY_FONT_MAIN,
+                        height=300,
+                        margin=dict(l=48, r=20, t=36, b=44),
+                        hoverlabel=_chart_hoverlabel(),
+                        title=dict(
+                            text="Modeled cumulative return (% of premium stack)",
+                            x=0,
+                            xanchor="left",
+                            font=dict(size=13, color="#e2e8f0", family="Inter, system-ui, sans-serif"),
+                        ),
+                        showlegend=False,
+                    )
+                    fig_b.update_xaxes(
+                        showgrid=True,
+                        gridcolor=_PLOTLY_GRID,
+                        gridwidth=1,
+                        zeroline=False,
+                        title_text="Trade entry",
+                        tickformat="%Y-%m-%d",
+                        **_PLOTLY_AXIS_TITLE,
+                    )
+                    fig_b.update_yaxes(
+                        showgrid=True,
+                        gridcolor=_PLOTLY_GRID,
+                        gridwidth=1,
+                        zeroline=True,
+                        zerolinecolor="rgba(128,128,128,0.25)",
+                        title_text="Cumulative return (%)",
+                        ticksuffix="%",
+                        tickformat=".1f",
+                        **_PLOTLY_AXIS_TITLE,
+                    )
+                    st.plotly_chart(fig_b, use_container_width=True, config=_PLOTLY_UI_CONFIG)
                 else:
-                    order = {t: i for i, t in enumerate(watchlist_tickers)}
-                    scanner_results.sort(key=lambda x: order.get(x["ticker"], 10_000))
-
-                for r in scanner_results:
-                    pc = "#10b981" if r["chg_pct"] >= 0 else "#ef4444"
-                    cpc = "#10b981" if r["cp_score"] >= 7 else ("#f59e0b" if r["cp_score"] >= 4 else "#ef4444")
-                    qec = "#10b981" if r["qs"] > 70 else ("#f59e0b" if r["qs"] > 50 else "#ef4444")
-                    gz_c = "#10b981" if r["dist_gz"] > 0 else "#ef4444"
-
-                    cp_mini_bar = ""
-                    for bi in range(r["cp_max"]):
-                        filled = bi < r["cp_score"]
-                        bc = "#10b981" if filled and r["cp_score"] >= 7 else ("#f59e0b" if filled and r["cp_score"] >= 4 else ("#ef4444" if filled else "#1e293b"))
-                        cp_mini_bar += f"<div style='flex:1;height:6px;background:{bc};border-radius:3px;margin:0 1px'></div>"
-
-                    st.markdown(f"""<div class='scanner-row'>
-                        <div class='scanner-grid'>
-                            <div style='min-width:80px'>
-                                <div style='font-size:1.1rem;font-weight:700;color:#e2e8f0'>{r['ticker']}</div>
-                                <div class='mono' style='font-size:.9rem;color:{pc}'>${r['price']:.2f} ({r['chg_pct']:+.1f}%)</div>
-                            </div>
-                            <div style='text-align:center;min-width:70px'>
-                                <div style='font-size:.65rem;color:#64748b;text-transform:uppercase'>QE Score</div>
-                                <div class='mono' style='color:{qec};font-weight:700'>{r['qs']:.0f}/100</div>
-                            </div>
-                            <div style='text-align:center;min-width:100px'>
-                                <div style='font-size:.65rem;color:#64748b;text-transform:uppercase'>Confluence</div>
-                                <div class='mono' style='color:{cpc};font-weight:700'>{r['cp_score']}/{r['cp_max']}</div>
-                                <div style='display:flex;gap:1px;margin-top:3px;width:80px'>{cp_mini_bar}</div>
-                            </div>
-                            <div style='text-align:center;min-width:100px'>
-                                <div style='font-size:.65rem;color:#64748b;text-transform:uppercase'>Diamond</div>
-                                <span class='diamond-badge {r["d_class"]}'>{r['d_status']}</span>
-                            </div>
-                            <div style='text-align:center;min-width:90px'>
-                                <div style='font-size:.65rem;color:#64748b;text-transform:uppercase'>Gold Zone</div>
-                                <div class='mono' style='font-size:.8rem;color:#fbbf24'>${r['gold_zone']:.2f}</div>
-                                <div style='font-size:.7rem;color:{gz_c}'>{r['dist_gz']:+.1f}%</div>
-                            </div>
-                            <div style='text-align:center;min-width:60px'>
-                                <div style='font-size:.65rem;color:#64748b;text-transform:uppercase'>Daily</div>
-                                <div style='font-size:.8rem;color:{"#10b981" if r["struct"]=="BULLISH" else ("#ef4444" if r["struct"]=="BEARISH" else "#f59e0b")}'>{r['struct']}</div>
-                            </div>
-                            <div style='flex:1;min-width:180px'>
-                                <div style='font-size:.65rem;color:#64748b;text-transform:uppercase'>Summary</div>
-                                <div class='scan-summary' style='font-size:.82rem;color:#e2e8f0;line-height:1.4'>{r['summary']}</div>
-                            </div>
-                        </div>
-                    </div>""", unsafe_allow_html=True)
-
-                _explain("🔎 How to use the Scanner",
-                    "Look for tickers with <strong>7+ confluence points</strong> and an active <strong>Blue Diamond</strong>. "
-                    "Those are your highest-probability setups across the entire watchlist. "
-                    "Tickers near their Gold Zone with rising confluence are about to trigger. "
-                    "Pink Diamonds mean take profits or avoid new entries on that ticker. "
-                    "Sort mentally by confluence score. The higher the number, the stronger the setup.", "neutral")
+                    st.caption(
+                        f"Mini mode parks the cumulative return chart. Modeled cumulative return landed at **{_cum.iloc[-1]:.1f}%** across {len(br)} trades."
+                    )
+                wr = (br["profit"] > 0).mean() * 100
+                _explain("\U0001f9e0 What does this backtest tell me?",
+                    f"Over {len(br)} simulated trades, selling {bt_otm * 100:.0f}% out of the money covered calls every {bt_hold} days would have made roughly <strong>${tp:,.0f}</strong> in premium cash. "
+                    f"The win rate was {wr:.0f}%. That means most of your options expired worthless and you kept all the cash. "
+                    "Think of this as reviewing last year's sales numbers before planning this year's budget. It is your proof of concept.",
+                    "bull" if wr > 60 else "neutral")
             else:
-                st.info("No scanner results. Check your ticker symbols.")
-    else:
-        st.info("Add tickers under **Edit watchlist symbols** (top of page) to use the scanner.")
+                st.info(
+                    "Not enough daily history for this symbol and settings to run the covered-call sweep. "
+                    "Try a longer period, a shorter hold window, or confirm the ticker has a full options tape."
+                )
 
-    # ══════════════════════════════════════════════════════════════════
-    #  SECTION 8 \u2014 NEWS & MACRO
-    # ══════════════════════════════════════════════════════════════════
-    st.markdown('<div id="news" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
-    _section("News and Market Conditions", f"Headlines plus macro crosswinds for {ticker} while the tape is open.",
-             tip_plain="Stories explain gaps and IV pops. Always read news through price. When headline risk stacks near earnings, favor safer strikes and lighter size.")
-    n1, n2 = st.columns([3, 2])
-    with n1:
-        st.markdown(f"#### {ticker} News")
-        if news:
-            for item in news:
-                lnk = f"<a href='{item['link']}' target='_blank' style='color:#06b6d4'>Read</a>" if item["link"] else ""
-                st.markdown(f"<div class='ni'><strong style='color:#e2e8f0'>{item['title']}</strong><br><span style='color:#64748b;font-size:.8rem'>{item['pub']} {item['time']}</span>{' | ' + lnk if lnk else ''}</div>", unsafe_allow_html=True)
-        else:
-            st.info("No news found.")
-    with n2:
-        st.markdown("#### Macro Dashboard")
-        for k, v in macro.items():
-            dc = "#10b981" if v["chg"] >= 0 else "#ef4444"
-            st.markdown(f"<div class='tc' style='padding:10px 14px;margin-bottom:6px'><div style='display:flex;justify-content:space-between'><span style='color:#94a3b8'>{k}</span><span class='mono' style='color:#e2e8f0'>{v['price']:.2f} <span style='color:{dc}'>{v['chg']:+.2f}%</span></span></div></div>", unsafe_allow_html=True)
+            # ══════════════════════════════════════════════════════════════════
+            #  SECTION 7 — MARKET SCANNER (multi-ticker diamond & confluence scan)
+            # ══════════════════════════════════════════════════════════════════
+            st.markdown('<div id="scanner" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
+            _section("🔎 Market Scanner", "One pass across the list for Diamonds, confluence stacks, and Gold Zone distance.",
+                     tip_plain="Sort mentally by confluence, then hunt for a live Blue Diamond. If nothing clears the bar, flat is a position.")
 
-    # ══════════════════════════════════════════════════════════════════
-    #  SECTION 9 \u2014 QUICK REFERENCE GUIDE (always visible)
-    # ══════════════════════════════════════════════════════════════════
-    st.markdown('<div id="guide" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
-    _section("Quick Reference Guide", "Plain language glossary for every signal on this desk. Keep it open during live markets.",
-             tip_plain="Reach for this when a label feels fuzzy. Clarity beats impulse every session.")
-    edu = [
-        ("Blue Diamond Signal", "A Blue Diamond appears when confluence crosses up to 7+ out of 9, <strong>daily market structure is BULLISH</strong>, the <strong>weekly MACD/EMA bias is not BEARISH</strong>, and <strong>volume is at least 90% of the 20-day volume SMA</strong> (participation). An ATR blow-off guard still filters manic prints. Buy on Blue Diamonds."),
-        ("Pink Diamond Signal", "A Pink Diamond appears when bullish confluence collapses or momentum exhausts (RSI > 75 with weak confluence). Think of it as your dashboard warning lights all turning on. It means the easy money in this move is done. Take profits, sell aggressive covered calls, or tighten your stops. Sell on Pink Diamonds."),
-        ("Gold Zone", "The Gold Zone is a single dynamic price level calculated from Volume Profile POC, the 61.8% Fibonacci golden ratio, the 200-day simple moving average, and the nearest Gann Square of 9 level. When the stock is above the Gold Zone, bulls are in control. Below it, bears have the edge. Use the Gold Zone as your anchor for all strike selection."),
-        ("Confluence Points (0 to 9)", "The Confluence score checks nine independent bullish factors: Supertrend direction (2pts), Ichimoku cloud position (2pts), ADX trend strength (1pt), OBV accumulation (1pt), bullish divergences (1pt), position versus Gold Zone (1pt), and market structure (1pt). Scores of 7 or higher trigger Blue Diamonds. Scores below 4 signal caution."),
-        ("Covered Call", "You own 100 shares. You sell 1 call above the current price. You collect cash today. If the stock stays below that price, you keep the cash AND you keep your shares. Target: 1 to 3 percent per month in pure cash income."),
-        ("Cash Secured Put and The Wheel", "You sell a put and hold cash to buy shares if needed. If you get assigned, you sell Covered Calls on those new shares. When shares get called away, you sell puts again. This is the cash flow loop. Repeat forever."),
-        ("Credit Spreads", "You sell one option and collect cash. Then you buy a cheaper one further away to cap your worst case loss. Bull Put Spread means you are bullish. Bear Call Spread means you are bearish. Uses less money than Cash Secured Puts."),
-        ("RSI (Relative Strength Index)", "RSI is a 0 to 100 energy meter for the stock. Above 70 means buyers are exhausted. Great time to sell calls. Below 30 means sellers panicked. Great time to sell puts. The sweet spot for collecting cash is 40 to 60."),
-        ("MACD", "MACD shows who is winning: buyers or sellers. When the blue line crosses above the orange line, buyers are taking over. When it crosses below, sellers are winning. Think of it as comparing this month's sales to the quarterly average."),
-        ("ADX (Trend Strength)", "ADX is a 0 to 100 gauge for how strong the trend is. Above 25 means a strong trend is happening. Below 20 means the market is going nowhere. ADX does not tell you the direction. It only tells you the strength."),
-        ("Ichimoku Cloud", "The cloud is a safety net for the stock price. When the price floats above the cloud, the trend is bullish. When it falls into or below the cloud, the trend is weak. When all 5 parts agree, that is the strongest signal you can get."),
-        ("Supertrend", "The Supertrend is your price floor or ceiling. Green line below the price means bullish. Your shares are safe. Red line above the price means bearish. When it flips color, that is your signal to act."),
-        ("OBV (On Balance Volume)", "OBV tracks what the big money is doing. Rising OBV means institutions are quietly buying. Think of wholesale customers stocking up. Falling OBV means they are selling. If OBV disagrees with the price, a reversal may be coming."),
-        ("Fibonacci Retracement", "After a big move, stocks pull back to key levels before continuing: 38.2%, 50%, and 61.8%. The 61.8% level is the golden ratio. It is the most watched level on Wall Street. Set your put strikes near these levels for the safest entries."),
-        ("Volatility Skew", "When put options cost much more than call options, big institutions are buying crash insurance. That means premiums are fat for you to sell. But it also means the smart money is nervous. Collect the cash but stay aware."),
-        ("Expected Value", "EV is your long run profit per trade. Multiply win rate by gain, then subtract loss rate times loss. Positive EV means a real edge. Negative EV means pass."),
-        ("Gann Square of 9", "These are natural support and resistance levels calculated from mathematical spirals. Stocks tend to stop or bounce at these prices. Use them to pick smarter strike prices for your options."),
-        ("Quant Edge Score", "Your overall score from 0 to 100. It checks five things: Trend, Momentum, Volume, Volatility, and Structure. Above 70 means prime conditions to sell options. Below 40 means wait for a better setup."),
-        ("Market Scanner", "The Scanner checks your entire watchlist in seconds. It calculates Confluence Points, Diamond Status, Gold Zone distance, and Quant Edge for every ticker. Sort by confluence to find the strongest setups across all your stocks. Tickers with 7+ confluence and a Blue Diamond are your best opportunities."),
-    ]
-    for i in range(0, len(edu), 2):
-        ec1, ec2 = st.columns(2)
-        with ec1:
-            st.markdown(f"<div class='edu-card'><strong style='font-size:.82rem;letter-spacing:.01em'>{edu[i][0]}</strong><div style='color:#9fb0c7;font-size:.76rem;margin-top:5px;line-height:1.38'>{edu[i][1]}</div></div>", unsafe_allow_html=True)
-        with ec2:
-            if i + 1 < len(edu):
-                st.markdown(f"<div class='edu-card'><strong style='font-size:.82rem;letter-spacing:.01em'>{edu[i + 1][0]}</strong><div style='color:#9fb0c7;font-size:.76rem;margin-top:5px;line-height:1.38'>{edu[i + 1][1]}</div></div>", unsafe_allow_html=True)
+            watchlist_tickers = [t.strip().upper() for t in scanner_watchlist.split(",") if t.strip()]
+            if watchlist_tickers:
+                if st.button("Scan Watchlist", key="run_scanner"):
+                    scanner_results = []
+                    n_scan = len(watchlist_tickers)
+                    workers = min(8, max(1, n_scan))
+                    scan_progress = st.progress(0)
+                    done_ct = 0
+                    scan_failed = []
+                    with ThreadPoolExecutor(max_workers=workers) as pool:
+                        future_map = {pool.submit(scan_single_ticker, tkr): tkr for tkr in watchlist_tickers}
+                        for fut in as_completed(future_map):
+                            done_ct += 1
+                            tkr = future_map[fut]
+                            scan_progress.progress(done_ct / n_scan, text=f"Scanning {tkr}… ({done_ct}/{n_scan})")
+                            try:
+                                result = fut.result()
+                                if result:
+                                    scanner_results.append(result)
+                            except Exception as e:
+                                scan_failed.append((tkr, type(e).__name__))
+                    scan_progress.empty()
+                    if scan_failed:
+                        failed_line = ", ".join(f"{_html_mod.escape(t)} ({err})" for t, err in scan_failed[:12])
+                        more = f" (+{len(scan_failed) - 12} more)" if len(scan_failed) > 12 else ""
+                        st.warning(f"Some symbols could not be scanned: {failed_line}{more}")
+
+                    if scanner_results:
+                        if scanner_sort_mode == "Highest confluence first":
+                            scanner_results.sort(key=lambda x: x["cp_score"], reverse=True)
+                        else:
+                            order = {t: i for i, t in enumerate(watchlist_tickers)}
+                            scanner_results.sort(key=lambda x: order.get(x["ticker"], 10_000))
+
+                        for r in scanner_results:
+                            pc = "#10b981" if r["chg_pct"] >= 0 else "#ef4444"
+                            cpc = "#10b981" if r["cp_score"] >= 7 else ("#f59e0b" if r["cp_score"] >= 4 else "#ef4444")
+                            qec = "#10b981" if r["qs"] > 70 else ("#f59e0b" if r["qs"] > 50 else "#ef4444")
+                            gz_c = "#10b981" if r["dist_gz"] > 0 else "#ef4444"
+
+                            cp_mini_bar = ""
+                            for bi in range(r["cp_max"]):
+                                filled = bi < r["cp_score"]
+                                bc = "#10b981" if filled and r["cp_score"] >= 7 else ("#f59e0b" if filled and r["cp_score"] >= 4 else ("#ef4444" if filled else "#1e293b"))
+                                cp_mini_bar += f"<div style='flex:1;height:6px;background:{bc};border-radius:3px;margin:0 1px'></div>"
+
+                            st.markdown(f"""<div class='scanner-row'>
+                                <div class='scanner-grid'>
+                                    <div style='min-width:80px'>
+                                        <div style='font-size:1.1rem;font-weight:700;color:#e2e8f0'>{r['ticker']}</div>
+                                        <div class='mono' style='font-size:.9rem;color:{pc}'>${r['price']:.2f} ({r['chg_pct']:+.1f}%)</div>
+                                    </div>
+                                    <div style='text-align:center;min-width:70px'>
+                                        <div style='font-size:.65rem;color:#64748b;text-transform:uppercase'>QE Score</div>
+                                        <div class='mono' style='color:{qec};font-weight:700'>{r['qs']:.0f}/100</div>
+                                    </div>
+                                    <div style='text-align:center;min-width:100px'>
+                                        <div style='font-size:.65rem;color:#64748b;text-transform:uppercase'>Confluence</div>
+                                        <div class='mono' style='color:{cpc};font-weight:700'>{r['cp_score']}/{r['cp_max']}</div>
+                                        <div style='display:flex;gap:1px;margin-top:3px;width:80px'>{cp_mini_bar}</div>
+                                    </div>
+                                    <div style='text-align:center;min-width:100px'>
+                                        <div style='font-size:.65rem;color:#64748b;text-transform:uppercase'>Diamond</div>
+                                        <span class='diamond-badge {r["d_class"]}'>{r['d_status']}</span>
+                                    </div>
+                                    <div style='text-align:center;min-width:90px'>
+                                        <div style='font-size:.65rem;color:#64748b;text-transform:uppercase'>Gold Zone</div>
+                                        <div class='mono' style='font-size:.8rem;color:#fbbf24'>${r['gold_zone']:.2f}</div>
+                                        <div style='font-size:.7rem;color:{gz_c}'>{r['dist_gz']:+.1f}%</div>
+                                    </div>
+                                    <div style='text-align:center;min-width:60px'>
+                                        <div style='font-size:.65rem;color:#64748b;text-transform:uppercase'>Daily</div>
+                                        <div style='font-size:.8rem;color:{"#10b981" if r["struct"]=="BULLISH" else ("#ef4444" if r["struct"]=="BEARISH" else "#f59e0b")}'>{r['struct']}</div>
+                                    </div>
+                                    <div style='flex:1;min-width:180px'>
+                                        <div style='font-size:.65rem;color:#64748b;text-transform:uppercase'>Summary</div>
+                                        <div class='scan-summary' style='font-size:.82rem;color:#e2e8f0;line-height:1.4'>{r['summary']}</div>
+                                    </div>
+                                </div>
+                            </div>""", unsafe_allow_html=True)
+
+                        _explain("🔎 How to use the Scanner",
+                            "Look for tickers with <strong>7+ confluence points</strong> and an active <strong>Blue Diamond</strong>. "
+                            "Those are your highest-probability setups across the entire watchlist. "
+                            "Tickers near their Gold Zone with rising confluence are about to trigger. "
+                            "Pink Diamonds mean take profits or avoid new entries on that ticker. "
+                            "Sort mentally by confluence score. The higher the number, the stronger the setup.", "neutral")
+                    else:
+                        st.info("No scanner results. Check your ticker symbols.")
+            else:
+                st.info("Add tickers under **Edit watchlist symbols** (top of page) to use the scanner.")
+
+            # ══════════════════════════════════════════════════════════════════
+            #  SECTION 8 \u2014 NEWS & MACRO
+            # ══════════════════════════════════════════════════════════════════
+            st.markdown('<div id="news" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
+            _section("News and Market Conditions", f"Headlines plus macro crosswinds for {ticker} while the tape is open.",
+                     tip_plain="Stories explain gaps and IV pops. Always read news through price. When headline risk stacks near earnings, favor safer strikes and lighter size.")
+            n1, n2 = st.columns([3, 2])
+            with n1:
+                st.markdown(f"#### {ticker} News")
+                if news:
+                    for item in news:
+                        lnk = f"<a href='{item['link']}' target='_blank' style='color:#06b6d4'>Read</a>" if item["link"] else ""
+                        st.markdown(f"<div class='ni'><strong style='color:#e2e8f0'>{item['title']}</strong><br><span style='color:#64748b;font-size:.8rem'>{item['pub']} {item['time']}</span>{' | ' + lnk if lnk else ''}</div>", unsafe_allow_html=True)
+                else:
+                    st.info("No news found.")
+            with n2:
+                st.markdown("#### Macro Dashboard")
+                for k, v in macro.items():
+                    dc = "#10b981" if v["chg"] >= 0 else "#ef4444"
+                    st.markdown(f"<div class='tc' style='padding:10px 14px;margin-bottom:6px'><div style='display:flex;justify-content:space-between'><span style='color:#94a3b8'>{k}</span><span class='mono' style='color:#e2e8f0'>{v['price']:.2f} <span style='color:{dc}'>{v['chg']:+.2f}%</span></span></div></div>", unsafe_allow_html=True)
+
+            with st.expander("Quick Reference Guide", expanded=False):
+                st.markdown('<div id="guide" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
+                _section("Quick Reference Guide", "Plain language glossary for every signal on this desk. Keep it open during live markets.",
+                         tip_plain="Reach for this when a label feels fuzzy. Clarity beats impulse every session.")
+                edu = [
+                    ("Blue Diamond Signal", "A Blue Diamond appears when confluence crosses up to 7+ out of 9, <strong>daily market structure is BULLISH</strong>, the <strong>weekly MACD/EMA bias is not BEARISH</strong>, and <strong>volume is at least 90% of the 20-day volume SMA</strong> (participation). An ATR blow-off guard still filters manic prints. Buy on Blue Diamonds."),
+                    ("Pink Diamond Signal", "A Pink Diamond appears when bullish confluence collapses or momentum exhausts (RSI > 75 with weak confluence). Think of it as your dashboard warning lights all turning on. It means the easy money in this move is done. Take profits, sell aggressive covered calls, or tighten your stops. Sell on Pink Diamonds."),
+                    ("Gold Zone", "The Gold Zone is a single dynamic price level calculated from Volume Profile POC, the 61.8% Fibonacci golden ratio, the 200-day simple moving average, and the nearest Gann Square of 9 level. When the stock is above the Gold Zone, bulls are in control. Below it, bears have the edge. Use the Gold Zone as your anchor for all strike selection."),
+                    ("Confluence Points (0 to 9)", "The Confluence score checks nine independent bullish factors: Supertrend direction (2pts), Ichimoku cloud position (2pts), ADX trend strength (1pt), OBV accumulation (1pt), bullish divergences (1pt), position versus Gold Zone (1pt), and market structure (1pt). Scores of 7 or higher trigger Blue Diamonds. Scores below 4 signal caution."),
+                    ("Covered Call", "You own 100 shares. You sell 1 call above the current price. You collect cash today. If the stock stays below that price, you keep the cash AND you keep your shares. Target: 1 to 3 percent per month in pure cash income."),
+                    ("Cash Secured Put and The Wheel", "You sell a put and hold cash to buy shares if needed. If you get assigned, you sell Covered Calls on those new shares. When shares get called away, you sell puts again. This is the cash flow loop. Repeat forever."),
+                    ("Credit Spreads", "You sell one option and collect cash. Then you buy a cheaper one further away to cap your worst case loss. Bull Put Spread means you are bullish. Bear Call Spread means you are bearish. Uses less money than Cash Secured Puts."),
+                    ("RSI (Relative Strength Index)", "RSI is a 0 to 100 energy meter for the stock. Above 70 means buyers are exhausted. Great time to sell calls. Below 30 means sellers panicked. Great time to sell puts. The sweet spot for collecting cash is 40 to 60."),
+                    ("MACD", "MACD shows who is winning: buyers or sellers. When the blue line crosses above the orange line, buyers are taking over. When it crosses below, sellers are winning. Think of it as comparing this month's sales to the quarterly average."),
+                    ("ADX (Trend Strength)", "ADX is a 0 to 100 gauge for how strong the trend is. Above 25 means a strong trend is happening. Below 20 means the market is going nowhere. ADX does not tell you the direction. It only tells you the strength."),
+                    ("Ichimoku Cloud", "The cloud is a safety net for the stock price. When the price floats above the cloud, the trend is bullish. When it falls into or below the cloud, the trend is weak. When all 5 parts agree, that is the strongest signal you can get."),
+                    ("Supertrend", "The Supertrend is your price floor or ceiling. Green line below the price means bullish. Your shares are safe. Red line above the price means bearish. When it flips color, that is your signal to act."),
+                    ("OBV (On Balance Volume)", "OBV tracks what the big money is doing. Rising OBV means institutions are quietly buying. Think of wholesale customers stocking up. Falling OBV means they are selling. If OBV disagrees with the price, a reversal may be coming."),
+                    ("Fibonacci Retracement", "After a big move, stocks pull back to key levels before continuing: 38.2%, 50%, and 61.8%. The 61.8% level is the golden ratio. It is the most watched level on Wall Street. Set your put strikes near these levels for the safest entries."),
+                    ("Volatility Skew", "When put options cost much more than call options, big institutions are buying crash insurance. That means premiums are fat for you to sell. But it also means the smart money is nervous. Collect the cash but stay aware."),
+                    ("Expected Value", "EV is your long run profit per trade. Multiply win rate by gain, then subtract loss rate times loss. Positive EV means a real edge. Negative EV means pass."),
+                    ("Gann Square of 9", "These are natural support and resistance levels calculated from mathematical spirals. Stocks tend to stop or bounce at these prices. Use them to pick smarter strike prices for your options."),
+                    ("Quant Edge Score", "Your overall score from 0 to 100. It checks five things: Trend, Momentum, Volume, Volatility, and Structure. Above 70 means prime conditions to sell options. Below 40 means wait for a better setup."),
+                    ("Market Scanner", "The Scanner checks your entire watchlist in seconds. It calculates Confluence Points, Diamond Status, Gold Zone distance, and Quant Edge for every ticker. Sort by confluence to find the strongest setups across all your stocks. Tickers with 7+ confluence and a Blue Diamond are your best opportunities."),
+                ]
+                for i in range(0, len(edu), 2):
+                    ec1, ec2 = st.columns(2)
+                    with ec1:
+                        st.markdown(f"<div class='edu-card'><strong style='font-size:.82rem;letter-spacing:.01em'>{edu[i][0]}</strong><div style='color:#9fb0c7;font-size:.76rem;margin-top:5px;line-height:1.38'>{edu[i][1]}</div></div>", unsafe_allow_html=True)
+                    with ec2:
+                        if i + 1 < len(edu):
+                            st.markdown(f"<div class='edu-card'><strong style='font-size:.82rem;letter-spacing:.01em'>{edu[i + 1][0]}</strong><div style='color:#9fb0c7;font-size:.76rem;margin-top:5px;line-height:1.38'>{edu[i + 1][1]}</div></div>", unsafe_allow_html=True)
 
 
 if __name__ == "__main__":
