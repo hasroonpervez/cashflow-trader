@@ -370,7 +370,24 @@ div[data-testid="stMetric"] [data-testid="stMetricDeltaInverseIcon-Down"]{
 .stTabs [data-baseweb="tab-list"]{gap:0!important;background:var(--bg1)!important;border-radius:10px!important;padding:4px!important}
 .stTabs [data-baseweb="tab"]{border-radius:8px!important;color:var(--t2)!important;font-weight:500!important;padding:8px 16px!important}
 .stTabs [aria-selected="true"]{background:var(--bg2)!important;color:var(--cyan)!important}
-.stButton>button{background:linear-gradient(135deg,var(--blue),var(--purple))!important;color:#fff!important;border:none!important;border-radius:8px!important;font-weight:600!important;padding:8px 24px!important}
+/* Primary vs secondary: a single gradient rule made every button purple (tape, nav, desk tabs looked broken). */
+.stButton > button[kind="primary"],
+.stButton > button[data-testid="stBaseButton-primary"]{
+  background:linear-gradient(135deg,var(--blue),var(--purple))!important;
+  color:#fff!important;border:none!important;border-radius:8px!important;
+  font-weight:600!important;padding:8px 20px!important;
+}
+.stButton > button[kind="secondary"],
+.stButton > button[data-testid="stBaseButton-secondary"]{
+  background:#1e293b!important;background-image:none!important;
+  color:#e2e8f0!important;-webkit-text-fill-color:#e2e8f0!important;
+  border:1px solid #475569!important;border-radius:8px!important;
+  font-weight:600!important;padding:8px 20px!important;
+}
+.stButton > button[kind="secondary"]:hover,
+.stButton > button[data-testid="stBaseButton-secondary"]:hover{
+  background:#334155!important;border-color:#64748b!important;color:#f8fafc!important;
+}
 .stSelectbox>div>div,.stNumberInput>div>div>input,.stTextInput>div>div>input{background:var(--bg2)!important;border-color:var(--bdr)!important;color:var(--t1)!important}
 .tc{background:var(--glass-bg);border:1px solid var(--glass-bdr);border-radius:12px;padding:12px 14px;margin-bottom:8px;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);box-shadow:inset 0 1px 1px rgba(255,255,255,.05),0 10px 26px rgba(2,6,23,.36)}
 .sb{background:linear-gradient(135deg,rgba(16,185,129,.12),rgba(5,150,105,.05));border-left:3px solid var(--green);border-radius:8px;padding:16px;margin:8px 0}
@@ -619,6 +636,10 @@ div[data-testid="stMetricValue"], .mono, .glance-value, .ticker, .price-value{
 .cf-command-bar .stMarkdown p{margin:0!important}
 .cf-tape-title{font-size:.82rem!important;font-weight:700!important;color:#e2e8f0!important;margin:2px 0 6px 0!important}
 .cf-tape-cell{text-align:center!important}
+.cf-nav-box-title{
+  font-size:.72rem!important;font-weight:800!important;letter-spacing:.12em!important;
+  color:#94a3b8!important;text-transform:uppercase!important;margin:0 0 8px 0!important;
+}
 /* Main-column segmented / radio pills (same intent as sidebar styling) */
 .main [data-baseweb="radio"]{
   background:#0c1220!important;border:1px solid #334155!important;border-radius:12px!important;

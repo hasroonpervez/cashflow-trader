@@ -2360,7 +2360,6 @@ def _apply_cf_nav_click(nid: str):
 
 def _render_cf_nav_bar():
     _init_cf_nav_state()
-    st.caption("Jump to section")
     nav_items = (
         ("Execution", "execution"),
         ("Charts", "charts"),
@@ -2388,7 +2387,13 @@ def main():
     if "_cf_toast" in st.session_state:
         st.toast(st.session_state.pop("_cf_toast"))
 
-    _render_cf_nav_bar()
+    with st.container(border=True):
+        st.markdown(
+            "<p class='cf-nav-box-title'>Page shortcuts</p>",
+            unsafe_allow_html=True,
+        )
+        st.caption("Scroll after tapping a shortcut, or use Main desk (under the chart) to switch the big panels.")
+        _render_cf_nav_bar()
 
     if "_sb_scanner_sync" in st.session_state:
         st.session_state["sb_scanner"] = st.session_state.pop("_sb_scanner_sync")
@@ -3175,6 +3180,47 @@ def main():
         mini_mode,
         mobile_chart_layout,
     )
+
+    # Main desk tabs — only the top shortcut grid could change `_cf_main_tab`; this row makes the three panels obvious.
+    _ti_pick = max(0, min(2, int(st.session_state.get("_cf_main_tab", 0))))
+    with st.container(border=True):
+        st.markdown(
+            "<p class='cf-nav-box-title'>Main desk</p>",
+            unsafe_allow_html=True,
+        )
+        st.caption("Analysis and quant · option strategies · risk, simulator, scanner, and news.")
+        _tb1, _tb2, _tb3 = st.columns(3)
+        with _tb1:
+            if st.button(
+                "Analysis & Quant",
+                key="cf_desk_main_0",
+                use_container_width=True,
+                type="primary" if _ti_pick == 0 else "secondary",
+                help="Setup, volume profile, quant dashboard",
+            ):
+                st.session_state["_cf_main_tab"] = 0
+                st.rerun()
+        with _tb2:
+            if st.button(
+                "Cash-flow strategies",
+                key="cf_desk_main_1",
+                use_container_width=True,
+                type="primary" if _ti_pick == 1 else "secondary",
+                help="Covered calls, CSPs, spreads, Greeks",
+            ):
+                st.session_state["_cf_main_tab"] = 1
+                st.rerun()
+        with _tb3:
+            if st.button(
+                "Risk · tools · intel",
+                key="cf_desk_main_2",
+                use_container_width=True,
+                type="primary" if _ti_pick == 2 else "secondary",
+                help="Psychology, premium simulator, scanner, news, guide",
+            ):
+                st.session_state["_cf_main_tab"] = 2
+                st.rerun()
+
     chart_mood = "bull" if struct == "BULLISH" else ("bear" if struct == "BEARISH" else "neutral")
 
     ti = max(0, min(2, int(st.session_state.get("_cf_main_tab", 0))))
