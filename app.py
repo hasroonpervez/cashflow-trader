@@ -1956,7 +1956,6 @@ def _parse_watchlist_string(s):
     return items
 
 
-@st.fragment
 def _fragment_technical_zone(
     df,
     df_wk,
@@ -1973,7 +1972,7 @@ def _fragment_technical_zone(
     mini_mode,
     mobile_chart_layout,
 ):
-    """Charts + overlay toggles + diamond cards + gold zone copy. Reruns without refetching Yahoo data."""
+    """Charts + overlay toggles + diamond cards + gold zone copy. Price history is cached; full-app reruns stay cheap."""
     if mini_mode:
         chg_pct = 0.0
         if len(df) >= 2:
@@ -2697,9 +2696,16 @@ def main():
             earnings_date_raw = _f_earn.result()
 
     if df is None or df.empty:
+        st.markdown(
+            "<div style='margin:12px 0;padding:16px 18px;border-radius:12px;border:2px solid #ef4444;"
+            "background:rgba(239,68,68,.12);color:#fecaca;font-size:1rem;line-height:1.5;font-weight:600'>"
+            "<strong style='color:#fca5a5'>No price bars for this symbol.</strong> "
+            "Scroll here if the rest of the desk did not load. Yahoo often blocks or throttles shared cloud IPs.</div>",
+            unsafe_allow_html=True,
+        )
         st.error(
-            f"Data feed unavailable for {ticker}. Yahoo often rate-limits shared cloud IPs (Streamlit Cloud) or returns empty data briefly. "
-            "Wait 1-2 minutes and refresh; if it persists, use Streamlit Cloud Manage app, then Reboot."
+            f"Data feed unavailable for {_html_mod.escape(str(ticker))}. "
+            "Wait 1-2 minutes and refresh the page; try another ticker from the watchlist; or use Streamlit Manage app, then Reboot."
         )
         st.stop()
 
@@ -3162,7 +3168,7 @@ def main():
         st.markdown(f"<div class='ac'>\U0001f514 <strong>{len(al)} Alert{'s' if len(al) > 1 else ''}</strong>: {hi_al[0]['m']}{'<em> +' + str(len(al) - 1) + ' more</em>' if len(al) > 1 else ''}</div>", unsafe_allow_html=True)
 
     # ══════════════════════════════════════════════════════════════════
-    #  SECTION 1 — TECHNICAL CHART (fragment: overlay toggles without refetching Yahoo)
+    #  SECTION 1 — TECHNICAL CHART (overlay toggles; Yahoo data stays cached via st.cache_data)
     # ══════════════════════════════════════════════════════════════════
     _fragment_technical_zone(
         df,

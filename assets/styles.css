@@ -370,7 +370,17 @@ div[data-testid="stMetric"] [data-testid="stMetricDeltaInverseIcon-Down"]{
 .stTabs [data-baseweb="tab-list"]{gap:0!important;background:var(--bg1)!important;border-radius:10px!important;padding:4px!important}
 .stTabs [data-baseweb="tab"]{border-radius:8px!important;color:var(--t2)!important;font-weight:500!important;padding:8px 16px!important}
 .stTabs [aria-selected="true"]{background:var(--bg2)!important;color:var(--cyan)!important}
-/* Primary vs secondary: a single gradient rule made every button purple (tape, nav, desk tabs looked broken). */
+/* Default button chrome (Streamlit builds vary: some omit kind= on secondary). */
+.stButton > button{
+  background:#1e293b!important;background-image:none!important;
+  color:#e2e8f0!important;-webkit-text-fill-color:#e2e8f0!important;
+  border:1px solid #475569!important;border-radius:8px!important;
+  font-weight:600!important;padding:8px 20px!important;
+}
+.stButton > button:hover{
+  background:#334155!important;border-color:#64748b!important;color:#f8fafc!important;
+}
+/* Primary vs secondary: gradient only on primary. */
 .stButton > button[kind="primary"],
 .stButton > button[data-testid="stBaseButton-primary"]{
   background:linear-gradient(135deg,var(--blue),var(--purple))!important;
