@@ -9,6 +9,7 @@ import threading
 import time
 from datetime import datetime
 from typing import Any, Callable, Optional, TypeVar
+from urllib.parse import quote
 
 import numpy as np
 import pandas as pd
@@ -36,6 +37,8 @@ def _thread_session() -> requests.Session:
                 "User-Agent": _DEFAULT_UA,
                 "Accept-Language": "en-US,en;q=0.9",
                 "Accept": "application/json,text/html,*/*;q=0.8",
+                "Referer": "https://finance.yahoo.com/",
+                "Origin": "https://finance.yahoo.com",
             }
         )
         _tls.session = s
@@ -103,7 +106,13 @@ def fetch_stock(ticker: str, period: str = "1y", interval: str = "1d") -> Option
             df.index = df.index.tz_localize(None)
         return df
 
-    return yf_retry(_once, retry_on_none=True)
+    out = yf_retry(_once, retry_on_none=True, attempts=6, base_delay=1.8, backoff=1.65)
+    if out is not None and not out.empty:
+        return out
+    fb = fetch_stock_chart_api(ticker, period, interval)
+    if fb is not None and not fb.empty:
+        return fb
+    return None
 
 
 def ticker_pct_change_1d(symbol: str) -> Optional[float]:
@@ -117,7 +126,17 @@ def ticker_pct_change_1d(symbol: str) -> Optional[float]:
             return None
         return float((c.iloc[-1] / c.iloc[-2] - 1.0) * 100.0)
 
-    return yf_retry(_once, retry_on_none=True)
+    sym_u = str(symbol).upper().strip()
+    out = yf_retry(_once, retry_on_none=True, attempts=5, base_delay=1.5, backoff=1.6)
+    if out is not None:
+        return out
+    df = fetch_stock_chart_api(sym_u, "1mo", "1d")
+    if df is None or len(df) < 2 or "Close" not in df.columns:
+        return None
+    c = pd.to_numeric(df["Close"], errors="coerce").dropna()
+    if len(c) < 2:
+        return None
+    return float((c.iloc[-1] / c.iloc[-2] - 1.0) * 100.0)
 
 
 def fetch_intraday_series(symbol: str, period: str = "5d", interval: str = "1h") -> pd.Series:
@@ -261,6 +280,106 @@ def fetch_news(ticker: str) -> list[dict[str, str]]:
         return items
 
     return yf_retry_exceptions(_once, default=[])
+
+
+def _chart_range_interval(period: str, interval: str) -> tuple[str, str]:
+    """Map yfinance-style period/interval to v8 chart ``range`` + ``interval`` query params."""
+    p = (period or "1y").strip().lower()
+    iv = (interval or "1d").strip().lower()
+    ranges_ok = {"1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "ytd", "max"}
+    iv_ok = {"1m", "2m", "5m", "15m", "30m", "60m", "90m", "1h", "1d", "5d", "1wk", "1mo", "3mo"}
+    rng = p if p in ranges_ok else "1y"
+    iv2 = iv if iv in iv_ok else "1d"
+    return rng, iv2
+
+
+def _frame_from_chart_result(res: dict) -> Optional[pd.DataFrame]:
+    ts = res.get("timestamp")
+    if not ts:
+        return None
+    quotes = (res.get("indicators") or {}).get("quote")
+    if not quotes or not isinstance(quotes, list):
+        return None
+    q = quotes[0]
+    o = q.get("open")
+    h = q.get("high")
+    low = q.get("low")
+    c = q.get("close")
+    v = q.get("volume")
+    if c is None or not isinstance(c, list) or len(c) != len(ts):
+        return None
+    idx = pd.to_datetime(ts, unit="s")
+    df = pd.DataFrame(
+        {
+            "Open": o,
+            "High": h,
+            "Low": low,
+            "Close": c,
+            "Volume": v if isinstance(v, list) and len(v) == len(ts) else [np.nan] * len(ts),
+        },
+        index=idx,
+    )
+    df["Close"] = pd.to_numeric(df["Close"], errors="coerce")
+    df = df.dropna(subset=["Close"], how="any")
+    if df.empty:
+        return None
+    for col in ("Open", "High", "Low", "Volume"):
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+    return df
+
+
+def fetch_stock_chart_api(symbol: str, period: str = "1y", interval: str = "1d") -> Optional[pd.DataFrame]:
+    """
+    Direct Yahoo ``v8/finance/chart`` fetch (requests). Often works when ``yfinance`` returns
+    empty rows on cloud/datacenter IPs (throttling / curl stack differences).
+    Retries on HTTP 429 with ``Retry-After`` / backoff.
+    """
+    sym = str(symbol).upper().strip()
+    rng, iv = _chart_range_interval(period, interval)
+    path = quote(sym, safe="")
+    sess = _thread_session()
+    for host in ("query1.finance.yahoo.com", "query2.finance.yahoo.com"):
+        url = f"https://{host}/v8/finance/chart/{path}"
+        for attempt in range(4):
+            js = None
+            try:
+                r = sess.get(url, params={"range": rng, "interval": iv}, timeout=45)
+                if r.status_code == 429:
+                    ra = r.headers.get("Retry-After")
+                    try:
+                        wait_s = float(ra) if ra else 0.0
+                    except ValueError:
+                        wait_s = 0.0
+                    wait_s = max(wait_s, 2.0 + attempt * 2.5)
+                    time.sleep(min(wait_s, 60.0))
+                    continue
+                r.raise_for_status()
+                js = r.json()
+            except Exception:
+                time.sleep(1.4 + attempt * 1.8)
+                continue
+            if not isinstance(js, dict):
+                continue
+            chart = js.get("chart") or {}
+            err = chart.get("error")
+            if err:
+                if isinstance(err, dict):
+                    desc = str(err.get("description", "")).lower()
+                else:
+                    desc = str(err).lower()
+                if "rate" in desc or "too many" in desc or "429" in desc:
+                    time.sleep(3.0 + attempt * 2.0)
+                    continue
+                break
+            results = chart.get("result")
+            if not results:
+                break
+            df = _frame_from_chart_result(results[0])
+            if df is not None and not df.empty:
+                return df
+            break
+    return None
 
 
 def fetch_earnings_date(ticker: str) -> Any:
