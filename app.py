@@ -51,6 +51,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 import plotly.graph_objects as go
 import math, warnings, json, time, os
+import textwrap
 from pathlib import Path
 warnings.filterwarnings("ignore")
 
@@ -89,6 +90,13 @@ def _streamlit_secrets_flat():
     """Scalar top-level keys from st.secrets (Streamlit Cloud). Skips nested tables."""
     try:
         if not hasattr(st, "secrets"):
+            return {}
+        # Avoid local warning banner when no secrets file exists.
+        local_secret_paths = (
+            Path.home() / ".streamlit" / "secrets.toml",
+            CONFIG_PATH.parent / ".streamlit" / "secrets.toml",
+        )
+        if not any(p.exists() for p in local_secret_paths):
             return {}
         sec = st.secrets
         if sec is None or len(sec) == 0:
@@ -205,9 +213,8 @@ def _yfinance_ticker(symbol: str):
 def _client_suggests_mobile_chart():
     """Best-effort mobile UA hint for tighter Plotly margins (server-side; no layout jank)."""
     try:
-        from streamlit.web.server.websocket_headers import _get_websocket_headers
-
-        h = _get_websocket_headers() or {}
+        _hdrs = st.context.headers
+        h = _hdrs.to_dict() if _hdrs is not None else {}
         lk = {str(k).lower(): v for k, v in h.items()}
         ua = str(lk.get("user-agent") or lk.get("user_agent") or "").lower()
         return any(tok in ua for tok in ("iphone", "ipad", "ipod", "android", "mobile"))
@@ -2530,11 +2537,7 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
             increasing_fillcolor=_PLOTLY_CASH_UP, decreasing_fillcolor=_PLOTLY_CASH_DOWN,
             increasing_line_width=1.35, decreasing_line_width=1.35,
             name="Price",
-            hovertemplate=(
-                "<b>" + _tk + "</b> · %{x|%Y-%m-%d}<br>"
-                "O <span style='color:#94a3b8'>$%{open:,.2f}</span> &nbsp;H <span style='color:#94a3b8'>$%{high:,.2f}</span><br>"
-                "L <span style='color:#94a3b8'>$%{low:,.2f}</span> &nbsp;C <span style='color:#94a3b8'>$%{close:,.2f}</span><extra></extra>"
-            ),
+            # Keep native candlestick hover for maximum Plotly-version compatibility.
         )
     )
     if show_ind:
@@ -3155,6 +3158,12 @@ def _glance_metric_card(label, value_html, caption_html, series, line_color):
     )
 
 
+def _render_html_block(raw_html: str) -> str:
+    """Normalize multiline HTML for st.markdown so indented lines are not treated as code blocks."""
+    lines = [line.strip() for line in textwrap.dedent(str(raw_html)).splitlines() if line.strip()]
+    return "".join(lines)
+
+
 def _parse_watchlist_string(s):
     """Split user paste (commas, newlines, semicolons) into unique uppercase tickers."""
     if not s:
@@ -3549,7 +3558,7 @@ def main():
     # ── Watchlist editor (must run before Mission Control so sb_scanner is committed same run)
     _wl_expanded = bool(st.session_state.pop("_open_watchlist_editor", False))
     st.caption("CashFlow Command Center · v14.1")
-    with st.expander("Edit watchlist symbols", expanded=_wl_expanded, key="cf_watchlist_editor_exp"):
+    with st.expander("Edit watchlist symbols", expanded=_wl_expanded):
         st.caption(
             "Drop in tickers separated by commas or line breaks. Shuffle the lineup with the controls. "
             "Everything commits when the app saves your config."
@@ -4292,10 +4301,11 @@ def main():
     #  EXECUTION STRIP (aligned mission + context)
     # ══════════════════════════════════════════════════════════════════
     st.markdown('<div id="execution" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
-    st.markdown(
-        f"<div class='execution-shell'><div class='execution-col'>{master_html}</div><div class='execution-col'>{bluf_html}</div></div>",
-        unsafe_allow_html=True
-    )
+    _ex_left, _ex_right = st.columns([1.25, 1])
+    with _ex_left:
+        st.markdown(_render_html_block(master_html), unsafe_allow_html=True)
+    with _ex_right:
+        st.markdown(_render_html_block(bluf_html), unsafe_allow_html=True)
 
     # ── ALERTS BAR ──
     hi_al = [a for a in al if a["p"] == "HIGH"]
@@ -4348,7 +4358,7 @@ def main():
                     countdown_txt = "Earnings expected today (May 04, 2026)"
                 else:
                     countdown_txt = f"Last projected print date passed by {abs(d_to_print)} days (May 04, 2026)"
-                with st.expander("STRATEGIC INTELLIGENCE: PLTR · Q4 2025 / 2026 OUTLOOK", expanded=True, key="cf_pltr_intel_exp"):
+                with st.expander("STRATEGIC INTELLIGENCE: PLTR · Q4 2025 / 2026 OUTLOOK", expanded=True):
                     gc, bc = st.columns(2)
                     with gc:
                         st.markdown(
