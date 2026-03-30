@@ -90,6 +90,13 @@ def _streamlit_secrets_flat():
     try:
         if not hasattr(st, "secrets"):
             return {}
+        # Avoid StreamlitSecretNotFoundError banner on local/dev runs with no secrets file.
+        local_secret_paths = (
+            Path.home() / ".streamlit" / "secrets.toml",
+            _APP_DIR / ".streamlit" / "secrets.toml",
+        )
+        if not any(p.exists() for p in local_secret_paths):
+            return {}
         sec = st.secrets
         if sec is None or len(sec) == 0:
             return {}
