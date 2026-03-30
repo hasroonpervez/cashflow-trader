@@ -21,7 +21,7 @@ import math
 import sys
 import threading
 import warnings
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -317,12 +317,19 @@ def _tape_pct_changes(symbols: tuple):
     out = {}
     with ThreadPoolExecutor(max_workers=w) as pool:
         futs = {pool.submit(yf_engine.ticker_pct_change_1d, s): s for s in syms}
-        for fut in as_completed(futs):
-            sym = futs[fut]
-            try:
-                out[sym] = fut.result()
-            except Exception:
-                out[sym] = None
+        try:
+            # Hard cap for cloud health checks: don't wait forever on stalled Yahoo calls.
+            for fut in as_completed(futs, timeout=8):
+                sym = futs[fut]
+                try:
+                    out[sym] = fut.result()
+                except Exception:
+                    out[sym] = None
+        except FuturesTimeoutError:
+            pass
+    for s in syms:
+        if s not in out:
+            out[s] = None
     return out
 
 
@@ -364,6 +371,14 @@ def fetch_earnings_calendar_display(ticker: str):
 @st.cache_data(ttl=300)
 def fetch_macro():
     return yf_engine.fetch_macro()
+
+
+def _future_result_or_default(fut, default, *, timeout_s: float):
+    """Return future result with timeout; fall back to default on timeout/error."""
+    try:
+        return fut.result(timeout=timeout_s)
+    except Exception:
+        return default
 
 
 # ═════════════════════════════════════════════════════════════════════════
@@ -2687,13 +2702,14 @@ def main():
             _f_macro = _submit_with_script_ctx(_pool, fetch_macro)
             _f_news = _submit_with_script_ctx(_pool, fetch_news, ticker)
             _f_earn = _submit_with_script_ctx(_pool, fetch_earnings_date, ticker)
-            df = _f_df.result()
-            df_wk = _f_wk.result()
-            df_1mo_spark = _f_1mo.result()
-            vix_1mo_df = _f_vix_m.result()
-            macro = _f_macro.result()
-            news = _f_news.result()
-            earnings_date_raw = _f_earn.result()
+            # Timeout each dependency so one slow endpoint cannot trip Streamlit health checks.
+            df = _future_result_or_default(_f_df, pd.DataFrame(), timeout_s=14)
+            df_wk = _future_result_or_default(_f_wk, pd.DataFrame(), timeout_s=12)
+            df_1mo_spark = _future_result_or_default(_f_1mo, pd.DataFrame(), timeout_s=8)
+            vix_1mo_df = _future_result_or_default(_f_vix_m, pd.DataFrame(), timeout_s=8)
+            macro = _future_result_or_default(_f_macro, {}, timeout_s=8)
+            news = _future_result_or_default(_f_news, [], timeout_s=8)
+            earnings_date_raw = _future_result_or_default(_f_earn, None, timeout_s=8)
 
     if df is None or df.empty:
         st.markdown(
