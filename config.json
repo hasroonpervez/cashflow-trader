@@ -1,8 +1,8 @@
 {
   "watchlist": "PLTR,BMNR,AAPL,AMZN,NVDA,AMD,TSLA,SPY,QQQ",
   "scanner_sort_mode": "Custom watchlist order",
-  "strat_focus": "Sell premium",
-  "strat_horizon": "Weekly",
+  "strat_focus": "Hybrid",
+  "strat_horizon": "30 DTE",
   "mini_mode": false,
   "overlay_ema": true,
   "overlay_fib": true,

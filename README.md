@@ -38,6 +38,21 @@ This v14.1 build expects these keys:
 
 Legacy portfolio keys are ignored and removed by the app on load.
 
+Default values in this build:
+
+- `watchlist`: `PLTR,BMNR,AAPL,AMZN,NVDA,AMD,TSLA,SPY,QQQ`
+- `scanner_sort_mode`: `Custom watchlist order`
+- `strat_focus`: `Hybrid`
+- `strat_horizon`: `30 DTE`
+- `mini_mode`: `false`
+- all overlays enabled except `overlay_ichi` and `overlay_super`
+
+## Current UX behavior
+
+- Recommended trade uses strict desk filters first, then fallback guidance if chain liquidity is thin.
+- Alerts row is expandable (click the bell summary to see all active alerts).
+- Watchlist editor, scanner sort mode, strategy focus, horizon, and overlays persist via `config.json`.
+
 ## Notes
 
 - If Yahoo throttles/blocks a symbol, data may be temporarily unavailable.
