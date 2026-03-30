@@ -25,6 +25,8 @@ _DEFAULT_UA = (
 )
 
 _tls = threading.local()
+_YF_CALL_BUDGET_S = 12.0
+_YF_HTTP_TIMEOUT_S = 8.0
 
 
 def _thread_session() -> requests.Session:
@@ -97,7 +99,7 @@ def yf_retry_exceptions(
 
 def fetch_stock(ticker: str, period: str = "1y", interval: str = "1d") -> Optional[pd.DataFrame]:
     def _once() -> Optional[pd.DataFrame]:
-        df = yfinance_ticker(ticker).history(period=period, interval=interval)
+        df = yfinance_ticker(ticker).history(period=period, interval=interval, timeout=_YF_HTTP_TIMEOUT_S)
         if df is None or df.empty:
             return None
         df = df.copy()
@@ -106,7 +108,7 @@ def fetch_stock(ticker: str, period: str = "1y", interval: str = "1d") -> Option
             df.index = df.index.tz_localize(None)
         return df
 
-    out = yf_retry(_once, retry_on_none=True, attempts=6, base_delay=1.8, backoff=1.65)
+    out = yf_retry(_once, retry_on_none=True, attempts=2, base_delay=0.35, backoff=1.4)
     if out is not None and not out.empty:
         return out
     fb = fetch_stock_chart_api(ticker, period, interval)
@@ -118,7 +120,7 @@ def fetch_stock(ticker: str, period: str = "1y", interval: str = "1d") -> Option
 def ticker_pct_change_1d(symbol: str) -> Optional[float]:
     def _once() -> Optional[float]:
         sym = str(symbol).upper().strip()
-        df = yfinance_ticker(sym).history(period="10d", interval="1d")
+        df = yfinance_ticker(sym).history(period="10d", interval="1d", timeout=_YF_HTTP_TIMEOUT_S)
         if df is None or df.empty or len(df) < 2 or "Close" not in df.columns:
             return None
         c = pd.to_numeric(df["Close"], errors="coerce")
@@ -127,7 +129,7 @@ def ticker_pct_change_1d(symbol: str) -> Optional[float]:
         return float((c.iloc[-1] / c.iloc[-2] - 1.0) * 100.0)
 
     sym_u = str(symbol).upper().strip()
-    out = yf_retry(_once, retry_on_none=True, attempts=5, base_delay=1.5, backoff=1.6)
+    out = yf_retry(_once, retry_on_none=True, attempts=2, base_delay=0.25, backoff=1.4)
     if out is not None:
         return out
     df = fetch_stock_chart_api(sym_u, "1mo", "1d")
@@ -141,7 +143,7 @@ def ticker_pct_change_1d(symbol: str) -> Optional[float]:
 
 def fetch_intraday_series(symbol: str, period: str = "5d", interval: str = "1h") -> pd.Series:
     def _once() -> pd.Series:
-        hist = yfinance_ticker(symbol).history(period=period, interval=interval)
+        hist = yfinance_ticker(symbol).history(period=period, interval=interval, timeout=_YF_HTTP_TIMEOUT_S)
         if hist is None or hist.empty or "Close" not in hist.columns:
             return pd.Series(dtype=float)
         s = pd.to_numeric(hist["Close"], errors="coerce").dropna()
@@ -339,25 +341,33 @@ def fetch_stock_chart_api(symbol: str, period: str = "1y", interval: str = "1d")
     rng, iv = _chart_range_interval(period, interval)
     path = quote(sym, safe="")
     sess = _thread_session()
+    deadline = time.monotonic() + _YF_CALL_BUDGET_S
     for host in ("query1.finance.yahoo.com", "query2.finance.yahoo.com"):
         url = f"https://{host}/v8/finance/chart/{path}"
         for attempt in range(4):
+            if time.monotonic() >= deadline:
+                return None
             js = None
             try:
-                r = sess.get(url, params={"range": rng, "interval": iv}, timeout=45)
+                remaining = max(1.0, deadline - time.monotonic())
+                r = sess.get(
+                    url,
+                    params={"range": rng, "interval": iv},
+                    timeout=min(_YF_HTTP_TIMEOUT_S, remaining),
+                )
                 if r.status_code == 429:
                     ra = r.headers.get("Retry-After")
                     try:
                         wait_s = float(ra) if ra else 0.0
                     except ValueError:
                         wait_s = 0.0
-                    wait_s = max(wait_s, 2.0 + attempt * 2.5)
-                    time.sleep(min(wait_s, 60.0))
+                    wait_s = max(wait_s, 0.35 + attempt * 0.45)
+                    time.sleep(min(wait_s, 1.2))
                     continue
                 r.raise_for_status()
                 js = r.json()
             except Exception:
-                time.sleep(1.4 + attempt * 1.8)
+                time.sleep(0.25 + attempt * 0.45)
                 continue
             if not isinstance(js, dict):
                 continue
@@ -369,7 +379,7 @@ def fetch_stock_chart_api(symbol: str, period: str = "1y", interval: str = "1d")
                 else:
                     desc = str(err).lower()
                 if "rate" in desc or "too many" in desc or "429" in desc:
-                    time.sleep(3.0 + attempt * 2.0)
+                    time.sleep(min(1.2, 0.35 + attempt * 0.45))
                     continue
                 break
             results = chart.get("result")
