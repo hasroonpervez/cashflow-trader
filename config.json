@@ -1,5 +1,5 @@
 {
-  "watchlist": "BMNR,PLTR,NVDA,TSLA,AAPL,AMD,AMZN,SOFI,SPY,QQQ,SOXX",
+  "watchlist": "PLTR,BMNR,AAPL,AMZN,NVDA,AMD,TSLA,SPY,QQQ",
   "scanner_sort_mode": "Custom watchlist order",
   "strat_focus": "Hybrid",
   "strat_horizon": "30 DTE",

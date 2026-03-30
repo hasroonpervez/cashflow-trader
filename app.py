@@ -15,51 +15,51 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
+st.markdown(
+    """
+<style>
+/* Production chrome: hide default app menu (hamburger) and footer */
+#MainMenu {
+  visibility: hidden !important;
+  height: 0 !important;
+  max-height: 0 !important;
+  position: fixed !important;
+  top: -9999px !important;
+}
+footer,
+[data-testid="stFooter"],
+.stApp footer {
+  visibility: hidden !important;
+  display: none !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  pointer-events: none !important;
+}
+</style>
+""",
+    unsafe_allow_html=True,
+)
+
 import html as _html_mod
-import json
-import math
-import sys
-import threading
-import warnings
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, as_completed
-from datetime import datetime, timedelta
-from pathlib import Path
-
-import numpy as np
 import pandas as pd
+import numpy as np
+import yfinance as yf
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timedelta
 import plotly.graph_objects as go
-from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
-
-# Ensure ``import data.yf_engine`` works when cwd is not the app folder (Streamlit Cloud / some runners).
-_APP_DIR = Path(__file__).resolve().parent
-if str(_APP_DIR) not in sys.path:
-    sys.path.insert(0, str(_APP_DIR))
-
-import data.yf_engine as yf_engine
-
+import math, warnings, json, time, os
+from pathlib import Path
 warnings.filterwarnings("ignore")
 
-
-def _submit_with_script_ctx(executor, fn, /, *args, **kwargs):
-    """Run ``fn`` in a pool thread with the active ScriptRunContext (needed for ``st.cache_data``)."""
-    ctx = get_script_run_ctx()
-
-    def _run():
-        if ctx is not None:
-            add_script_run_ctx(threading.current_thread(), ctx)
-        return fn(*args, **kwargs)
-
-    return executor.submit(_run)
-
-
 # ─────────────────────────────────────────────────────────────────────────
-# CONFIG — watchlist, scanner, strategy, chart overlays (session_state only; no disk writes)
-# Legacy ``config.json`` is read once per browser session if present (migration).
+# CONFIG PERSISTENCE — watchlist, scanner, Strategy, chart overlays (no secrets / portfolio)
 # ─────────────────────────────────────────────────────────────────────────
-CONFIG_PATH = _APP_DIR / "config.json"
-_CF_APP_CONFIG_KEY = "_cf_app_config"
+CONFIG_PATH = Path(__file__).parent / "config.json"
 DEFAULT_CONFIG = {
-    "watchlist": "PLTR,AAPL,AMZN,NVDA,AMD,TSLA,SPY,QQQ,MSFT",
+    "watchlist": "PLTR,BMNR,AAPL,AMZN,NVDA,AMD,TSLA,SPY,QQQ",
     "scanner_sort_mode": "Custom watchlist order",
     "strat_focus": "Hybrid",
     "strat_horizon": "30 DTE",
@@ -90,13 +90,6 @@ def _streamlit_secrets_flat():
     try:
         if not hasattr(st, "secrets"):
             return {}
-        # Avoid StreamlitSecretNotFoundError banner on local/dev runs with no secrets file.
-        local_secret_paths = (
-            Path.home() / ".streamlit" / "secrets.toml",
-            _APP_DIR / ".streamlit" / "secrets.toml",
-        )
-        if not any(p.exists() for p in local_secret_paths):
-            return {}
         sec = st.secrets
         if sec is None or len(sec) == 0:
             return {}
@@ -111,63 +104,29 @@ def _streamlit_secrets_flat():
         return {}
 
 
-def _normalize_config_value(key: str, val):
-    sample = DEFAULT_CONFIG[key]
-    if isinstance(sample, bool):
-        return bool(val)
-    if isinstance(sample, str):
-        return str(val) if val is not None else sample
-    return val if val is not None else sample
-
-
-def _coerce_full_config(raw: dict) -> dict:
-    """Keep only known keys; normalize types to match ``DEFAULT_CONFIG``."""
-    out = {}
-    for k in DEFAULT_CONFIG:
-        out[k] = _normalize_config_value(k, raw.get(k, DEFAULT_CONFIG[k]))
-    return out
-
-
-def _ensure_app_config() -> None:
-    """Hydrate ``_cf_app_config`` once: defaults + secrets + optional legacy ``config.json``."""
-    if _CF_APP_CONFIG_KEY in st.session_state:
-        return
+def load_config():
+    """Local `config.json` merged over defaults; optional `st.secrets` overlay for Cloud."""
     merged = {**DEFAULT_CONFIG, **_streamlit_secrets_flat()}
-    legacy_failed = False
     try:
         if CONFIG_PATH.exists():
-            with open(CONFIG_PATH, encoding="utf-8") as f:
+            with open(CONFIG_PATH) as f:
                 saved = json.load(f)
             merged = {**merged, **saved}
             for k in _LEGACY_CONFIG_KEYS:
                 merged.pop(k, None)
     except Exception:
-        legacy_failed = True
-    st.session_state[_CF_APP_CONFIG_KEY] = _coerce_full_config(merged)
-    if legacy_failed:
-        st.toast("Could not read legacy config.json; using defaults.", icon="⚠️")
+        pass
+    return merged
 
-
-def load_config():
-    """Current desk settings from ``st.session_state`` (defaults + secrets + one-time file import)."""
-    _ensure_app_config()
-    return dict(st.session_state[_CF_APP_CONFIG_KEY])
-
-
-def save_config(cfg: dict) -> bool:
-    """Merge ``cfg`` into session-backed settings. Never writes to disk."""
+def save_config(cfg):
+    """Atomic write — writes to .tmp first, then renames. Zero corruption risk."""
     try:
-        _ensure_app_config()
-        cur = st.session_state[_CF_APP_CONFIG_KEY]
-        merged = {**cur}
-        for k in DEFAULT_CONFIG:
-            if k in cfg:
-                merged[k] = _normalize_config_value(k, cfg[k])
-        st.session_state[_CF_APP_CONFIG_KEY] = merged
-        return True
+        temp_path = CONFIG_PATH.with_suffix('.tmp')
+        with open(temp_path, "w") as f:
+            json.dump(cfg, f, indent=2)
+        os.replace(temp_path, CONFIG_PATH)
     except Exception:
-        st.toast("Failed to save settings", icon="⚠️")
-        return False
+        pass
 
 
 def _overlay_prefs_from_session():
@@ -185,7 +144,7 @@ def _overlay_prefs_from_session():
 
 
 def _persist_overlay_prefs():
-    """Persist overlay toggles from session state (used inside chart fragment). Merges onto latest session config."""
+    """Persist overlay toggles from session state (used inside chart fragment). Merges onto latest config on disk."""
     base = load_config()
     o = _overlay_prefs_from_session()
     upd = {**base, **o}
@@ -221,11 +180,34 @@ def _hydrate_sidebar_prefs(cfg):
             st.session_state[wkey] = bool(cfg.get(ckey, default))
 
 
+# ─────────────────────────────────────────────────────────────────────────
+# RETRY WRAPPER — handles yfinance throttling gracefully
+# ─────────────────────────────────────────────────────────────────────────
+def retry_fetch(fn, retries=3, delay=2):
+    """Call fn() up to `retries` times with exponential backoff."""
+    for attempt in range(retries):
+        try:
+            result = fn()
+            if result is not None:
+                return result
+        except Exception:
+            pass
+        if attempt < retries - 1:
+            time.sleep(delay * (attempt + 1))
+    return None
+
+
+def _yfinance_ticker(symbol: str):
+    """Fresh ``yf.Ticker`` per call — avoids stale sessions and unbounded cached connections on large watchlists."""
+    return yf.Ticker(str(symbol).upper().strip())
+
+
 def _client_suggests_mobile_chart():
     """Best-effort mobile UA hint for tighter Plotly margins (server-side; no layout jank)."""
     try:
-        _hdrs = st.context.headers
-        h = _hdrs.to_dict() if _hdrs is not None else {}
+        from streamlit.web.server.websocket_headers import _get_websocket_headers
+
+        h = _get_websocket_headers() or {}
         lk = {str(k).lower(): v for k, v in h.items()}
         ua = str(lk.get("user-agent") or lk.get("user_agent") or "").lower()
         return any(tok in ua for tok in ("iphone", "ipad", "ipod", "android", "mobile"))
@@ -254,49 +236,1020 @@ _PLOTLY_BLUE_DEEP = "#2563eb"
 _PLOTLY_BLUE_DEEPER = "#1e40af"
 _PLOTLY_SLATE = "#64748b"
 
+# Injected only when Mini mode is on — tighter main-column density for mobile one-screen scans
+_MINI_MODE_DENSITY_CSS = """
+<style>
+.main .block-container{
+  max-width:100%!important;
+  padding-top:calc(var(--nav-h) + 4px)!important;
+  padding-left:.4rem!important;padding-right:.4rem!important;
+  padding-bottom:.3rem!important;
+}
+.main .block-container [data-testid="stVerticalBlock"]{gap:.22rem!important}
+.main .block-container [data-testid="stHorizontalBlock"]{gap:.3rem!important}
+.main .section-hdr{margin:20px 0 10px 0!important;padding:6px 0 8px 0!important}
+.main .section-hdr h2{font-size:1.08rem!important}
+.main .section-hdr p{font-size:.74rem!important;margin-top:2px!important}
+.main .glance-shell{margin:2px 0 4px 0!important;gap:5px!important}
+.main .glance-card{padding:6px 8px!important;border-radius:10px!important}
+.main .glance-mini{height:50px!important}
+.main .glance-label{font-size:.56rem!important;letter-spacing:.06em!important}
+.main .glance-caption{font-size:.62rem!important;margin-top:2px!important;line-height:1.22!important}
+.main .glance-value{font-size:1.02rem!important}
+.main .glance-inner{gap:4px!important}
+.main .execution-shell{gap:6px!important;margin:2px 0 4px 0!important}
+.main .bluf{padding:11px 12px!important;margin:5px 0!important;border-radius:11px!important}
+.main .bluf .mono{font-size:1.28rem!important}
+.main .trade-master{padding:10px 11px!important;border-radius:10px!important}
+.main .trade-master p{font-size:.82rem!important;line-height:1.42!important;margin:0 0 6px 0!important}
+.main .strike-big{font-size:clamp(1.35rem,4vw,2rem)!important}
+.main .rh-stepper{gap:5px!important;margin-top:6px!important}
+.main .rh-step{padding:6px 8px!important;font-size:.78rem!important}
+.main .tc,.main .ni,.main .ac,.main .scanner-row,.main .glass-card,.main .confluence-meter,.main .rr-card,.main .rh-card,.main .edu-card{padding:7px 9px!important;margin:3px 0!important;border-radius:9px!important}
+.main .diamond-blue,.main .diamond-pink,.main .gold-zone{padding:11px 12px!important;margin:5px 0!important}
+.main .explain{padding:10px 12px!important;margin:6px 0!important;line-height:1.48!important;font-size:.84rem!important}
+.main div[data-testid="stMetric"]{
+  padding:8px 10px!important;border-radius:12px!important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.05),
+    0 1px 3px rgba(0,0,0,.18),
+    0 8px 20px rgba(2,6,23,.38)!important;
+}
+.main div[data-testid="stMetric"] label{font-size:.58rem!important}
+.main div[data-testid="stMetric"] [data-testid="stMetricValue"]{font-size:1.02rem!important}
+.main .stMarkdown p{font-size:.84rem!important;line-height:1.45!important;margin:0 0 .3rem 0!important}
+.main h1{font-size:1.28rem!important;margin:0 0 .2rem 0!important}
+.main .cf-page-header{margin-bottom:6px!important;gap:6px!important}
+.main .cf-page-header h1{font-size:1.22rem!important;line-height:1.2!important}
+.main .cf-page-header span{font-size:.62rem!important}
+.main [data-testid="stExpander"] summary{font-size:.84rem!important;padding:.3rem .45rem!important}
+.main [data-baseweb="alert"]{padding:8px 10px!important;font-size:.82rem!important}
+.main .stTabs [data-baseweb="tab"]{padding:5px 9px!important;font-size:.78rem!important}
+.main .tip,.main .sb,.main .sr,.main .sn{padding:8px 10px!important;font-size:.82rem!important;margin:3px 0!important}
+.main .qe{padding:12px!important;margin:6px 0!important}
+@media (max-width:768px){
+  .main .block-container{padding-left:.35rem!important;padding-right:.35rem!important}
+  .main .section-hdr{margin:16px 0 8px 0!important}
+}
+</style>
+"""
+
 # ─────────────────────────────────────────────────────────────────────────
-# Static assets (CSS + JS) — see ``assets/styles.css`` and ``assets/routing.js``
+# CSS (stored as variable, merged with navbar in a single st.markdown call
+# so the first paint stays one consolidated markdown injection)
 # ─────────────────────────────────────────────────────────────────────────
-_ASSETS_DIR = _APP_DIR / "assets"
-_CF_MINI_START = "/* CF_MINI_MODE_START"
-_CF_MINI_END = "/* CF_MINI_MODE_END */"
+_CSS = """
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@300;400;500;600;700&display=swap');
+:root{--bg0:#080c14;--bg1:#0f1520;--bg2:#151d2e;--bg3:#1a2540;--bdr:#1e293b;
+--t1:#e2e8f0;--t2:#94a3b8;--t3:#64748b;--green:#10b981;--red:#ef4444;
+--blue:#3b82f6;--purple:#8b5cf6;--amber:#f59e0b;--cyan:#06b6d4;--cyan-bright:#00e5ff;
+--success:#00FFA3;--danger:#FF005C;--gold:#FFD700;
+--glass-bg:rgba(15,23,42,.65);--glass-bdr:rgba(255,255,255,.1);--nav-h:52px}
+.stApp{
+  background:var(--bg0)!important;font-family:'Inter',sans-serif!important;
+  min-height:100dvh;min-height:-webkit-fill-available;
+  touch-action:manipulation;-webkit-tap-highlight-color:transparent;
+}
+button,[role="button"]{touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+.main .block-container{max-width:1400px!important;padding-top:calc(var(--nav-h) + 14px)!important;padding-left:.7rem!important;padding-right:.7rem!important}
+/* Shell row: fixed nav leaves no flow; collapse markdown + hide bootstrap iframe chrome */
+[data-testid="stMarkdownContainer"]:has(nav.sticky-nav){
+  min-height:0!important;padding:0!important;margin:0!important;border:none!important;outline:none!important;
+  background:transparent!important;box-shadow:none!important;
+}
+[data-testid="stMarkdownContainer"]:has(nav.sticky-nav) iframe[aria-hidden="true"],
+iframe[aria-hidden="true"][data-cf-toggle-boot="1"]{
+  position:fixed!important;left:-9999px!important;top:0!important;width:1px!important;height:1px!important;max-height:1px!important;
+  margin:0!important;padding:0!important;border:0!important;overflow:hidden!important;clip-path:inset(50%)!important;
+  opacity:0!important;pointer-events:none!important;visibility:hidden!important;
+}
+iframe{border:0!important}
+.main [data-testid="stVerticalBlock"] > div:has(> div[data-testid="stMarkdownContainer"] nav.sticky-nav){
+  min-height:0!important;margin-top:0!important;margin-bottom:0!important;
+}
+/* Settings drawer: collapsed by default; FAB script toggles inline display when open */
+section[data-testid="stSidebar"],
+[data-testid="stSidebar"]{
+  display:none!important;width:0!important;min-width:0!important;max-width:0!important;
+  overflow:hidden!important;visibility:hidden!important;
+  box-sizing:border-box!important;
+  background:linear-gradient(180deg,#080d16 0%,#0f172a 50%,#0a101c 100%)!important;
+  border-right:1px solid rgba(100,116,139,.28)!important;
+  -webkit-font-smoothing:antialiased!important;
+  -moz-osx-font-smoothing:grayscale!important;
+}
+[data-testid="stSidebarNav"]{display:none!important}
+#sob,.cf-vip-fab{display:none!important;visibility:hidden!important;pointer-events:none!important}
+/* Mission Control: single bordered HUD shell in main (st.container border=True) */
+.main [data-testid="stVerticalBlockBorderWrapper"]{
+  background:rgba(15,23,42,.88)!important;
+  border:1px solid rgba(0,229,255,.3)!important;
+  border-radius:12px!important;
+  box-shadow:0 4px 28px rgba(2,6,23,.5)!important;
+  margin-bottom:14px!important;
+}
+/* HUD row labels: high contrast on dark bg (Strategy / Horizon headers) */
+.main p.cf-hud-label,
+.main [data-testid="stVerticalBlockBorderWrapper"] p.cf-hud-label{
+  color:#e2e8f0!important;
+  -webkit-text-fill-color:#e2e8f0!important;
+  font-size:0.82rem!important;font-weight:800!important;
+  letter-spacing:0.08em!important;text-transform:uppercase!important;margin:0 0 6px 0!important;
+  line-height:1.35!important;
+  text-shadow:0 1px 2px rgba(0,0,0,.55)!important;
+}
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stWidgetLabel"] p,
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stWidgetLabel"] span,
+.main [data-testid="stVerticalBlockBorderWrapper"] label{
+  color:#e2e8f0!important;
+  -webkit-text-fill-color:#e2e8f0!important;
+}
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-baseweb="radio"] label,
+.main [data-testid="stVerticalBlockBorderWrapper"] [role="radiogroup"] label{
+  color:#f8fafc!important;
+  -webkit-text-fill-color:#f8fafc!important;
+}
+/* st.segmented_control → frontend data-testid is stButtonGroup (Streamlit ≥1.39); keep stSegmentedControl for older builds */
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"],
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stButtonGroup"],
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] > div,
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stButtonGroup"] > div{
+  background:#0c1220!important;
+  border:1px solid #334155!important;
+  border-radius:12px!important;
+  padding:4px 6px!important;
+  gap:6px!important;
+}
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] button,
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stButtonGroup"] button,
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] [data-baseweb="button"],
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stButtonGroup"] [data-baseweb="button"]{
+  color:#e2e8f0!important;
+  -webkit-text-fill-color:#e2e8f0!important;
+  background:#1e293b!important;
+  border:1px solid #475569!important;
+  border-radius:10px!important;
+  font-weight:600!important;
+  font-size:0.78rem!important;
+}
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] button p,
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stButtonGroup"] button p,
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] button span,
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stButtonGroup"] button span,
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] [data-baseweb="button"] p,
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stButtonGroup"] [data-baseweb="button"] p,
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] [data-baseweb="button"] span,
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stButtonGroup"] [data-baseweb="button"] span{
+  color:#e2e8f0!important;
+  -webkit-text-fill-color:#e2e8f0!important;
+}
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] button[aria-pressed="true"],
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stButtonGroup"] button[aria-pressed="true"],
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] button[aria-checked="true"],
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stButtonGroup"] button[aria-checked="true"],
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] [data-baseweb="button"][aria-pressed="true"],
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stButtonGroup"] [data-baseweb="button"][aria-pressed="true"]{
+  background:linear-gradient(180deg,#22d3ee,#0ea5e9)!important;
+  color:#fff!important;
+  -webkit-text-fill-color:#fff!important;
+  border-color:rgba(255,255,255,.28)!important;
+}
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] button[aria-pressed="true"] p,
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stButtonGroup"] button[aria-pressed="true"] p,
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] button[aria-pressed="true"] span,
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stButtonGroup"] button[aria-pressed="true"] span{
+  color:#fff!important;
+  -webkit-text-fill-color:#fff!important;
+}
+/* Base Web v12+ role="radio" segments inside Mission Control (some Streamlit builds) */
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] [role="radio"],
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stButtonGroup"] [role="radio"]{
+  background:#1e293b!important;color:#f1f5f9!important;border:1px solid #475569!important;
+  border-radius:10px!important;padding:8px 10px!important;font-weight:600!important;font-size:0.76rem!important;
+}
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] [role="radio"][aria-checked="true"],
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stButtonGroup"] [role="radio"][aria-checked="true"]{
+  background:linear-gradient(180deg,#22d3ee,#0ea5e9)!important;color:#fff!important;
+  border-color:rgba(255,255,255,.25)!important;
+}
+/* Fallback: Streamlit attaches st-key-<widget_key> on the widget root (test id varies by version) */
+.main [data-testid="stVerticalBlockBorderWrapper"] div[class*="st-key-sb_strat_radio"] button,
+.main [data-testid="stVerticalBlockBorderWrapper"] div[class*="st-key-sb_horizon_radio"] button,
+.main [data-testid="stVerticalBlockBorderWrapper"] div[class*="st-key-sb_strat_radio"] [data-baseweb="button"],
+.main [data-testid="stVerticalBlockBorderWrapper"] div[class*="st-key-sb_horizon_radio"] [data-baseweb="button"],
+.main div[class*="st-key-sb_strat_radio"] [data-testid="stButtonGroup"] button,
+.main div[class*="st-key-sb_horizon_radio"] [data-testid="stButtonGroup"] button,
+.main div[class*="st-key-sb_strat_radio"] [data-testid="stButtonGroup"] [data-baseweb="button"],
+.main div[class*="st-key-sb_horizon_radio"] [data-testid="stButtonGroup"] [data-baseweb="button"]{
+  color:#e2e8f0!important;
+  -webkit-text-fill-color:#e2e8f0!important;
+  background:#1e293b!important;
+  border:1px solid #475569!important;
+}
+.main [data-testid="stVerticalBlockBorderWrapper"] div[class*="st-key-sb_strat_radio"] button[aria-pressed="true"],
+.main [data-testid="stVerticalBlockBorderWrapper"] div[class*="st-key-sb_horizon_radio"] button[aria-pressed="true"],
+.main div[class*="st-key-sb_strat_radio"] [data-testid="stButtonGroup"] button[aria-pressed="true"],
+.main div[class*="st-key-sb_horizon_radio"] [data-testid="stButtonGroup"] button[aria-pressed="true"]{
+  background:linear-gradient(180deg,#22d3ee,#0ea5e9)!important;
+  color:#fff!important;
+  -webkit-text-fill-color:#fff!important;
+}
+/* Streamlit 1.39+ st.segmented_control: BaseButton <button kind="segmented_control"> (not baseweb).
+   Theme bgColor is light on some hosts — force HUD pills readable without BorderWrapper ancestry. */
+.main [data-testid="stButtonGroup"] button[kind="segmented_control"],
+[data-testid="stMain"] [data-testid="stButtonGroup"] button[kind="segmented_control"],
+.block-container [data-testid="stButtonGroup"] button[kind="segmented_control"]{
+  color:#e2e8f0!important;
+  -webkit-text-fill-color:#e2e8f0!important;
+  background-color:#1e293b!important;
+  background-image:none!important;
+  border:1px solid #475569!important;
+  border-radius:10px!important;
+  font-weight:600!important;
+  font-size:0.78rem!important;
+  box-shadow:none!important;
+}
+.main [data-testid="stButtonGroup"] button[kind="segmented_control"] p,
+.main [data-testid="stButtonGroup"] button[kind="segmented_control"] span,
+.main [data-testid="stButtonGroup"] button[kind="segmented_control"] div,
+[data-testid="stMain"] [data-testid="stButtonGroup"] button[kind="segmented_control"] p,
+[data-testid="stMain"] [data-testid="stButtonGroup"] button[kind="segmented_control"] span,
+.block-container [data-testid="stButtonGroup"] button[kind="segmented_control"] p,
+.block-container [data-testid="stButtonGroup"] button[kind="segmented_control"] span{
+  color:#e2e8f0!important;
+  -webkit-text-fill-color:#e2e8f0!important;
+  background:transparent!important;
+  background-color:transparent!important;
+}
+.main [data-testid="stButtonGroup"] button[kind="segmented_controlActive"],
+[data-testid="stMain"] [data-testid="stButtonGroup"] button[kind="segmented_controlActive"],
+.block-container [data-testid="stButtonGroup"] button[kind="segmented_controlActive"]{
+  background:linear-gradient(180deg,#22d3ee,#0ea5e9)!important;
+  background-color:transparent!important;
+  color:#fff!important;
+  -webkit-text-fill-color:#fff!important;
+  border:1px solid rgba(255,255,255,.28)!important;
+  font-weight:600!important;
+  font-size:0.78rem!important;
+}
+.main [data-testid="stButtonGroup"] button[kind="segmented_controlActive"] p,
+.main [data-testid="stButtonGroup"] button[kind="segmented_controlActive"] span,
+[data-testid="stMain"] [data-testid="stButtonGroup"] button[kind="segmented_controlActive"] p,
+[data-testid="stMain"] [data-testid="stButtonGroup"] button[kind="segmented_controlActive"] span,
+.block-container [data-testid="stButtonGroup"] button[kind="segmented_controlActive"] p,
+.block-container [data-testid="stButtonGroup"] button[kind="segmented_controlActive"] span{
+  color:#fff!important;
+  -webkit-text-fill-color:#fff!important;
+}
+.main [data-testid="stButtonGroup"] button[data-testid="stBaseButton-segmented_control"],
+[data-testid="stMain"] [data-testid="stButtonGroup"] button[data-testid="stBaseButton-segmented_control"]{
+  color:#e2e8f0!important;
+  -webkit-text-fill-color:#e2e8f0!important;
+  background-color:#1e293b!important;
+  background-image:none!important;
+  border:1px solid #475569!important;
+}
+.main [data-testid="stButtonGroup"] button[data-testid="stBaseButton-segmented_controlActive"],
+[data-testid="stMain"] [data-testid="stButtonGroup"] button[data-testid="stBaseButton-segmented_controlActive"]{
+  background:linear-gradient(180deg,#22d3ee,#0ea5e9)!important;
+  color:#fff!important;
+  -webkit-text-fill-color:#fff!important;
+  border-color:rgba(255,255,255,.28)!important;
+}
+[data-testid="stAppViewContainer"] [data-testid="stButtonGroup"] button[kind="segmented_control"],
+[data-testid="stAppViewContainer"] [data-testid="stButtonGroup"] button[kind="segmented_controlActive"]{
+  color:#e2e8f0!important;
+  -webkit-text-fill-color:#e2e8f0!important;
+  background-color:#1e293b!important;
+  background-image:none!important;
+  border-color:#475569!important;
+}
+[data-testid="stAppViewContainer"] [data-testid="stButtonGroup"] button[kind="segmented_controlActive"]{
+  background:linear-gradient(180deg,#22d3ee,#0ea5e9)!important;
+  color:#fff!important;
+  -webkit-text-fill-color:#fff!important;
+  border-color:rgba(255,255,255,.28)!important;
+}
+/* Horizontal st.radio fallback for Strategy / Horizon: match pill contrast inside HUD */
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-baseweb="radio"]{
+  background:#0c1220!important;border:1px solid #334155!important;border-radius:12px!important;
+  padding:6px 8px!important;flex-wrap:wrap!important;gap:6px!important;
+}
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-baseweb="radio"] label{
+  background:#1e293b!important;color:#e2e8f0!important;
+  -webkit-text-fill-color:#e2e8f0!important;
+  border:1px solid #475569!important;
+  border-radius:10px!important;padding:8px 10px!important;font-weight:600!important;font-size:0.74rem!important;
+}
+.main [data-testid="stVerticalBlockBorderWrapper"] [data-baseweb="radio"] label:has(input:checked){
+  background:linear-gradient(180deg,#22d3ee,#0ea5e9)!important;color:#fff!important;
+  -webkit-text-fill-color:#fff!important;
+  border-color:rgba(255,255,255,.25)!important;
+}
+.main [data-testid="stVerticalBlockBorderWrapper"] [role="radiogroup"] [role="radio"]{
+  background:#1e293b!important;color:#f1f5f9!important;border:1px solid #475569!important;
+  border-radius:10px!important;
+}
+.main [data-testid="stVerticalBlockBorderWrapper"] [role="radiogroup"] [role="radio"][aria-checked="true"]{
+  background:linear-gradient(180deg,#22d3ee,#0ea5e9)!important;color:#fff!important;
+}
+[data-testid="stSidebarUserContent"]{
+  padding:1rem 1.2rem 2rem 1.2rem!important;
+  padding-top:max(5.75rem, calc(0.85rem + env(safe-area-inset-top, 0px)))!important;
+  box-sizing:border-box!important;
+}
+[data-testid="stSidebar"] [data-testid="stVerticalBlock"]{gap:0.55rem!important}
+[data-testid="stSidebar"] .stMarkdown p,
+[data-testid="stSidebar"] .stMarkdown li{
+  font-size:0.9rem!important;line-height:1.55!important;letter-spacing:0.015em!important;
+}
+[data-testid="stSidebar"] [data-testid="stWidgetLabel"] p,
+[data-testid="stSidebar"] [data-testid="stWidgetLabel"] span{
+  font-size:0.76rem!important;font-weight:600!important;letter-spacing:0.07em!important;
+  text-transform:uppercase!important;color:#cbd5e1!important;
+}
+[data-testid="stSidebar"] h2,[data-testid="stSidebar"] h3,[data-testid="stSidebar"] h4{color:#00e5ff!important}
+[data-testid="stSidebar"] h1:not(.cf-sidebar-title){color:#00e5ff!important}
+[data-testid="stSidebar"] label{color:#cbd5e1!important;font-weight:600!important}
+[data-testid="stSidebar"] .stMarkdown p:not(.cf-sidebar-subtitle),[data-testid="stSidebar"] span:not(.cf-sidebar-subtitle){color:#e2e8f0!important}
+[data-testid="stSidebar"] .cf-sidebar-brand{padding:4px 2px 8px 2px!important;text-align:center!important}
+[data-testid="stSidebar"] .cf-sidebar-title{
+  font-size:1.5rem!important;font-weight:800!important;margin:0!important;line-height:1.15!important;
+  background:linear-gradient(135deg,#34d399,#38bdf8)!important;
+  -webkit-background-clip:text!important;-webkit-text-fill-color:transparent!important;
+  background-clip:text!important;letter-spacing:-.02em!important;
+}
+[data-testid="stSidebar"] .cf-sidebar-subtitle{
+  color:#8b9cb3!important;font-size:.72rem!important;font-weight:600!important;letter-spacing:.16em!important;
+  text-transform:uppercase!important;margin:8px 0 0 0!important;line-height:1.35!important;
+}
+/* Streamlit sidebar header row (collapse / close); no neon */
+[data-testid="stSidebar"] [data-testid="stVerticalBlock"] > div:first-child button,
+[data-testid="stSidebar"] button[kind="header"],
+[data-testid="stSidebar"] button[kind="headerNoPadding"]{
+  background:rgba(30,41,59,.88)!important;color:#cbd5e1!important;
+  border:1px solid rgba(100,116,139,.45)!important;border-radius:10px!important;
+  box-shadow:none!important;
+}
+[data-testid="stSidebar"] [data-testid="stVerticalBlock"] > div:first-child button:hover{
+  background:rgba(51,65,85,.9)!important;color:#f1f5f9!important;border-color:rgba(148,163,184,.5)!important;
+}
+/* Sidebar watchlist: stop cramped 3-col buttons from breaking words mid-label */
+[data-testid="stSidebar"] .stButton > button{
+  white-space:nowrap!important;text-align:center!important;
+  font-size:.82rem!important;padding:.45rem .65rem!important;
+}
+[data-testid="stSidebar"] [data-testid="stHorizontalBlock"] [data-testid="column"]{min-width:0!important}
+[data-testid="stSidebar"] textarea{font-family:'JetBrains Mono',monospace!important;font-size:.78rem!important;line-height:1.35!important}
+/* Scoped typography only — a global `span,label` rule breaks Streamlit expander chevrons
+   (Material Symbols render as literal names like _arrow_right and overlap the label). */
+.stMarkdown,.stText{color:var(--t1)!important;font-family:'Inter',sans-serif!important}
+h1,h2,h3,h4,h5,h6{font-family:'Inter',sans-serif!important;font-weight:700!important;color:var(--cyan-bright)!important}
+div[data-testid="stMetric"]{
+  background:linear-gradient(160deg,rgba(15,23,42,.96),rgba(15,23,42,.78))!important;
+  border:1px solid rgba(100,116,139,.38)!important;border-radius:14px!important;
+  padding:14px 16px!important;box-sizing:border-box!important;
+  backdrop-filter:blur(14px)!important;-webkit-backdrop-filter:blur(14px)!important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.07),
+    0 2px 6px rgba(0,0,0,.22),
+    0 14px 32px rgba(2,6,23,.48)!important;
+}
+div[data-testid="stMetric"] label{
+  color:#94a3b8!important;font-size:.72rem!important;text-transform:uppercase!important;
+  letter-spacing:.08em!important;font-weight:600!important;
+}
+div[data-testid="stMetric"] [data-testid="stMetricValue"]{
+  font-family:'JetBrains Mono',monospace!important;font-weight:700!important;
+  font-size:1.5rem!important;letter-spacing:-.02em!important;color:#f8fafc!important;
+}
+[data-testid="stMetricDelta"],
+div[data-testid="stMetric"] [data-testid="stMetricDelta"]{
+  font-family:'JetBrains Mono',monospace!important;font-weight:600!important;font-size:.86rem!important;
+}
+[data-testid="stMetricDeltaIcon-Up"],
+div[data-testid="stMetric"] [data-testid="stMetricDeltaIcon-Up"]{
+  color:#34d399!important;fill:#34d399!important;
+}
+[data-testid="stMetricDeltaIcon-Down"],
+div[data-testid="stMetric"] [data-testid="stMetricDeltaIcon-Down"]{
+  color:#f87171!important;fill:#f87171!important;
+}
+[data-testid="stMetricDelta"]:has([data-testid="stMetricDeltaIcon-Up"]){color:#6ee7b7!important}
+[data-testid="stMetricDelta"]:has([data-testid="stMetricDeltaIcon-Down"]){color:#fca5a5!important}
+[data-testid="stMetricDeltaInverseIcon-Up"],
+div[data-testid="stMetric"] [data-testid="stMetricDeltaInverseIcon-Up"]{
+  color:#f87171!important;fill:#f87171!important;
+}
+[data-testid="stMetricDeltaInverseIcon-Down"],
+div[data-testid="stMetric"] [data-testid="stMetricDeltaInverseIcon-Down"]{
+  color:#34d399!important;fill:#34d399!important;
+}
+[data-testid="stMetricDelta"]:has([data-testid="stMetricDeltaInverseIcon-Up"]){color:#fca5a5!important}
+[data-testid="stMetricDelta"]:has([data-testid="stMetricDeltaInverseIcon-Down"]){color:#6ee7b7!important}
+.stTabs [data-baseweb="tab-list"]{gap:0!important;background:var(--bg1)!important;border-radius:10px!important;padding:4px!important}
+.stTabs [data-baseweb="tab"]{border-radius:8px!important;color:var(--t2)!important;font-weight:500!important;padding:8px 16px!important}
+.stTabs [aria-selected="true"]{background:var(--bg2)!important;color:var(--cyan)!important}
+.stButton>button{background:linear-gradient(135deg,var(--blue),var(--purple))!important;color:#fff!important;border:none!important;border-radius:8px!important;font-weight:600!important;padding:8px 24px!important}
+.stSelectbox>div>div,.stNumberInput>div>div>input,.stTextInput>div>div>input{background:var(--bg2)!important;border-color:var(--bdr)!important;color:var(--t1)!important}
+.tc{background:var(--glass-bg);border:1px solid var(--glass-bdr);border-radius:12px;padding:12px 14px;margin-bottom:8px;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);box-shadow:inset 0 1px 1px rgba(255,255,255,.05),0 10px 26px rgba(2,6,23,.36)}
+.sb{background:linear-gradient(135deg,rgba(16,185,129,.12),rgba(5,150,105,.05));border-left:3px solid var(--green);border-radius:8px;padding:16px;margin:8px 0}
+.sr{background:linear-gradient(135deg,rgba(239,68,68,.12),rgba(220,38,38,.05));border-left:3px solid var(--red);border-radius:8px;padding:16px;margin:8px 0}
+.sn{background:linear-gradient(135deg,rgba(245,158,11,.12),rgba(217,119,6,.05));border-left:3px solid var(--amber);border-radius:8px;padding:16px;margin:8px 0}
+.tip{background:var(--bg1);border:1px solid var(--bdr);border-radius:8px;padding:12px 16px;font-size:.85rem;color:var(--t2);margin:4px 0 12px 0}
+.mono{font-family:'JetBrains Mono',monospace!important}
+.ni{background:var(--bg2);border:1px solid var(--bdr);border-radius:8px;padding:12px 16px;margin:6px 0;transition:background .15s}
+.ni:hover{background:var(--bg3)}
+.ac{background:linear-gradient(135deg,rgba(6,182,212,.12),rgba(59,130,246,.08));border:1px solid rgba(6,182,212,.3);border-radius:10px;padding:14px 18px;margin:8px 0}
+.qe{background:linear-gradient(135deg,rgba(139,92,246,.15),rgba(59,130,246,.1));border:2px solid rgba(139,92,246,.4);border-radius:14px;padding:20px;margin:12px 0;text-align:center}
+.bluf{background:linear-gradient(135deg,rgba(16,185,129,.08),rgba(6,182,212,.08));border:2px solid rgba(16,185,129,.3);border-radius:16px;padding:24px 28px;margin:12px 0}
+.tl{display:inline-block;width:12px;height:12px;border-radius:50%;margin-right:8px}
+.explain{border-left:3px solid var(--cyan);border-radius:0 10px 10px 0;padding:18px 22px;margin:16px 0;line-height:1.7}
+.section-hdr{margin:56px 0 28px 0;padding:18px 0;border-bottom:2px solid var(--bdr)}
+.section-hdr h2{margin:0!important;font-size:1.5rem!important;color:var(--t1)!important;letter-spacing:-.01em;display:inline;vertical-align:middle}
+.section-hdr p{margin:4px 0 0 0!important;color:var(--t3)!important;font-size:.9rem!important}
+.cf-tip{
+  cursor:help;display:inline-flex;align-items:center;justify-content:center;width:1.15rem;height:1.15rem;margin-left:8px;
+  border-radius:50%;background:#0f172a;border:1px solid #334155;color:#e2e8f0;font-size:.62rem;font-weight:800;
+  vertical-align:middle;line-height:1;position:relative;top:-2px;overflow:visible;
+}
+.cf-tip:hover{border-color:#00e5ff;background:#1e293b;color:#fff}
+.cf-tip .cf-tiptext{
+  visibility:hidden;opacity:0;transition:opacity .14s;
+  position:absolute;top:calc(100% + 10px);left:8px;transform:none;
+  z-index:2147483647;min-width:320px;width:min(560px,72vw);max-width:72vw;padding:12px 14px;
+  background:#020617;border:1px solid rgba(148,163,184,.4);border-left:4px solid #00E5FF;
+  color:#f1f5f9;font-size:16px;font-weight:600;line-height:1.62;border-radius:10px;
+  box-shadow:0 12px 28px rgba(2,6,23,.78);text-transform:none;letter-spacing:0;
+  white-space:normal;word-break:break-word;
+}
+.cf-tip:hover .cf-tiptext,.cf-tip:focus-visible .cf-tiptext{visibility:visible;opacity:1}
+.cf-tip.cf-tip-ico{
+  width:auto;min-width:1.5rem;height:auto;padding:2px 9px;border-radius:999px;margin-left:4px;
+}
+.cf-tip-ico .cf-tip-ico-mark{font-size:.9rem;line-height:1;font-weight:900;color:#22d3ee}
+.section-hdr,.section-hdr h2,.section-hdr p,[data-testid="stMarkdownContainer"]{overflow:visible!important}
+.rh-card{background:rgba(139,92,246,.06);border:1px solid rgba(139,92,246,.2);border-radius:10px;padding:16px 20px;margin:8px 0;line-height:2}
+.rr-card{background:rgba(16,185,129,.06);border:1px solid rgba(16,185,129,.2);border-radius:10px;padding:14px 18px;margin:8px 0}
+.edu-card{background:var(--bg2);border:1px solid var(--bdr);border-radius:10px;padding:10px 12px;margin:0 0 8px 0}
+.edu-card strong{color:var(--cyan)}
+.stMarkdown p{font-size:.95rem!important;line-height:1.7!important}
+[data-testid="stWidgetLabel"] button,[data-testid="stWidgetLabel"] [role="button"]{
+  color:#e2e8f0!important;opacity:1!important;
+  background:rgba(148,163,184,.2)!important;border:1px solid rgba(148,163,184,.45)!important;
+  border-radius:50%!important;min-width:1.75rem!important;min-height:1.75rem!important;
+}
+[data-testid="stWidgetLabel"] button:hover,[data-testid="stWidgetLabel"] [role="button"]:hover{
+  color:#fff!important;background:rgba(6,182,212,.3)!important;border-color:#22d3ee!important;
+}
+[data-testid="stWidgetLabel"] svg{fill:currentColor!important;color:#e2e8f0!important}
+/* FINAL TOOLTIP VISIBILITY FIX */
+div[data-testid="stTooltipHoverTarget"] {
+    color: #00E5FF !important; cursor: help !important;
+}
+/* Force the actual pop-up container */
+div[data-testid="stTooltipContent"],
+div[data-baseweb="tooltip"] {
+    background-color: #020617 !important;
+    border: 1px solid rgba(148,163,184,.45) !important;
+    border-left: 4px solid #00e5ff !important;
+    min-width: 350px !important;
+    padding: 15px !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+}
+/* Force the text INSIDE the pop-up to be Off-White */
+div[data-testid="stTooltipContent"] p,
+div[data-baseweb="tooltip"] p {
+    color: #f1f5f9 !important;
+    font-size: 14px !important;
+    line-height: 1.6 !important;
+}
+.diamond-blue{background:linear-gradient(135deg,rgba(59,130,246,.15),rgba(6,182,212,.10));border:2px solid rgba(59,130,246,.5);border-radius:14px;padding:20px 24px;margin:12px 0}
+.diamond-pink{background:linear-gradient(135deg,rgba(236,72,153,.15),rgba(244,114,182,.10));border:2px solid rgba(236,72,153,.5);border-radius:14px;padding:20px 24px;margin:12px 0}
+.gold-zone{background:linear-gradient(135deg,rgba(245,158,11,.12),rgba(234,179,8,.08));border:2px solid rgba(245,158,11,.5);border-radius:14px;padding:18px 22px;margin:12px 0}
+.confluence-meter{background:var(--bg2);border:1px solid var(--bdr);border-radius:12px;padding:18px 22px;margin:10px 0}
+.confluence-meter .bar{height:10px;border-radius:5px;margin:3px 0}
+.scanner-row{background:var(--bg2);border:1px solid var(--bdr);border-radius:10px;padding:12px 16px;margin:6px 0;transition:background .15s}
+.scanner-row:hover{background:var(--bg3)}
+.diamond-badge{display:inline-block;padding:4px 12px;border-radius:20px;font-size:.75rem;font-weight:700;letter-spacing:.03em}
+.badge-blue{background:rgba(59,130,246,.2);color:#60a5fa;border:1px solid rgba(59,130,246,.4)}
+.badge-pink{background:rgba(236,72,153,.2);color:#f472b6;border:1px solid rgba(236,72,153,.4)}
+.badge-none{background:rgba(100,116,139,.15);color:#94a3b8;border:1px solid rgba(100,116,139,.3)}
+.badge-gold{background:rgba(245,158,11,.2);color:#fbbf24;border:1px solid rgba(245,158,11,.4)}
+.trade-master{
+  background:linear-gradient(145deg,rgba(0,229,255,.11),rgba(2,6,23,.96));
+  border:2px solid #00e5ff;border-radius:14px;padding:16px 18px;margin:0;
+  box-shadow:0 0 30px rgba(0,229,255,.18),inset 0 1px 1px rgba(255,255,255,.05),0 10px 24px rgba(2,6,23,.55);
+  animation:pulse 1.9s ease-in-out infinite;
+}
+.trade-master .strike-big{
+  font-size:clamp(2rem,5vw,3.2rem);font-weight:900;color:#00e5ff;font-family:'JetBrains Mono',monospace;
+  line-height:1.12;text-shadow:0 0 28px rgba(0,229,255,.4);letter-spacing:-.02em;
+}
+.rh-stepper{display:grid;grid-template-columns:repeat(3,minmax(180px,1fr));gap:8px;margin-top:10px;align-items:stretch;justify-content:center}
+.rh-step{
+  background:rgba(0,229,255,.05);border:1px solid rgba(0,229,255,.3);border-radius:10px;
+  padding:8px 10px;min-height:88px;position:relative;transition:border-color .2s,box-shadow .2s,background .2s;
+}
+.rh-step .num{font-family:'JetBrains Mono',monospace;font-weight:700;color:#00E5FF;font-size:.78rem;letter-spacing:.08em}
+.rh-step .txt{font-size:.82rem;color:#e2e8f0;line-height:1.35;margin-top:4px}
+.rh-step:hover{border-color:#00E5FF;box-shadow:0 0 16px rgba(0,229,255,.38);background:rgba(0,229,255,.09)}
+.rh-step:after{
+  content:'>';position:absolute;right:-10px;top:50%;transform:translateY(-50%);
+  color:rgba(0,229,255,.7);font-size:.95rem;
+}
+.rh-step:last-child:after{display:none}
+@keyframes pulse{
+  0%,100%{box-shadow:0 0 10px rgba(0,229,255,.2),0 0 20px rgba(0,229,255,.4),inset 0 1px 1px rgba(255,255,255,.05),0 10px 24px rgba(2,6,23,.55)}
+  50%{box-shadow:0 0 25px rgba(0,229,255,.5),0 0 20px rgba(0,229,255,.4),inset 0 1px 1px rgba(255,255,255,.08),0 14px 30px rgba(2,6,23,.7)}
+}
+.execution-shell{display:grid;grid-template-columns:1.25fr 1fr;gap:12px;align-items:stretch;margin:8px 0 10px 0;min-width:0}
+.execution-col{min-width:0;overflow:hidden}
+.bluf{margin:0!important;height:100%}
+.trade-master{height:100%}
+@media(max-width:1100px){
+  .execution-shell{grid-template-columns:1fr}
+}
+@media(max-width:900px){
+  .rh-stepper{grid-template-columns:1fr;gap:6px}
+  .rh-step{min-height:unset}
+  .rh-step:after{display:none}
+}
+.diamond-win-badge{
+  display:inline-block;padding:8px 18px;border-radius:999px;background:rgba(16,185,129,.22);
+  border:1px solid #34d399;color:#a7f3d0;font-weight:800;font-size:1.05rem;margin:10px 0;
+  font-family:'JetBrains Mono',monospace;
+}
+[data-testid="stToolbar"]{display:none!important}
+[data-testid="stDecoration"]{display:none!important}
+[data-testid="stStatusWidget"]{display:none!important}
+header{display:none!important}
+[data-testid="stHeader"]{display:none!important}
+[data-testid="stAppHeader"]{display:none!important}
+[data-testid^="stHeader"]{display:none!important}
+@keyframes sobg{
+  0%,100%{box-shadow:0 2px 10px rgba(0,229,255,.2)}
+  50%{box-shadow:0 4px 14px rgba(0,229,255,.35)}
+}
+.sticky-nav{
+  position:fixed;top:0;left:0;width:100%;height:var(--nav-h);
+  z-index:99999;touch-action:manipulation;
+  pointer-events:auto!important;
+  background:rgba(8,12,20,.8)!important;
+  backdrop-filter:blur(15px);-webkit-backdrop-filter:blur(15px);
+  border-bottom:1px solid #1e293b;
+  display:flex;align-items:center;justify-content:center;gap:6px;
+  padding:0 12px;
+  box-shadow:0 2px 24px rgba(0,0,0,.4);
+}
+.sticky-nav-track{
+  flex:1;min-width:0;display:flex;align-items:center;justify-content:center;gap:4px;
+  overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:thin;
+  padding:0 4px;mask-image:linear-gradient(90deg,transparent 0,#000 8px,#000 calc(100% - 8px),transparent 100%);
+}
+.cf-vip-fab{
+  position:fixed!important;top:80px!important;left:20px!important;z-index:1000008!important;
+  touch-action:manipulation;
+  width:52px!important;height:52px!important;margin:0!important;padding:0!important;border-radius:12px!important;
+  border:1px solid rgba(100,116,139,.45)!important;
+  background:rgba(15,23,42,.92)!important;color:#e2e8f0!important;font-size:20px!important;font-weight:700!important;line-height:1!important;
+  cursor:pointer!important;display:flex!important;align-items:center!important;justify-content:center!important;
+  box-shadow:0 2px 12px rgba(0,0,0,.35)!important;animation:none!important;
+  transition:transform .15s,background .15s,border-color .15s,box-shadow .15s!important;
+  font-family:'Inter',system-ui,sans-serif!important;
+  -webkit-appearance:none!important;appearance:none!important;
+}
+.cf-vip-fab:hover{
+  background:rgba(30,41,59,.95)!important;color:#fff!important;transform:scale(1.04)!important;
+  border-color:rgba(0,229,255,.45)!important;box-shadow:0 4px 18px rgba(0,229,255,.2)!important;
+}
+.sticky-nav-track a{
+  pointer-events:auto!important;z-index:100000!important;
+  color:var(--t2);text-decoration:none;
+  font-family:'Inter',sans-serif;font-size:.8rem;font-weight:600;
+  letter-spacing:.02em;text-transform:uppercase;
+  padding:7px 12px;border-radius:6px;
+  transition:color .15s,background .15s;white-space:nowrap;flex-shrink:0;
+}
+.sticky-nav-track a:hover{color:var(--cyan);background:rgba(6,182,212,.1)}
+.sticky-nav-track a:active,.sticky-nav-track a:focus{color:#fff;background:rgba(6,182,212,.2)}
+@media(max-width:768px){
+  .bluf{padding:16px 14px!important}
+  .bluf .mono{font-size:2rem!important}
+  div[data-testid="stMetric"]{padding:9px 11px!important;border-radius:12px!important}
+  .tc{padding:14px!important}
+  .mobile-hide{display:none!important}
+  .sticky-nav{gap:4px;padding:0 6px 0 58px}
+  .cf-vip-fab{width:48px!important;height:48px!important;top:76px!important;left:14px!important;font-size:20px!important}
+  .sticky-nav-track{justify-content:flex-start;mask-image:none}
+  .sticky-nav-track a{font-size:.68rem;padding:6px 8px}
+  .cf-tip .cf-tiptext{
+    left:50%;transform:translateX(-50%);
+    min-width:unset;width:min(92vw,440px);max-width:92vw;
+    font-size:15px;line-height:1.56;
+  }
+}
+/* High-density Bloomberg-like spacing */
+.main .block-container [data-testid="stVerticalBlock"]{gap:.45rem!important}
+.main .block-container [data-testid="stHorizontalBlock"]{gap:.5rem!important}
+[data-testid="stVerticalBlock"] > div{margin-top:0!important;margin-bottom:0!important}
+div[data-testid="stMetricValue"], .mono, .glance-value, .ticker, .price-value{
+  font-family:'JetBrains Mono',monospace!important;
+  font-variant-numeric:tabular-nums lining-nums;
+}
+.glance-value{font-variant-numeric:tabular-nums!important}
+.glass-card,.ni,.ac,.scanner-row,.edu-card,.confluence-meter,.rr-card,.rh-card{
+  background:var(--glass-bg)!important;border:1px solid var(--glass-bdr)!important;
+  backdrop-filter:blur(12px)!important;-webkit-backdrop-filter:blur(12px)!important;
+  box-shadow:inset 0 0 0 1px rgba(0,229,255,.22),0 10px 26px rgba(2,6,23,.36)!important;
+}
+.glance-shell{display:flex;gap:10px;flex-wrap:nowrap;margin:6px 0 10px 0}
+.glance-card{padding:10px 12px 10px 12px;border-radius:12px;min-height:unset}
+.glance-card-whole{min-width:0}
+.glance-row-flex{display:flex;align-items:center;justify-content:space-between;gap:10px;min-width:0}
+.glance-text-col{min-width:0;flex:1 1 auto}
+.glance-spark-col{flex:0 0 auto;display:flex;align-items:center;justify-content:flex-end}
+.glance-spark-svg{display:block;vertical-align:middle}
+.glance-head{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.glance-mini{height:62px}
+.glance-label{font-size:.72rem;color:#a8b6ca;text-transform:uppercase;letter-spacing:.09em;font-weight:700}
+.glance-caption{font-size:.78rem;color:#b7c3d4;margin-top:6px;line-height:1.4}
+.glance-inner{display:grid;grid-template-columns:1.2fr .9fr;gap:8px;align-items:center}
+.trade-master{overflow:hidden;min-width:0}
+.trade-master p{overflow-wrap:anywhere;word-break:break-word;hyphens:auto}
+@media(max-width:1100px){.glance-shell{flex-wrap:wrap}}
+[data-testid="stDataFrame"] tbody tr:hover,
+[data-testid="stTable"] tbody tr:hover{
+  background:rgba(0,229,255,.12)!important;
+  transition:background .2s ease;
+}
+.earnings-intel{padding:14px 16px;border-radius:12px}
+.earnings-intel-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.earn-col{padding:10px 12px;border-radius:10px;background:rgba(2,6,23,.6);border:1px solid rgba(148,163,184,.24)}
+.earn-col h4{margin:0 0 8px 0!important;font-size:.84rem!important;letter-spacing:.08em;text-transform:uppercase}
+.earn-col ul{margin:0;padding-left:1rem}
+.earn-col li{margin:.34rem 0;color:#dbe5f0;font-size:.85rem;line-height:1.35}
+.earn-good h4{color:#00FFA3!important}
+.earn-bad h4{color:#FF005C!important}
+.earn-meta{margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.08);display:flex;gap:12px;flex-wrap:wrap}
+.earn-pill{padding:6px 10px;border-radius:999px;border:1px solid rgba(0,229,255,.35);background:rgba(2,6,23,.66);color:#cbd5e1;font-size:.82rem}
+@media(max-width:900px){.earnings-intel-grid{grid-template-columns:1fr}}
+/* Command bar + watchlist tape (main column HUD) */
+.cf-command-bar .stMarkdown p{margin:0!important}
+.cf-tape-title{font-size:.82rem!important;font-weight:700!important;color:#e2e8f0!important;margin:2px 0 6px 0!important}
+.cf-tape-cell{text-align:center!important}
+/* Main-column segmented / radio pills (same intent as sidebar styling) */
+.main [data-baseweb="radio"]{
+  background:#0c1220!important;border:1px solid #334155!important;border-radius:12px!important;
+  padding:6px 8px!important;flex-wrap:wrap!important;gap:6px!important;
+}
+.main [data-baseweb="radio"] label{
+  background:#1e293b!important;color:#f8fafc!important;border:1px solid #475569!important;
+  border-radius:10px!important;padding:8px 10px!important;margin:0 4px 4px 0!important;
+  font-weight:600!important;font-size:.74rem!important;
+}
+.main [data-baseweb="radio"] label:has(input:checked){
+  background:linear-gradient(180deg,#22d3ee,#0ea5e9)!important;color:#fff!important;
+  border-color:rgba(255,255,255,.25)!important;
+}
+/* Sidebar style: horizontal radio groups (Scanner / Focus / Horizon); dark, readable on all hosts */
+[data-testid="stSidebar"] [data-baseweb="radio"]{
+  background:#0c1220!important;border:1px solid #334155!important;border-radius:12px!important;
+  padding:6px 8px!important;flex-wrap:wrap!important;gap:6px!important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.04)!important;
+}
+[data-testid="stSidebar"] [data-baseweb="radio"] label,
+[data-testid="stSidebar"] [role="radiogroup"] label{
+  background:#1e293b!important;color:#f8fafc!important;border:1px solid #475569!important;
+  border-radius:10px!important;padding:9px 12px!important;margin:0 4px 4px 0!important;
+  font-weight:600!important;font-size:.76rem!important;letter-spacing:.01em!important;
+  cursor:pointer!important;transition:background .15s,border-color .15s,color .15s!important;
+}
+[data-testid="stSidebar"] [data-baseweb="radio"] label:hover,
+[data-testid="stSidebar"] [role="radiogroup"] label:hover{
+  background:#334155!important;border-color:#64748b!important;color:#fff!important;
+}
+[data-testid="stSidebar"] [data-baseweb="radio"] label:has(input:checked),
+[data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked){
+  background:linear-gradient(180deg,#22d3ee,#0ea5e9)!important;
+  color:#fff!important;border-color:rgba(255,255,255,.25)!important;
+  box-shadow:0 2px 12px rgba(14,165,233,.4)!important;
+}
+[data-testid="stSidebar"] [data-baseweb="radio"] label:has(input:checked) *,
+[data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) *{
+  color:#fff!important;
+}
+[data-testid="stSidebar"] [data-baseweb="radio"] input[type="radio"],
+[data-testid="stSidebar"] [role="radiogroup"] input[type="radio"]{
+  accent-color:#22d3ee!important;
+}
+/* Kill theme light fills on radio wrappers (Streamlit Cloud) */
+[data-testid="stSidebar"] [data-baseweb="radio"] > div,
+[data-testid="stSidebar"] [role="radiogroup"] > div{
+  background:transparent!important;
+}
+/* Base Web v12+: options as [role="radio"] divs (not always <label>) */
+[data-testid="stSidebar"] [data-baseweb="radio"] [role="radio"]{
+  background:#1e293b!important;color:#f8fafc!important;border:1px solid #475569!important;
+  border-radius:10px!important;padding:9px 12px!important;margin:0 6px 6px 0!important;
+  font-weight:600!important;font-size:.76rem!important;
+}
+[data-testid="stSidebar"] [data-baseweb="radio"] [role="radio"][aria-checked="true"]{
+  background:linear-gradient(180deg,#22d3ee,#0ea5e9)!important;color:#fff!important;
+  border-color:rgba(255,255,255,.25)!important;box-shadow:0 2px 12px rgba(14,165,233,.4)!important;
+}
+[data-testid="stSidebar"] [data-baseweb="radio"] [role="radio"][aria-checked="false"]{
+  color:#f1f5f9!important;
+}
+[data-testid="stSidebar"] [data-baseweb="radio"] [role="radio"]:hover{
+  background:#334155!important;border-color:#64748b!important;
+}
+/* ── Sidebar: sliders (Quant Edge threshold) ── */
+[data-testid="stSidebar"] [data-baseweb="slider"] [data-baseweb="thumb"]{
+  background:linear-gradient(180deg,#22d3ee,#0891b2)!important;
+  border:2px solid rgba(255,255,255,.85)!important;
+  box-shadow:0 0 0 2px rgba(0,229,255,.35),0 4px 14px rgba(0,229,255,.4)!important;
+  height:22px!important;width:22px!important;
+}
+[data-testid="stSidebar"] [data-baseweb="slider"] [data-baseweb="track"]{
+  background:rgba(30,41,59,.9)!important;border-radius:999px!important;height:8px!important;
+}
+[data-testid="stSidebar"] [data-baseweb="slider"] [data-baseweb="track"] [data-index="0"]{
+  background:linear-gradient(90deg,rgba(0,229,255,.15),rgba(0,229,255,.55))!important;
+  border-radius:999px!important;
+}
+/* ── Sidebar: toggle switches (chart overlays) ── */
+[data-testid="stSidebar"] [data-testid="stToggle"] label{
+  font-size:.84rem!important;font-weight:500!important;color:#e2e8f0!important;
+}
+[data-testid="stSidebar"] [data-baseweb="checkbox"] [data-baseweb="checkmark"]{
+  border-radius:999px!important;
+}
+[data-testid="stSidebar"] [data-testid="stToggle"] [data-baseweb="switch"]{
+  background:rgba(30,41,59,.95)!important;border:1px solid rgba(148,163,184,.35)!important;
+}
+[data-testid="stSidebar"] [data-testid="stToggle"] [data-baseweb="switch"][data-state="checked"]{
+  background:linear-gradient(135deg,#0891b2,#06b6d4)!important;border-color:rgba(0,229,255,.5)!important;
+  box-shadow:0 0 16px rgba(0,229,255,.35)!important;
+}
+[data-testid="stSidebar"] .cf-toggle-grid{
+  display:grid;grid-template-columns:1fr 1fr;gap:6px 10px;align-items:center;margin-top:4px;
+}
+[data-testid="stSidebar"] .cf-toggle-grid [data-testid="stToggle"]{margin:0!important;padding:4px 0!important;}
+[data-testid="stSidebar"] .cf-widget-hint{
+  font-size:.68rem!important;color:#64748b!important;margin:-4px 0 8px 0!important;line-height:1.35!important;
+}
+[data-testid="stSidebar"] [data-baseweb="select"] > div:first-child{
+  border-radius:10px!important;border-color:rgba(0,229,255,.32)!important;
+  background:rgba(15,23,42,.85)!important;min-height:42px!important;
+}
+[data-testid="stSidebar"] [data-baseweb="textarea"]{
+  border-radius:10px!important;border-color:rgba(0,229,255,.22)!important;
+}
+[data-testid="stExpander"]{
+  background:rgba(15,23,42,.65)!important;border:1px solid rgba(255,255,255,.1)!important;border-radius:12px!important;
+  backdrop-filter:blur(12px)!important;-webkit-backdrop-filter:blur(12px)!important;
+  box-shadow:inset 0 0 0 1px rgba(0,229,255,.22),0 10px 26px rgba(2,6,23,.36)!important;
+}
+[data-testid="stExpander"] details,[data-testid="stExpander"] summary{border:none!important}
+[data-testid="stExpander"] summary{
+  background:transparent!important;
+  display:flex!important;align-items:center!important;gap:0.5rem!important;
+  flex-wrap:nowrap!important;list-style:none!important;
+}
+[data-testid="stExpander"] summary::-webkit-details-marker{display:none!important}
+[data-testid="stExpander"] *{border-color:transparent!important}
+.scanner-row{overflow:hidden}
+.scanner-grid{display:flex;justify-content:space-between;align-items:center;flex-wrap:nowrap;gap:10px;overflow-x:auto}
+.scanner-grid > div{white-space:nowrap}
+.scan-summary{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:360px}
+</style>"""
 
+# ─────────────────────────────────────────────────────────────────────────
+# SIDEBAR TOGGLE — injected via iframe srcdoc inside st.markdown
+# ─────────────────────────────────────────────────────────────────────────
+_TOGGLE_JS = r"""(function(){
+function resolveDoc(){
+  var list=[];
+  try{list.push(window.parent);}catch(e1){}
+  try{list.push(window.top);}catch(e2){}
+  list.push(window);
+  for(var i=0;i<list.length;i++){
+    try{
+      var d=list[i].document;
+      if(!d)continue;
+      var sb=d.querySelector('section[data-testid="stSidebar"]')||d.querySelector('[data-testid="stSidebar"]');
+      var nav=d.querySelector('nav.sticky-nav');
+      if(sb&&nav)return d;
+    }catch(e3){}
+  }
+  for(var j=0;j<list.length;j++){
+    try{
+      var d2=list[j].document;
+      if(d2&&(d2.querySelector('section[data-testid="stSidebar"]')||d2.querySelector('[data-testid="stSidebar"]')))return d2;
+    }catch(e4){}
+  }
+  try{return window.parent.document;}catch(e5){return document;}
+}
+var pd=resolveDoc();
+var pw=pd.defaultView||window;
+if(pw.__cfSidebarToggleInit)return;
+pw.__cfSidebarToggleInit=true;
+var legacy=pd.getElementById('sob-host');
+if(legacy)try{legacy.remove()}catch(e0){}
+var oldFab=pd.getElementById('sob');
+if(oldFab&&!oldFab.hasAttribute('data-cf-hamburger'))try{oldFab.remove()}catch(e1){}
+var sOpen=true;
+function sbEl(){return pd.querySelector('section[data-testid="stSidebar"]')||pd.querySelector('[data-testid="stSidebar"]')}
+function iso(){return sOpen}
+function applyClosed(sb){
+  if(!sb)return;
+  sb.setAttribute('aria-expanded','false');
+  sb.style.setProperty('display','none','important');
+  sb.style.setProperty('visibility','hidden','important');
+  sb.style.setProperty('opacity','0','important');
+  sb.style.setProperty('min-width','0','important');
+  sb.style.setProperty('max-width','0','important');
+  sb.style.setProperty('width','0','important');
+  sb.style.setProperty('overflow','hidden','important');
+  sb.style.setProperty('transform','translateX(-100%)','important');
+  sb.style.setProperty('pointer-events','none','important');
+}
+function applyOpen(sb){
+  if(!sb)return;
+  sb.setAttribute('aria-expanded','true');
+  sb.style.setProperty('display','flex','important');
+  sb.style.setProperty('visibility','visible','important');
+  sb.style.setProperty('opacity','1','important');
+  sb.style.setProperty('width','21rem','important');
+  sb.style.setProperty('min-width','21rem','important');
+  sb.style.setProperty('max-width','','important');
+  sb.style.setProperty('transform','none','important');
+  sb.style.setProperty('position','relative','important');
+  sb.style.removeProperty('overflow');
+  sb.style.removeProperty('pointer-events');
+}
+function opn(){var sb=sbEl();if(sb){sOpen=true;applyOpen(sb);}}
+function cls(){
+  var sb=sbEl();
+  if(sb){
+    sOpen=false;
+    applyClosed(sb);
+    queueMicrotask(function(){if(!sOpen)applyClosed(sbEl());});
+    setTimeout(function(){if(!sOpen)applyClosed(sbEl());},0);
+    setTimeout(function(){if(!sOpen)applyClosed(sbEl());},50);
+  }
+}
+function toggleFromUi(ev){
+  if(ev){ev.preventDefault();ev.stopPropagation();}
+  if(iso())cls();else opn();
+}
+function onDocClick(ev){
+  var el=ev.target;
+  if(el&&el.nodeType===3)el=el.parentElement;
+  if(!el||!el.closest)return;
+  if(!el.closest('[data-cf-hamburger="1"]'))return;
+  toggleFromUi(ev);
+}
+pd.addEventListener('click',onDocClick,false);
+/* Sticky nav: anchors inside inactive st.tabs are not mounted — switch tab first, then scroll. */
+function cfFindMainDashTabButtons(){
+  var lists=pd.querySelectorAll('[data-baseweb="tab-list"]');
+  for(var i=0;i<lists.length;i++){
+    var tabs=lists[i].querySelectorAll('[role="tab"]');
+    if(tabs.length!==3)continue;
+    var a=(tabs[0].textContent||'').trim();
+    var b=(tabs[1].textContent||'').trim();
+    if(a.indexOf('Setup')>=0&&b.indexOf('Cashflow')>=0)return tabs;
+  }
+  return null;
+}
+function cfClickMainDashTab(idx,cb,retries){
+  retries=retries||0;
+  var tabs=cfFindMainDashTabButtons();
+  if(!tabs||!tabs[idx]){
+    if(retries<30){setTimeout(function(){cfClickMainDashTab(idx,cb,retries+1);},120);return;}
+    if(cb)cb();
+    return;
+  }
+  try{tabs[idx].click();}catch(e1){}
+  setTimeout(function(){if(cb)cb();},480);
+}
+function cfOpenQuickReference(){
+  var exps=pd.querySelectorAll('[data-testid="stExpander"]');
+  for(var i=0;i<exps.length;i++){
+    var sum=exps[i].querySelector('summary');
+    if(!sum)continue;
+    var tx=(sum.textContent||'').replace(/\s+/g,' ').trim();
+    if(tx.indexOf('Quick Reference')<0)continue;
+    var det=exps[i].querySelector('details');
+    if(det&&!det.open)try{sum.click();}catch(e){}
+    break;
+  }
+}
+function cfScrollToHashId(id){
+  var n=0;
+  function one(){
+    var el=pd.getElementById(id);
+    if(el){
+      el.scrollIntoView({behavior:'smooth',block:'start'});
+      try{pw.history.replaceState(null,'','#'+id);}catch(e){}
+      return;
+    }
+    n++; if(n<50)setTimeout(one,110);
+  }
+  setTimeout(one,60);
+}
+function cfOnStickyNavClick(ev){
+  var t=ev.target;
+  if(t&&t.nodeType===3)t=t.parentElement;
+  if(!t||!t.closest)return;
+  var a=t.closest('a[href^="#"]');
+  if(!a||!a.closest('.sticky-nav'))return;
+  var href=a.getAttribute('href')||'';
+  var id=href.slice(1);
+  if(!id)return;
+  var map={setup:0,'quant-dashboard':0,strategies:1,risk:2,scanner:2,news:2,guide:2};
+  if(map[id]===undefined)return;
+  ev.preventDefault();
+  ev.stopPropagation();
+  var tidx=map[id];
+  cfClickMainDashTab(tidx,function(){
+    if(id==='guide'){
+      setTimeout(function(){
+        cfOpenQuickReference();
+        setTimeout(function(){cfScrollToHashId(id);},380);
+      },120);
+    }else{
+      cfScrollToHashId(id);
+    }
+  });
+}
+pd.addEventListener('click',cfOnStickyNavClick,true);
+function ensureToggle(){
+  var fab=pd.getElementById('sob');
+  if(!fab){
+    fab=pd.createElement('button');
+    fab.type='button';fab.id='sob';fab.className='cf-vip-fab';
+    fab.setAttribute('data-cf-hamburger','1');fab.setAttribute('aria-label','Open or close settings');
+    fab.textContent='\u2630';pd.body.appendChild(fab);
+  }else if(!fab.getAttribute('data-cf-hamburger'))fab.setAttribute('data-cf-hamburger','1');
+}
+function syncToggleUi(){
+  ensureToggle();
+  if(!sOpen)applyClosed(sbEl());
+  var t=pd.getElementById('sob')||pd.querySelector('[data-cf-hamburger="1"]');
+  if(!t)return;
+  t.textContent=iso()?'\u2715':'\u2630';
+  t.title=iso()?'Close settings':'Open settings';
+  t.setAttribute('aria-expanded',iso()?'true':'false');
+}
+function armSidebarMo(){
+  var sb=sbEl();
+  if(!sb||sb.__cfMo)return;
+  sb.__cfMo=1;
+  new MutationObserver(function(){
+    if(!sOpen){
+      var x=sbEl();
+      if(x)applyClosed(x);
+    }
+  }).observe(sb,{attributes:true,attributeFilter:['style','class']});
+}
+function hideDefaultStreamlitHeader(){
+  var all=pd.querySelectorAll('header,[data-testid*="eader"],[data-testid*="Header"]');
+  for(var i=0;i<all.length;i++){
+    all[i].style.setProperty('display','none','important');
+  }
+}
+ensureToggle();
+armSidebarMo();
+setInterval(function(){ensureToggle();armSidebarMo();syncToggleUi();},400);
+hideDefaultStreamlitHeader();setInterval(hideDefaultStreamlitHeader,1500);
+})();"""
+_TOGGLE_SRCDOC = _html_mod.escape("<script>" + _TOGGLE_JS + "</script>", quote=True)
 
-def _read_asset(rel: str) -> str:
-    return (_ASSETS_DIR / rel).read_text(encoding="utf-8")
-
-
-def _split_styles_css(full: str) -> tuple[str, str]:
-    """Return (base_css, mini_density_css) from the bundled stylesheet."""
-    s = full.find(_CF_MINI_START)
-    e = full.find(_CF_MINI_END)
-    if s == -1 or e == -1 or e <= s:
-        return full.strip(), ""
-    base = full[:s].strip()
-    mid = full[s:e]
-    lines = mid.splitlines()
-    if lines and "CF_MINI_MODE_START" in lines[0]:
-        lines = lines[1:]
-    mini = "\n".join(lines).strip()
-    return base, mini
-
-
-def inject_assets() -> None:
-    """Load ``assets/styles.css`` (theme + layout). Section nav uses Streamlit buttons — see ``_render_cf_nav_bar``."""
-    full_css = _read_asset("styles.css")
-    base_css, _mini = _split_styles_css(full_css)
-    st.markdown(f"<style>{base_css}</style>", unsafe_allow_html=True)
-
-
-def inject_mini_mode_density_css() -> None:
-    """Second-pass density rules when Mini mode is enabled (session / sidebar toggle)."""
-    full_css = _read_asset("styles.css")
-    _, mini = _split_styles_css(full_css)
-    if mini:
-        st.markdown(f"<style>{mini}</style>", unsafe_allow_html=True)
-
-
-inject_assets()
+st.markdown(
+    _CSS + f"""
+<button type="button" class="cf-vip-fab" id="sob" data-cf-hamburger="1" aria-label="Open or close settings" title="Settings">&#9776;</button>
+<nav class="sticky-nav">
+<div class="sticky-nav-track">
+<a href="#execution">Execution</a>
+<a href="#charts">Charts</a>
+<a href="#setup">Setup</a>
+<a href="#quant-dashboard">Quant Dashboard</a>
+<a href="#strategies">Strategies</a>
+<a href="#risk">Risk</a>
+<a href="#scanner">Scanner</a>
+<a href="#news">News</a>
+<a href="#guide">Guide</a>
+</div>
+</nav>
+<iframe data-cf-toggle-boot="1" srcdoc="{_TOGGLE_SRCDOC}" title="" tabindex="-1" aria-hidden="true"></iframe>
+""",
+    unsafe_allow_html=True,
+)
 
 # ═════════════════════════════════════════════════════════════════════════
 #  DATA LAYER
@@ -304,91 +1257,326 @@ inject_assets()
 
 @st.cache_data(ttl=300)
 def fetch_stock(ticker, period="1y", interval="1d"):
-    return yf_engine.fetch_stock(ticker, period, interval)
+    def _fetch():
+        df = _yfinance_ticker(ticker).history(period=period, interval=interval)
+        if df.empty:
+            return None
+        df.index = pd.to_datetime(df.index)
+        if df.index.tz is not None:
+            df.index = df.index.tz_localize(None)
+        return df
+    return retry_fetch(_fetch)
 
 
-_TAPE_PCT_MAX = 32
-
-
-@st.cache_data(ttl=120, show_spinner=False)
-def _tape_pct_changes(symbols: tuple):
-    """One cache entry per watchlist lineup; parallel Yahoo hits with a hard cap (avoids script timeout)."""
-    syms = tuple(dict.fromkeys(symbols))[:_TAPE_PCT_MAX]
-    if not syms:
-        return {}
-    n = len(syms)
-    if n == 1:
-        s0 = syms[0]
-        return {s0: yf_engine.ticker_pct_change_1d(s0)}
-    w = min(3, n)
-    out = {}
-    pool = ThreadPoolExecutor(max_workers=w)
+@st.cache_data(ttl=120)
+def _ticker_pct_change_1d(symbol: str):
+    """Approximate last session % change for watchlist tape (cached per symbol)."""
     try:
-        futs = {pool.submit(yf_engine.ticker_pct_change_1d, s): s for s in syms}
-        try:
-            # Hard cap for cloud health checks: don't wait forever on stalled Yahoo calls.
-            for fut in as_completed(futs, timeout=8):
-                sym = futs[fut]
-                try:
-                    out[sym] = fut.result()
-                except Exception:
-                    out[sym] = None
-        except FuturesTimeoutError:
-            pass
-    finally:
-        pool.shutdown(wait=False, cancel_futures=True)
-    for s in syms:
-        if s not in out:
-            out[s] = None
-    return out
+        sym = str(symbol).upper().strip()
+        df = _yfinance_ticker(sym).history(period="10d", interval="1d")
+        if df is None or df.empty or len(df) < 2:
+            return None
+        c = df["Close"]
+        return float((c.iloc[-1] / c.iloc[-2] - 1.0) * 100.0)
+    except Exception:
+        return None
 
 
 @st.cache_data(ttl=300)
 def fetch_intraday_series(symbol, period="5d", interval="1h"):
-    return yf_engine.fetch_intraday_series(symbol, period, interval)
-
+    """Cached intraday close series for compact UI sparklines."""
+    try:
+        hist = _yfinance_ticker(symbol).history(period=period, interval=interval)
+        if hist is None or hist.empty or "Close" not in hist.columns:
+            return pd.Series(dtype=float)
+        s = pd.to_numeric(hist["Close"], errors="coerce").dropna()
+        return s
+    except Exception:
+        return pd.Series(dtype=float)
 
 @st.cache_data(ttl=300)
 def fetch_info(ticker):
-    return yf_engine.fetch_info(ticker)
-
+    try:
+        return _yfinance_ticker(ticker).info
+    except Exception:
+        return {}
 
 @st.cache_data(ttl=300)
 def fetch_options(ticker, exp=None):
-    return yf_engine.fetch_options(ticker, exp)
+    """Fetch options chain. Always returns ((calls_df, puts_df), exps) for stable unpacking.
+
+    When ``exp`` is None, returns empty dataframes and only the expiration list (no ``option_chain``
+    download). Call again with a concrete expiry when you need strikes. This avoids pulling the
+    nearest expiry chain twice on every dashboard load.
+
+    If the requested expiry returns empty frames (illiquid / API gap), we walk forward through
+    nearby listed expiries so BLUF and the Execution Strip never assume non-empty strikes."""
+    empty = (pd.DataFrame(), pd.DataFrame())
+
+    def _frames_from_chain(chain_obj):
+        if chain_obj is None:
+            return pd.DataFrame(), pd.DataFrame()
+        c_raw, p_raw = chain_obj.calls, chain_obj.puts
+        calls_df = c_raw.copy() if c_raw is not None and not c_raw.empty else pd.DataFrame()
+        puts_df = p_raw.copy() if p_raw is not None and not p_raw.empty else pd.DataFrame()
+        return calls_df, puts_df
+
+    try:
+        t = _yfinance_ticker(ticker)
+        raw_exps = getattr(t, "options", None)
+        if raw_exps is None:
+            return empty, []
+        exps = [str(x) for x in list(raw_exps)]
+        if not exps:
+            return empty, []
+        if exp is None:
+            return empty, exps
+        primary = exp if exp in exps else exps[0]
+        candidates = [primary]
+        for e in exps:
+            if e not in candidates:
+                candidates.append(e)
+            if len(candidates) >= 8:
+                break
+        last_empty = empty
+        for pick in candidates:
+            try:
+                chain = t.option_chain(pick)
+                calls_df, puts_df = _frames_from_chain(chain)
+                if not calls_df.empty or not puts_df.empty:
+                    return (calls_df, puts_df), exps
+                last_empty = (calls_df, puts_df)
+            except Exception:
+                continue
+        return last_empty, exps
+    except Exception:
+        return empty, []
 
 
 @st.cache_data(ttl=900)
 def compute_iv_rank_proxy(sym: str, spot: float, ref_iv_pct: float):
-    return yf_engine.compute_iv_rank_proxy(sym, spot, ref_iv_pct)
+    """Where ``ref_iv_pct`` sits between min/max ATM call IV sampled across visible expiries.
+
+    Yahoo does not expose a true 52-week ATM IV series per equity; this **term-structure proxy**
+    compares your reference IV (e.g. prop-desk strike) to the cheapest vs richest ATM IV across
+    listed expirations. Returns ``dict`` with ``rank`` (0–100), ``lo``, ``hi``, or ``None``."""
+    if ref_iv_pct is None or spot is None or spot <= 0:
+        return None
+    try:
+        t = _yfinance_ticker(sym)
+        exps = list(getattr(t, "options", None) or [])[:14]
+        if len(exps) < 2:
+            return None
+        samples = []
+        for exp in exps:
+            try:
+                chain = t.option_chain(exp)
+                c = chain.calls
+                if c is None or c.empty or "impliedVolatility" not in c.columns:
+                    continue
+                c = c[c["impliedVolatility"].notna() & (c["impliedVolatility"] > 0)]
+                if c.empty or "strike" not in c.columns:
+                    continue
+                ix = (pd.to_numeric(c["strike"], errors="coerce") - spot).abs().idxmin()
+                iv = float(c.loc[ix, "impliedVolatility"]) * 100.0
+                if iv > 0:
+                    samples.append(iv)
+            except Exception:
+                continue
+        if len(samples) < 2:
+            return None
+        lo, hi = min(samples), max(samples)
+        if hi <= lo + 0.25:
+            return {"rank": 50.0, "lo": lo, "hi": hi}
+        rank = (float(ref_iv_pct) - lo) / (hi - lo) * 100.0
+        rank = max(0.0, min(100.0, rank))
+        return {"rank": rank, "lo": lo, "hi": hi}
+    except Exception:
+        return None
 
 
 @st.cache_data(ttl=600)
 def fetch_news(ticker):
-    return yf_engine.fetch_news(ticker)
-
+    try:
+        raw = _yfinance_ticker(ticker).news or []
+        items = []
+        for n in raw[:8]:
+            title = n.get("title") or n.get("content", {}).get("title", "")
+            link = n.get("link") or n.get("content", {}).get("canonicalUrl", {}).get("url", "")
+            pub = n.get("publisher") or n.get("content", {}).get("provider", {}).get("displayName", "")
+            pt = ""
+            try:
+                ts = n.get("providerPublishTime") or n.get("content", {}).get("pubDate", "")
+                if isinstance(ts, (int, float)):
+                    pt = datetime.fromtimestamp(ts).strftime("%b %d, %H:%M")
+                elif isinstance(ts, str) and ts:
+                    pt = ts[:16]
+            except Exception:
+                pass
+            if title:
+                items.append({"title": title, "link": link, "pub": pub, "time": pt})
+        return items
+    except Exception:
+        return []
 
 @st.cache_data(ttl=3600)
 def fetch_earnings_date(ticker):
-    return yf_engine.fetch_earnings_date(ticker)
+    """Fetch next earnings date from yfinance corporate calendar."""
+    try:
+        cal = _yfinance_ticker(ticker).calendar
+        if cal is None:
+            return None
+        if isinstance(cal, dict):
+            ed = cal.get("Earnings Date")
+            if isinstance(ed, (list, tuple)) and ed:
+                return ed[0]
+            return ed if ed else None
+        if isinstance(cal, pd.DataFrame):
+            if "Earnings Date" in cal.columns:
+                return cal["Earnings Date"].iloc[0]
+            if "Earnings Date" in cal.index:
+                val = cal.loc["Earnings Date"]
+                return val.iloc[0] if hasattr(val, "iloc") else val
+        return None
+    except Exception:
+        return None
+
+
+def _earnings_ts_normalize(x):
+    """Naive midnight timestamp for calendar / earnings_dates index values."""
+    if isinstance(x, str) and len(x) >= 10:
+        t = pd.Timestamp(x[:10])
+    else:
+        t = pd.Timestamp(x)
+    if t.tzinfo is not None:
+        t = t.tz_convert("UTC").tz_localize(None)
+    return t.normalize()
+
+
+def _earnings_float_or_none(x):
+    if x is None:
+        return None
+    try:
+        if isinstance(x, str) and not x.strip():
+            return None
+        v = float(x)
+        if np.isnan(v):
+            return None
+        return v
+    except (TypeError, ValueError):
+        return None
+
+
+def _earnings_find_col(df: pd.DataFrame, *candidates: str):
+    cols = list(df.columns)
+    norm = {str(c).strip().lower().replace(" ", ""): c for c in cols}
+    for cand in candidates:
+        key = cand.strip().lower().replace(" ", "")
+        if key in norm:
+            return norm[key]
+        if cand in cols:
+            return cand
+    return None
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_earnings_calendar_display(ticker: str):
-    return yf_engine.fetch_earnings_calendar_display(ticker)
+    """Build earnings calendar rows for the desk table. Returns (df, highlight_row_index | None)."""
+    today_d = datetime.now().date()
+    rows = []
+    try:
+        t = _yfinance_ticker(ticker)
+        ed = getattr(t, "earnings_dates", None)
+        if isinstance(ed, pd.DataFrame) and not ed.empty:
+            ed = ed.copy()
+            ed.index = [_earnings_ts_normalize(i) for i in ed.index]
+            ed = ed.sort_index(ascending=True)
+            cutoff = pd.Timestamp(today_d) - pd.Timedelta(days=800)
+            ed = ed[ed.index >= cutoff]
+            if len(ed) > 18:
+                ed = ed.iloc[-18:]
+
+            c_est = _earnings_find_col(ed, "EPS Estimate", "eps estimate")
+            c_rep = _earnings_find_col(ed, "Reported EPS", "Reported Eps")
+            c_sur = _earnings_find_col(ed, "Surprise(%)", "Surprise (%)", "Surprise %")
+
+            for dt_ts, row in ed.iterrows():
+                d = dt_ts.date() if hasattr(dt_ts, "date") else pd.Timestamp(dt_ts).date()
+                est = row[c_est] if c_est else np.nan
+                rep = row[c_rep] if c_rep else np.nan
+                sur = row[c_sur] if c_sur else np.nan
+                has_rep = pd.notna(rep) and str(rep).strip() != ""
+                if has_rep:
+                    status = "Reported"
+                elif d >= today_d:
+                    status = "Upcoming"
+                else:
+                    status = "Past"
+                rows.append(
+                    {
+                        "Earnings date": d,
+                        "EPS estimate": _earnings_float_or_none(est),
+                        "Reported EPS": _earnings_float_or_none(rep),
+                        "Surprise (%)": _earnings_float_or_none(sur),
+                        "Status": status,
+                    }
+                )
+
+        if not rows:
+            raw = fetch_earnings_date(ticker)
+            if raw is not None:
+                try:
+                    dt_ts = _earnings_ts_normalize(raw)
+                    d = dt_ts.date()
+                    status = "Upcoming" if d >= today_d else "Past"
+                    rows.append(
+                        {
+                            "Earnings date": d,
+                            "EPS estimate": None,
+                            "Reported EPS": None,
+                            "Surprise (%)": None,
+                            "Status": status,
+                        }
+                    )
+                except Exception:
+                    pass
+
+        if not rows:
+            return pd.DataFrame(), None
+
+        df = pd.DataFrame(rows)
+        df = df.sort_values("Earnings date", ascending=False, kind="mergesort").reset_index(drop=True)
+
+        future_df = df[df["Earnings date"] >= today_d]
+        highlight_idx = None
+        if not future_df.empty:
+            next_d = future_df["Earnings date"].min()
+            hit = df.index[df["Earnings date"] == next_d]
+            if len(hit):
+                highlight_idx = int(hit[0])
+
+        return df, highlight_idx
+    except Exception:
+        return pd.DataFrame(), None
 
 
 @st.cache_data(ttl=300)
 def fetch_macro():
-    return yf_engine.fetch_macro()
-
-
-def _future_result_or_default(fut, default, *, timeout_s: float):
-    """Return future result with timeout; fall back to default on timeout/error."""
-    try:
-        return fut.result(timeout=timeout_s)
-    except Exception:
-        return default
+    data = {}
+    for label, sym in {"VIX": "^VIX", "10Y Yield": "^TNX", "DXY (UUP)": "UUP", "SPY": "SPY", "QQQ": "QQQ"}.items():
+        try:
+            df = _yfinance_ticker(sym).history(period="5d")
+            if not df.empty:
+                last = df["Close"].iloc[-1]
+                prev = df["Close"].iloc[-2] if len(df) >= 2 else last
+                data[label] = {"price": last, "chg": (last / prev - 1) * 100}
+        except Exception:
+            pass
+    if "10Y Yield" not in data:
+        data["10Y Yield"] = {"price": 4.5, "chg": 0.0}
+    if "VIX" not in data:
+        data["VIX"] = {"price": 20.0, "chg": 0.0}
+    return data
 
 
 # ═════════════════════════════════════════════════════════════════════════
@@ -1981,6 +3169,7 @@ def _parse_watchlist_string(s):
     return items
 
 
+@st.fragment
 def _fragment_technical_zone(
     df,
     df_wk,
@@ -1997,7 +3186,7 @@ def _fragment_technical_zone(
     mini_mode,
     mobile_chart_layout,
 ):
-    """Charts + overlay toggles + diamond cards + gold zone copy. Price history is cached; full-app reruns stay cheap."""
+    """Charts + overlay toggles + diamond cards + gold zone copy. Reruns without refetching Yahoo data."""
     if mini_mode:
         chg_pct = 0.0
         if len(df) >= 2:
@@ -2349,75 +3538,8 @@ def _style_propdesk_highlight(df: pd.DataFrame):
 #  MAIN
 # ═════════════════════════════════════════════════════════════════════════
 
-
-def _init_cf_nav_state():
-    if "_cf_main_tab" not in st.session_state:
-        st.session_state["_cf_main_tab"] = 0
-    if "_cf_intel_sub" not in st.session_state:
-        st.session_state["_cf_intel_sub"] = 0
-
-
-def _apply_cf_nav_click(nid: str):
-    """Map sticky targets to main dashboard tab + intel sub-panel (no parent-frame JS)."""
-    if nid == "execution":
-        st.session_state["_cf_toast"] = "Execution is the wide strip under the chart area — scroll up if you are lower on the page."
-        return
-    if nid == "charts":
-        st.session_state["_cf_toast"] = "Technical Chart lives under Mission Control — scroll up."
-        return
-    if nid in ("setup", "quant-dashboard"):
-        st.session_state["_cf_main_tab"] = 0
-        return
-    if nid == "strategies":
-        st.session_state["_cf_main_tab"] = 1
-        return
-    if nid in ("risk", "scanner", "news", "guide"):
-        st.session_state["_cf_main_tab"] = 2
-        if nid == "news":
-            st.session_state["_cf_intel_sub"] = 0
-        elif nid == "guide":
-            st.session_state["_cf_intel_sub"] = 0
-            st.session_state["_cf_open_guide"] = True
-        else:
-            st.session_state["_cf_intel_sub"] = 0
-
-
-def _render_cf_nav_bar():
-    _init_cf_nav_state()
-    nav_items = (
-        ("Execution", "execution"),
-        ("Charts", "charts"),
-        ("Setup", "setup"),
-        ("Quant", "quant-dashboard"),
-        ("Strategies", "strategies"),
-        ("Risk", "risk"),
-        ("Scanner", "scanner"),
-        ("News", "news"),
-        ("Guide", "guide"),
-    )
-    for row_start in range(0, len(nav_items), 3):
-        chunk = nav_items[row_start : row_start + 3]
-        cols = st.columns(3)
-        for col, (label, nid) in zip(cols, chunk):
-            with col:
-                if st.button(label, key=f"cf_nav_{nid}", use_container_width=True):
-                    _apply_cf_nav_click(nid)
-                    st.rerun()
-
-
 def main():
     cfg = load_config()
-
-    if "_cf_toast" in st.session_state:
-        st.toast(st.session_state.pop("_cf_toast"))
-
-    with st.container(border=True):
-        st.markdown(
-            "<p class='cf-nav-box-title'>Page shortcuts</p>",
-            unsafe_allow_html=True,
-        )
-        st.caption("Scroll after tapping a shortcut, or use Main desk (under the chart) to switch the big panels.")
-        _render_cf_nav_bar()
 
     if "_sb_scanner_sync" in st.session_state:
         st.session_state["sb_scanner"] = st.session_state.pop("_sb_scanner_sync")
@@ -2427,10 +3549,10 @@ def main():
     # ── Watchlist editor (must run before Mission Control so sb_scanner is committed same run)
     _wl_expanded = bool(st.session_state.pop("_open_watchlist_editor", False))
     st.caption("CashFlow Command Center · v14.1")
-    with st.expander("Edit watchlist symbols", expanded=_wl_expanded):
+    with st.expander("Edit watchlist symbols", expanded=_wl_expanded, key="cf_watchlist_editor_exp"):
         st.caption(
             "Drop in tickers separated by commas or line breaks. Shuffle the lineup with the controls. "
-            "Watchlist and desk preferences are kept in this session (not written to disk)."
+            "Everything commits when the app saves your config."
         )
         scanner_watchlist_raw = st.text_area(
             "Watchlist symbols",
@@ -2639,18 +3761,13 @@ def main():
     if watch_items:
         st.markdown('<p class="cf-tape-title">Watchlist tape</p>', unsafe_allow_html=True)
         st.caption("Tap a symbol to promote it to the active ticker. Daily move is versus the prior session close (cached).")
-        if len(watch_items) > _TAPE_PCT_MAX:
-            st.caption(
-                f"Daily % is loaded for the first {_TAPE_PCT_MAX} symbols only so the app stays under the Streamlit script timeout."
-            )
-        _tape_pct = _tape_pct_changes(tuple(watch_items))
         _TAPE_CHUNK = 8
         tape_i = 0
         for row_start in range(0, len(watch_items), _TAPE_CHUNK):
             row_tickers = watch_items[row_start : row_start + _TAPE_CHUNK]
             tape_cols = st.columns(len(row_tickers))
             for j, tkr in enumerate(row_tickers):
-                pct = _tape_pct.get(tkr)
+                pct = _ticker_pct_change_1d(tkr)
                 pct_str = f"{pct:+.2f}%" if pct is not None else "n/a"
                 c_pct = "#10b981" if (pct is not None and pct >= 0) else ("#ef4444" if pct is not None else "#64748b")
                 is_active = tkr == ticker
@@ -2700,63 +3817,30 @@ def main():
     mini_mode = bool(st.session_state.get("sb_mini_mode", False))
     mobile_chart_layout = _client_suggests_mobile_chart()
     if mini_mode:
-        inject_mini_mode_density_css()
+        st.markdown(_MINI_MODE_DENSITY_CSS, unsafe_allow_html=True)
 
     # ── FETCH (parallel I/O: independent Yahoo endpoints + sparkline series) ──
     with st.spinner(f"Loading {ticker}..."):
-        _pool = ThreadPoolExecutor(max_workers=3)
-        try:
-            _f_df = _submit_with_script_ctx(_pool, fetch_stock, ticker, "1y", "1d")
-            _f_wk = _submit_with_script_ctx(_pool, fetch_stock, ticker, "2y", "1wk")
-            _f_1mo = _submit_with_script_ctx(_pool, fetch_stock, ticker, "1mo", "1d")
-            _f_vix_m = _submit_with_script_ctx(_pool, fetch_stock, "^VIX", "1mo", "1d")
-            _f_macro = _submit_with_script_ctx(_pool, fetch_macro)
-            _f_news = _submit_with_script_ctx(_pool, fetch_news, ticker)
-            _f_earn = _submit_with_script_ctx(_pool, fetch_earnings_date, ticker)
-            # Timeout each dependency so one slow endpoint cannot trip Streamlit health checks.
-            df = _future_result_or_default(_f_df, pd.DataFrame(), timeout_s=14)
-            df_wk = _future_result_or_default(_f_wk, pd.DataFrame(), timeout_s=12)
-            df_1mo_spark = _future_result_or_default(_f_1mo, pd.DataFrame(), timeout_s=8)
-            vix_1mo_df = _future_result_or_default(_f_vix_m, pd.DataFrame(), timeout_s=8)
-            macro = _future_result_or_default(_f_macro, {}, timeout_s=8)
-            news = _future_result_or_default(_f_news, [], timeout_s=8)
-            earnings_date_raw = _future_result_or_default(_f_earn, None, timeout_s=8)
-        finally:
-            _pool.shutdown(wait=False, cancel_futures=True)
+        with ThreadPoolExecutor(max_workers=7) as _pool:
+            _f_df = _pool.submit(fetch_stock, ticker, "1y", "1d")
+            _f_wk = _pool.submit(fetch_stock, ticker, "2y", "1wk")
+            _f_1mo = _pool.submit(fetch_stock, ticker, "1mo", "1d")
+            _f_vix_m = _pool.submit(fetch_stock, "^VIX", "1mo", "1d")
+            _f_macro = _pool.submit(fetch_macro)
+            _f_news = _pool.submit(fetch_news, ticker)
+            _f_earn = _pool.submit(fetch_earnings_date, ticker)
+            df = _f_df.result()
+            df_wk = _f_wk.result()
+            df_1mo_spark = _f_1mo.result()
+            vix_1mo_df = _f_vix_m.result()
+            macro = _f_macro.result()
+            news = _f_news.result()
+            earnings_date_raw = _f_earn.result()
 
     if df is None or df.empty:
-        # QA fallback: if the selected symbol is blocked/empty, auto-pivot to another watchlist symbol.
-        fallback_symbol = None
-        liquidity_fallbacks = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMZN", "TSLA"]
-        seen = {str(ticker).upper().strip()}
-        candidates = []
-        for c in liquidity_fallbacks + list(watch_items):
-            cu = str(c).upper().strip()
-            if cu and cu not in seen:
-                seen.add(cu)
-                candidates.append(cu)
-        for candidate in candidates[:8]:
-            cdf = fetch_stock(candidate, "1y", "1d")
-            if cdf is not None and not cdf.empty:
-                fallback_symbol = candidate
-                break
-        if fallback_symbol:
-            st.warning(
-                f"No usable bars for {_html_mod.escape(str(ticker))}. "
-                f"Switching to {_html_mod.escape(str(fallback_symbol))} from your watchlist."
-            )
-            st.session_state["_sb_watch_selected_sync"] = fallback_symbol
-            st.rerun()
-        st.markdown(
-            "<div style='margin:12px 0;padding:16px 18px;border-radius:12px;border:2px solid #ef4444;"
-            "background:rgba(239,68,68,.12);color:#fecaca;font-size:1rem;line-height:1.5;font-weight:600'>"
-            "<strong style='color:#fca5a5'>No price bars for this symbol.</strong> "
-            "Scroll here if the rest of the desk did not load. Yahoo often blocks or throttles shared cloud IPs.</div>",
-            unsafe_allow_html=True,
-        )
         st.error(
-            f"Data feed unavailable for {_html_mod.escape(str(ticker))}. "
-            "Wait 1-2 minutes and refresh the page; try another ticker from the watchlist; or use Streamlit Manage app, then Reboot."
+            f"Data feed unavailable for {ticker}. Yahoo Finance may be throttling or the tape may be quiet. "
+            "We will try again the moment you refresh."
         )
         st.stop()
 
@@ -3219,7 +4303,7 @@ def main():
         st.markdown(f"<div class='ac'>\U0001f514 <strong>{len(al)} Alert{'s' if len(al) > 1 else ''}</strong>: {hi_al[0]['m']}{'<em> +' + str(len(al) - 1) + ' more</em>' if len(al) > 1 else ''}</div>", unsafe_allow_html=True)
 
     # ══════════════════════════════════════════════════════════════════
-    #  SECTION 1 — TECHNICAL CHART (overlay toggles; Yahoo data stays cached via st.cache_data)
+    #  SECTION 1 — TECHNICAL CHART (fragment: overlay toggles without refetching Yahoo)
     # ══════════════════════════════════════════════════════════════════
     _fragment_technical_zone(
         df,
@@ -3237,52 +4321,17 @@ def main():
         mini_mode,
         mobile_chart_layout,
     )
-
-    # Main desk tabs — only the top shortcut grid could change `_cf_main_tab`; this row makes the three panels obvious.
-    _ti_pick = max(0, min(2, int(st.session_state.get("_cf_main_tab", 0))))
-    with st.container(border=True):
-        st.markdown(
-            "<p class='cf-nav-box-title'>Main desk</p>",
-            unsafe_allow_html=True,
-        )
-        st.caption("Analysis and quant · option strategies · risk, simulator, scanner, and news.")
-        _tb1, _tb2, _tb3 = st.columns(3)
-        with _tb1:
-            if st.button(
-                "Analysis & Quant",
-                key="cf_desk_main_0",
-                use_container_width=True,
-                type="primary" if _ti_pick == 0 else "secondary",
-                help="Setup, volume profile, quant dashboard",
-            ):
-                st.session_state["_cf_main_tab"] = 0
-                st.rerun()
-        with _tb2:
-            if st.button(
-                "Cash-flow strategies",
-                key="cf_desk_main_1",
-                use_container_width=True,
-                type="primary" if _ti_pick == 1 else "secondary",
-                help="Covered calls, CSPs, spreads, Greeks",
-            ):
-                st.session_state["_cf_main_tab"] = 1
-                st.rerun()
-        with _tb3:
-            if st.button(
-                "Risk · tools · intel",
-                key="cf_desk_main_2",
-                use_container_width=True,
-                type="primary" if _ti_pick == 2 else "secondary",
-                help="Psychology, premium simulator, scanner, news, guide",
-            ):
-                st.session_state["_cf_main_tab"] = 2
-                st.rerun()
-
     chart_mood = "bull" if struct == "BULLISH" else ("bear" if struct == "BEARISH" else "neutral")
 
-    ti = max(0, min(2, int(st.session_state.get("_cf_main_tab", 0))))
+    dash_tab_setup, dash_tab_cashflow, dash_tab_intel = st.tabs(
+        [
+            "Setup & quant",
+            "Cashflow & strikes",
+            "Risk, scanner & intel",
+        ]
+    )
 
-    if ti == 0:
+    with dash_tab_setup:
             # ══════════════════════════════════════════════════════════════════
             #  SECTION 2 \u2014 SETUP ANALYSIS
             # ══════════════════════════════════════════════════════════════════
@@ -3299,7 +4348,7 @@ def main():
                     countdown_txt = "Earnings expected today (May 04, 2026)"
                 else:
                     countdown_txt = f"Last projected print date passed by {abs(d_to_print)} days (May 04, 2026)"
-                with st.expander("STRATEGIC INTELLIGENCE: PLTR · Q4 2025 / 2026 OUTLOOK", expanded=True):
+                with st.expander("STRATEGIC INTELLIGENCE: PLTR · Q4 2025 / 2026 OUTLOOK", expanded=True, key="cf_pltr_intel_exp"):
                     gc, bc = st.columns(2)
                     with gc:
                         st.markdown(
@@ -3604,7 +4653,7 @@ def main():
 
             # ══════════════════════════════════════════════════════════════════
 
-    elif ti == 1:
+    with dash_tab_cashflow:
             #  SECTION 4 \u2014 CASH-FLOW STRATEGIES
             # ══════════════════════════════════════════════════════════════════
             st.markdown('<div id="strategies" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
@@ -3797,7 +4846,7 @@ def main():
 
             # ══════════════════════════════════════════════════════════════════
 
-    else:
+    with dash_tab_intel:
             #  SECTION 5 \u2014 PSYCHOLOGY & RISK MANAGEMENT
             # ══════════════════════════════════════════════════════════════════
             st.markdown('<div id="risk" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
@@ -3991,14 +5040,12 @@ def main():
                 if st.button("Scan Watchlist", key="run_scanner"):
                     scanner_results = []
                     n_scan = len(watchlist_tickers)
-                    workers = min(4, max(1, n_scan))
+                    workers = min(8, max(1, n_scan))
                     scan_progress = st.progress(0)
                     done_ct = 0
                     scan_failed = []
                     with ThreadPoolExecutor(max_workers=workers) as pool:
-                        future_map = {
-                            _submit_with_script_ctx(pool, scan_single_ticker, tkr): tkr for tkr in watchlist_tickers
-                        }
+                        future_map = {pool.submit(scan_single_ticker, tkr): tkr for tkr in watchlist_tickers}
                         for fut in as_completed(future_map):
                             done_ct += 1
                             tkr = future_map[fut]
@@ -4086,37 +5133,8 @@ def main():
             st.markdown('<div id="news" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
             _section("News and Market Conditions", f"Headlines, macro, and earnings calendar for {ticker} while the tape is open.",
                      tip_plain="Stories explain gaps and IV pops. Always read news through price. When headline risk stacks near earnings, favor safer strikes and lighter size.")
-            _isub = max(0, min(2, int(st.session_state.get("_cf_intel_sub", 0))))
-            _ic1, _ic2, _ic3 = st.columns(3)
-            with _ic1:
-                if st.button(
-                    "🗞️ Market News",
-                    key="cf_intel_pick0",
-                    use_container_width=True,
-                    type="primary" if _isub == 0 else "secondary",
-                ):
-                    st.session_state["_cf_intel_sub"] = 0
-                    st.rerun()
-            with _ic2:
-                if st.button(
-                    "🌍 Macro & Yields",
-                    key="cf_intel_pick1",
-                    use_container_width=True,
-                    type="primary" if _isub == 1 else "secondary",
-                ):
-                    st.session_state["_cf_intel_sub"] = 1
-                    st.rerun()
-            with _ic3:
-                if st.button(
-                    "📅 Upcoming Earnings",
-                    key="cf_intel_pick2",
-                    use_container_width=True,
-                    type="primary" if _isub == 2 else "secondary",
-                ):
-                    st.session_state["_cf_intel_sub"] = 2
-                    st.rerun()
-
-            if _isub == 0:
+            n_tab, m_tab, e_tab = st.tabs(["🗞️ Market News", "🌍 Macro & Yields", "📅 Upcoming Earnings"])
+            with n_tab:
                 st.markdown(f"#### {ticker} News")
                 if news:
                     for item in news:
@@ -4124,13 +5142,12 @@ def main():
                         st.markdown(f"<div class='ni'><strong style='color:#e2e8f0'>{item['title']}</strong><br><span style='color:#64748b;font-size:.8rem'>{item['pub']} {item['time']}</span>{' | ' + lnk if lnk else ''}</div>", unsafe_allow_html=True)
                 else:
                     st.info("No news found.")
-            elif _isub == 1:
-                st.markdown('<div id="macro" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
+            with m_tab:
                 st.markdown("#### Macro Dashboard")
                 for k, v in macro.items():
                     dc = "#10b981" if v["chg"] >= 0 else "#ef4444"
                     st.markdown(f"<div class='tc' style='padding:10px 14px;margin-bottom:6px'><div style='display:flex;justify-content:space-between'><span style='color:#94a3b8'>{k}</span><span class='mono' style='color:#e2e8f0'>{v['price']:.2f} <span style='color:{dc}'>{v['chg']:+.2f}%</span></span></div></div>", unsafe_allow_html=True)
-            else:
+            with e_tab:
                 st.markdown('<div id="earnings" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
                 st.markdown(f"#### {_html_mod.escape(ticker)} earnings calendar")
                 earn_cal_df, earn_highlight_idx = fetch_earnings_calendar_display(ticker)
@@ -4148,14 +5165,10 @@ def main():
                         hide_index=True,
                     )
 
-            _guide_open = bool(st.session_state.pop("_cf_open_guide", False))
-            with st.expander("Quick Reference Guide", expanded=_guide_open):
+            with st.expander("Quick Reference Guide", expanded=False):
                 st.markdown('<div id="guide" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
-                _section(
-                    "Quick Reference Guide",
-                    "Plain language glossary for every signal on this desk. Keep it open during live markets.",
-                    tip_plain="Reach for this when a label feels fuzzy. Clarity beats impulse every session.",
-                )
+                _section("Quick Reference Guide", "Plain language glossary for every signal on this desk. Keep it open during live markets.",
+                         tip_plain="Reach for this when a label feels fuzzy. Clarity beats impulse every session.")
                 edu = [
                     ("Blue Diamond Signal", "A Blue Diamond appears when confluence crosses up to 7+ out of 9, <strong>daily market structure is BULLISH</strong>, the <strong>weekly MACD/EMA bias is not BEARISH</strong>, and <strong>volume is at least 90% of the 20-day volume SMA</strong> (participation). An ATR blow-off guard still filters manic prints. Buy on Blue Diamonds."),
                     ("Pink Diamond Signal", "A Pink Diamond appears when bullish confluence collapses or momentum exhausts (RSI > 75 with weak confluence). Think of it as your dashboard warning lights all turning on. It means the easy money in this move is done. Take profits, sell aggressive covered calls, or tighten your stops. Sell on Pink Diamonds."),
