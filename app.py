@@ -2725,6 +2725,20 @@ def main():
             _pool.shutdown(wait=False, cancel_futures=True)
 
     if df is None or df.empty:
+        # QA fallback: if the selected symbol is blocked/empty, auto-pivot to another watchlist symbol.
+        fallback_symbol = None
+        for candidate in [t for t in watch_items if t != ticker][:5]:
+            cdf = fetch_stock(candidate, "1y", "1d")
+            if cdf is not None and not cdf.empty:
+                fallback_symbol = candidate
+                break
+        if fallback_symbol:
+            st.warning(
+                f"No usable bars for {_html_mod.escape(str(ticker))}. "
+                f"Switching to {_html_mod.escape(str(fallback_symbol))} from your watchlist."
+            )
+            st.session_state["_sb_watch_selected_sync"] = fallback_symbol
+            st.rerun()
         st.markdown(
             "<div style='margin:12px 0;padding:16px 18px;border-radius:12px;border:2px solid #ef4444;"
             "background:rgba(239,68,68,.12);color:#fecaca;font-size:1rem;line-height:1.5;font-weight:600'>"
