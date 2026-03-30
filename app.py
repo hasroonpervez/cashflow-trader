@@ -2317,6 +2317,7 @@ class Opt:
     DELTA_TARGET = 0.16
     DELTA_LOW, DELTA_HIGH = 0.15, 0.20
     MIN_OI, MIN_VOL = 100, 10
+    RELAXED_MIN_OI, RELAXED_MIN_VOL = 10, 1
 
     @staticmethod
     def _sc(otm, py, ann, vol, delta=None):
@@ -2348,6 +2349,23 @@ class Opt:
                          "prem_100": mid * 100, "breakeven": price - mid,
                          "delta": round(delta, 3), "optimal": False,
                          "score": Opt._sc(otm, py, ann, vol, delta)})
+        # Relax liquidity gates if strict pass returns nothing (common on thin chains / after-hours).
+        if not rows:
+            for _, r in calls_df.iterrows():
+                s, b, a = r.get("strike", 0), r.get("bid", 0), r.get("ask", 0)
+                iv = r.get("impliedVolatility", 0); vol, oi = r.get("volume", 0) or 0, r.get("openInterest", 0) or 0
+                mid = (b + a) / 2 if b > 0 and a > 0 else 0
+                if s <= price or mid <= .01: continue
+                if oi < Opt.RELAXED_MIN_OI or vol < Opt.RELAXED_MIN_VOL: continue
+                otm = (s - price) / price * 100; py = mid / price * 100; ann = py * 365 / max(dte, 1)
+                iv_dec = iv if iv > 0 else 0.5
+                greeks = bs_greeks(price, s, T_y, rfr, iv_dec, "call")
+                delta = greeks["delta"]
+                rows.append({"strike": s, "bid": b, "ask": a, "mid": mid, "iv": iv * 100 if iv else 0,
+                             "volume": vol, "oi": oi, "otm_pct": otm, "prem_yield": py, "ann_yield": ann,
+                             "prem_100": mid * 100, "breakeven": price - mid,
+                             "delta": round(delta, 3), "optimal": False,
+                             "score": Opt._sc(otm, py, ann, vol, delta)})
         rows.sort(key=lambda x: x["score"], reverse=True)
         if rows:
             best = min(range(len(rows)), key=lambda i: abs(rows[i]["delta"] - Opt.DELTA_TARGET))
@@ -2373,6 +2391,22 @@ class Opt:
                          "prem_100": mid * 100, "eff_buy": s - mid, "cash_req": s * 100,
                          "delta": round(delta, 3), "optimal": False,
                          "score": Opt._sc(otm, py, ann, vol, delta)})
+        if not rows:
+            for _, r in puts_df.iterrows():
+                s, b, a = r.get("strike", 0), r.get("bid", 0), r.get("ask", 0)
+                iv = r.get("impliedVolatility", 0); vol, oi = r.get("volume", 0) or 0, r.get("openInterest", 0) or 0
+                mid = (b + a) / 2 if b > 0 and a > 0 else 0
+                if s >= price or mid <= .01: continue
+                if oi < Opt.RELAXED_MIN_OI or vol < Opt.RELAXED_MIN_VOL: continue
+                otm = (price - s) / price * 100; py = mid / s * 100; ann = py * 365 / max(dte, 1)
+                iv_dec = iv if iv > 0 else 0.5
+                greeks = bs_greeks(price, s, T_y, rfr, iv_dec, "put")
+                delta = greeks["delta"]
+                rows.append({"strike": s, "bid": b, "ask": a, "mid": mid, "iv": iv * 100 if iv else 0,
+                             "volume": vol, "oi": oi, "otm_pct": otm, "prem_yield": py, "ann_yield": ann,
+                             "prem_100": mid * 100, "eff_buy": s - mid, "cash_req": s * 100,
+                             "delta": round(delta, 3), "optimal": False,
+                             "score": Opt._sc(otm, py, ann, vol, delta)})
         rows.sort(key=lambda x: x["score"], reverse=True)
         if rows:
             best = min(range(len(rows)), key=lambda i: abs(abs(rows[i]["delta"]) - Opt.DELTA_TARGET))
@@ -3023,7 +3057,7 @@ def _iv_rank_pill_html(ticker, price, ref_iv_pct=None, *, stub=None):
             pill_open
             + "<span class='mono' style='font-weight:800;color:#64748b;font-size:1.05rem'>—</span>"
             + label
-            + "<span style='font-size:.68rem;color:#64748b'>no desk strike yet</span></div>"
+            + "<span style='font-size:.68rem;color:#64748b'>fallback mode active</span></div>"
         )
     try:
         ref = float(ref_iv_pct) if ref_iv_pct is not None else 0.0
@@ -4037,6 +4071,7 @@ def main():
     # ── EARLY OPTIONS FETCH (populates BLUF with specific strikes) ──
     rfr = macro.get("10Y Yield", {}).get("price", 4.5) / 100
     bluf_cc, bluf_csp, bluf_exp, bluf_dte = None, None, None, 0
+    bluf_calls, bluf_puts = pd.DataFrame(), pd.DataFrame()
     opt_exps = []
     try:
         _, opt_exps = fetch_options(ticker)
@@ -4189,14 +4224,79 @@ def main():
             f"</div>"
         )
     else:
-        _iv_ns = _iv_rank_pill_html(ticker, price, ref_iv_bluf, stub="no_strike" if not ref_iv_bluf else None)
-        master_html = (
-            f"<div class='trade-master'>"
-            f"{trade_hdr_html}"
-            f"{_iv_ns}"
-            f"<p style='color:#e2e8f0;font-size:1rem;margin:0'>No liquid optimal strike cleared our filters yet. Open Cash Flow Strategies and choose an expiration by hand.</p>"
-            f"</div>"
-        )
+        # Fallback when strict OI/volume filters remove every strike.
+        # We still propose the nearest sensible OTM line from the current chain.
+        fallback_kind = None
+        fallback_row = None
+        br = struct in ("BULLISH", "RANGING")
+        if br and isinstance(bluf_calls, pd.DataFrame) and not bluf_calls.empty:
+            c = bluf_calls.copy()
+            c["strike"] = pd.to_numeric(c.get("strike"), errors="coerce")
+            c["bid"] = pd.to_numeric(c.get("bid"), errors="coerce").fillna(0.0)
+            c["ask"] = pd.to_numeric(c.get("ask"), errors="coerce").fillna(0.0)
+            c["mid"] = (c["bid"] + c["ask"]) / 2.0
+            c = c[(c["strike"] > price) & (c["mid"] > 0.01)].copy()
+            if not c.empty:
+                c["otm"] = (c["strike"] / price - 1.0) * 100.0
+                c["target_gap"] = (c["otm"] - 5.0).abs()
+                fallback_row = c.sort_values(["target_gap", "strike"]).iloc[0]
+                fallback_kind = "cc"
+        if fallback_row is None and isinstance(bluf_puts, pd.DataFrame) and not bluf_puts.empty:
+            p = bluf_puts.copy()
+            p["strike"] = pd.to_numeric(p.get("strike"), errors="coerce")
+            p["bid"] = pd.to_numeric(p.get("bid"), errors="coerce").fillna(0.0)
+            p["ask"] = pd.to_numeric(p.get("ask"), errors="coerce").fillna(0.0)
+            p["mid"] = (p["bid"] + p["ask"]) / 2.0
+            p = p[(p["strike"] < price) & (p["mid"] > 0.01)].copy()
+            if not p.empty:
+                p["otm"] = (1.0 - p["strike"] / price) * 100.0
+                p["target_gap"] = (p["otm"] - 5.0).abs()
+                fallback_row = p.sort_values(["target_gap", "strike"], ascending=[True, False]).iloc[0]
+                fallback_kind = "csp"
+
+        if fallback_row is not None and bluf_exp:
+            _f_strike = float(fallback_row["strike"])
+            _f_mid = float(fallback_row["mid"])
+            _f_prem = _f_mid * 100.0
+            _f_iv_raw = float(pd.to_numeric(fallback_row.get("impliedVolatility"), errors="coerce") or 0.0)
+            _f_iv_pct = _f_iv_raw * 100.0 if _f_iv_raw > 0 else ref_iv_bluf
+            _iv_fb = _iv_rank_pill_html(ticker, price, _f_iv_pct, stub=None if _f_iv_pct else "no_strike")
+            if fallback_kind == "cc":
+                _f_headline = (
+                    f"FALLBACK LINE: SELL {nc}x {_html_mod.escape(ticker)} ${_f_strike:.0f} CALLS EXP {bluf_exp}. "
+                    f"EST CREDIT ${_f_prem * nc:,.0f}."
+                )
+                _f_note = "Strict desk liquidity filters blocked every strike; this is the nearest tradable OTM call."
+            else:
+                _f_headline = (
+                    f"FALLBACK LINE: SELL 1x {_html_mod.escape(ticker)} ${_f_strike:.0f} PUTS EXP {bluf_exp}. "
+                    f"EST CREDIT ${_f_prem:,.0f}."
+                )
+                _f_note = "Strict desk liquidity filters blocked every strike; this is the nearest tradable OTM put."
+            master_html = (
+                f"<div class='trade-master'>"
+                f"{trade_hdr_html}"
+                f"{_iv_fb}"
+                f"<p style='color:#e2e8f0;font-size:1rem;line-height:1.5;margin:0 0 10px 0;font-weight:600'>{_f_headline}</p>"
+                f"<div class='strike-big' style='margin:6px 0 4px 0'>${_f_strike:.0f}</div>"
+                f"<div style='color:#94a3b8;font-size:.85rem'>{_f_note}</div>"
+                f"</div>"
+            )
+        else:
+            _iv_ns = _iv_rank_pill_html(ticker, price, ref_iv_bluf, stub="no_strike" if not ref_iv_bluf else None)
+            _fallback_action = _html_mod.escape(action_strat.title())
+            master_html = (
+                f"<div class='trade-master'>"
+                f"{trade_hdr_html}"
+                f"{_iv_ns}"
+                f"<p style='color:#e2e8f0;font-size:1rem;line-height:1.5;margin:0 0 8px 0'>"
+                f"Desk filters are too strict for this snapshot. Use a manual {_fallback_action} line around 3-7% OTM on the nearest monthly expiry."
+                f"</p>"
+                f"<p style='color:#94a3b8;font-size:.85rem;margin:0'>"
+                f"Reference spot: ${price:,.2f}. Open Cash Flow Strategies for full chain selection."
+                f"</p>"
+                f"</div>"
+            )
 
     ema_dist_pct = None
     if len(df) >= 20:
@@ -4310,7 +4410,18 @@ def main():
     # ── ALERTS BAR ──
     hi_al = [a for a in al if a["p"] == "HIGH"]
     if hi_al:
-        st.markdown(f"<div class='ac'>\U0001f514 <strong>{len(al)} Alert{'s' if len(al) > 1 else ''}</strong>: {hi_al[0]['m']}{'<em> +' + str(len(al) - 1) + ' more</em>' if len(al) > 1 else ''}</div>", unsafe_allow_html=True)
+        _lead = hi_al[0]["m"]
+        _more = f" +{len(al) - 1} more" if len(al) > 1 else ""
+        with st.expander(
+            f"🔔 {len(al)} Alert{'s' if len(al) > 1 else ''}: {_lead}{_more}",
+            expanded=False,
+        ):
+            for _a in al:
+                _ic = "🟢" if _a["t"] == "bullish" else ("🔴" if _a["t"] == "bearish" else "🟡")
+                st.markdown(
+                    f"<div class='ac'>{_ic} [{_html_mod.escape(_a['p'])}] {_html_mod.escape(_a['m'])}</div>",
+                    unsafe_allow_html=True,
+                )
 
     # ══════════════════════════════════════════════════════════════════
     #  SECTION 1 — TECHNICAL CHART (fragment: overlay toggles without refetching Yahoo)
@@ -4707,7 +4818,7 @@ def main():
                                     hide_index=True,
                                 )
                         else:
-                            st.info("No liquid covered call strikes found. We need at least 100 open interest and 10 volume.")
+                            st.info("No covered call strikes met pricing/liquidity checks in this snapshot. Try a nearby expiry or refresh.")
                     with s2:
                         st.markdown("#### Cash Secured Puts")
                         csp = Opt.cash_secured_puts(price, puts, dte, rfr)
@@ -4727,7 +4838,7 @@ def main():
                                     hide_index=True,
                                 )
                         else:
-                            st.info("No liquid put strikes found. We need at least 100 open interest and 10 volume.")
+                            st.info("No put strikes met pricing/liquidity checks in this snapshot. Try a nearby expiry or refresh.")
 
                     _explain("\U0001f9e0 What are Delta and Theta?",
                         "<strong>Delta is your win probability.</strong> A Delta of 0.16 means you have an 84 percent chance to keep all the cash and keep your shares. Lower Delta means safer. "

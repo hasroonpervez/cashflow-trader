@@ -12,7 +12,7 @@ Single-file Streamlit command desk for options income and technical context.
 ## Run Locally
 
 ```bash
-python -m venv venv
+python3 -m venv venv
 source venv/bin/activate  # macOS/Linux
 pip install -r requirements.txt
 streamlit run app.py
