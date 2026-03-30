@@ -322,7 +322,8 @@ def _tape_pct_changes(symbols: tuple):
         return {s0: yf_engine.ticker_pct_change_1d(s0)}
     w = min(3, n)
     out = {}
-    with ThreadPoolExecutor(max_workers=w) as pool:
+    pool = ThreadPoolExecutor(max_workers=w)
+    try:
         futs = {pool.submit(yf_engine.ticker_pct_change_1d, s): s for s in syms}
         try:
             # Hard cap for cloud health checks: don't wait forever on stalled Yahoo calls.
@@ -334,6 +335,8 @@ def _tape_pct_changes(symbols: tuple):
                     out[sym] = None
         except FuturesTimeoutError:
             pass
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
     for s in syms:
         if s not in out:
             out[s] = None
@@ -2701,7 +2704,8 @@ def main():
 
     # ── FETCH (parallel I/O: independent Yahoo endpoints + sparkline series) ──
     with st.spinner(f"Loading {ticker}..."):
-        with ThreadPoolExecutor(max_workers=3) as _pool:
+        _pool = ThreadPoolExecutor(max_workers=3)
+        try:
             _f_df = _submit_with_script_ctx(_pool, fetch_stock, ticker, "1y", "1d")
             _f_wk = _submit_with_script_ctx(_pool, fetch_stock, ticker, "2y", "1wk")
             _f_1mo = _submit_with_script_ctx(_pool, fetch_stock, ticker, "1mo", "1d")
@@ -2717,6 +2721,8 @@ def main():
             macro = _future_result_or_default(_f_macro, {}, timeout_s=8)
             news = _future_result_or_default(_f_news, [], timeout_s=8)
             earnings_date_raw = _future_result_or_default(_f_earn, None, timeout_s=8)
+        finally:
+            _pool.shutdown(wait=False, cancel_futures=True)
 
     if df is None or df.empty:
         st.markdown(
