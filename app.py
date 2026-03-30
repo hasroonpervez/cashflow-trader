@@ -59,7 +59,7 @@ def _submit_with_script_ctx(executor, fn, /, *args, **kwargs):
 CONFIG_PATH = _APP_DIR / "config.json"
 _CF_APP_CONFIG_KEY = "_cf_app_config"
 DEFAULT_CONFIG = {
-    "watchlist": "PLTR,BMNR,AAPL,AMZN,NVDA,AMD,TSLA,SPY,QQQ",
+    "watchlist": "PLTR,AAPL,AMZN,NVDA,AMD,TSLA,SPY,QQQ,MSFT",
     "scanner_sort_mode": "Custom watchlist order",
     "strat_focus": "Hybrid",
     "strat_horizon": "30 DTE",
@@ -2727,7 +2727,15 @@ def main():
     if df is None or df.empty:
         # QA fallback: if the selected symbol is blocked/empty, auto-pivot to another watchlist symbol.
         fallback_symbol = None
-        for candidate in [t for t in watch_items if t != ticker][:5]:
+        liquidity_fallbacks = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMZN", "TSLA"]
+        seen = {str(ticker).upper().strip()}
+        candidates = []
+        for c in liquidity_fallbacks + list(watch_items):
+            cu = str(c).upper().strip()
+            if cu and cu not in seen:
+                seen.add(cu)
+                candidates.append(cu)
+        for candidate in candidates[:8]:
             cdf = fetch_stock(candidate, "1y", "1d")
             if cdf is not None and not cdf.empty:
                 fallback_symbol = candidate
