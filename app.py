@@ -76,7 +76,7 @@ from modules.options import (
     diamond_win_rate, scan_single_ticker, Opt,
 )
 from modules.sentiment import Sentiment, Backtest, Alerts, run_cc_sim_cached
-from modules.chart import build_chart
+from modules.chart import build_chart, _chart_hoverlabel
 from modules.ui_helpers import (
     _factor_checklist_labels, _confluence_why_trade_plain,
     _iv_rank_qualitative_words, _iv_rank_pill_html,
