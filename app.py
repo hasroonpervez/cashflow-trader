@@ -1683,7 +1683,7 @@ def main():
                                     {
                                         "Date": earnings_dt.strftime("%Y-%m-%d"),
                                         "When": _status,
-                                        "Source": "earnings_date fallback",
+                                        "Source": "Primary earnings date feed",
                                     }
                                 ]
                             ),
