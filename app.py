@@ -1669,10 +1669,32 @@ def main():
                 st.markdown(f"#### {_html_mod.escape(ticker)} earnings calendar")
                 earn_cal_df, earn_highlight_idx = fetch_earnings_calendar_display(ticker)
                 if earn_cal_df.empty:
-                    _earn_empty = "No upcoming earnings data available for this ticker."
-                    if earnings_parse_failed:
-                        _earn_empty += " The feed returned a value we could not parse into a date."
-                    st.info(_earn_empty)
+                    if earnings_dt is not None and days_to_earnings is not None:
+                        # Fallback when calendar rows are empty but we still have a valid next earnings date.
+                        _status = (
+                            f"In {days_to_earnings} day(s)"
+                            if days_to_earnings > 0
+                            else ("Today" if days_to_earnings == 0 else f"Reported {abs(days_to_earnings)} day(s) ago")
+                        )
+                        st.caption("Calendar rows unavailable from feed; showing single-date fallback.")
+                        st.dataframe(
+                            pd.DataFrame(
+                                [
+                                    {
+                                        "Date": earnings_dt.strftime("%Y-%m-%d"),
+                                        "When": _status,
+                                        "Source": "earnings_date fallback",
+                                    }
+                                ]
+                            ),
+                            use_container_width=True,
+                            hide_index=True,
+                        )
+                    else:
+                        _earn_empty = "No upcoming earnings data available for this ticker."
+                        if earnings_parse_failed:
+                            _earn_empty += " The feed returned a value we could not parse into a date."
+                        st.info(_earn_empty)
                 else:
                     st.caption("Rows are newest-first. The next on-calendar print (today or later) is highlighted.")
                     st.dataframe(
