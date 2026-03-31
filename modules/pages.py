@@ -243,7 +243,7 @@ def _parse_earnings(ctx: DashContext):
         else:
             ctx.earn_glance = f"{ctx.days_to_earnings} days: {ctx.earnings_dt.strftime('%b %d, %Y')}"
     else:
-        ctx.earn_glance = "No date from feed"
+        ctx.earn_glance = "Date unavailable from feed"
 
 
 def _fetch_options_context(ctx: DashContext):

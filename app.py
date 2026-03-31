@@ -500,11 +500,16 @@ def main():
             unsafe_allow_html=True,
         )
     with g3:
+        earnings_caption = (
+            "Plan size before the print"
+            if earn_glance != "Date unavailable from feed"
+            else "Keep base size until date is confirmed"
+        )
         st.markdown(
             _glance_metric_card(
                 "EARNINGS COUNTDOWN",
                 f"<div class='glance-value' style='font-size:1.0rem;font-weight:700;color:#e2e8f0'>{_html_mod.escape(earn_glance)}</div>",
-                "<div class='glance-caption'>Plan size before the print</div>",
+                f"<div class='glance-caption'>{_html_mod.escape(earnings_caption)}</div>",
                 earnings_spark,
                 "#FFD700",
             ),
