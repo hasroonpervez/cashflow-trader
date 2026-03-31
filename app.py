@@ -1072,8 +1072,7 @@ def main():
 
             # Ichimoku + OBV row
             above_cloud = not pd.isna(sa_ich.iloc[-1]) and not pd.isna(sb_ich.iloc[-1]) and price > max(sa_ich.iloc[-1], sb_ich.iloc[-1])
-            obv_s = TA.obv(df)
-            ou = obv_s.iloc[-1] > obv_s.iloc[-20] if len(obv_s) >= 20 else True
+            ou = obv_up
             il, ir = st.columns([1, 2])
             with il:
                 st.markdown(f"<div class='tc' style='text-align:center'><div style='font-size:.7rem;color:#64748b;text-transform:uppercase'>Ichimoku</div><div class='mono' style='font-size:1.2rem;color:{'#10b981' if above_cloud else '#ef4444'}'>{'ABOVE CLOUD' if above_cloud else 'IN/BELOW'}</div><div style='font-size:.7rem;color:#64748b;margin-top:6px'>Kijun: ${kj.iloc[-1]:.2f}</div></div>", unsafe_allow_html=True)
@@ -1087,7 +1086,7 @@ def main():
             st.markdown("#### Divergence Scanner")
             rsi_s = TA.rsi(df["Close"])
             divs_rsi = TA.detect_divergences(df["Close"], rsi_s)
-            obv_divs = TA.detect_divergences(df["Close"], obv_s)
+            obv_divs = TA.detect_divergences(df["Close"], TA.obv(df))
             all_divs = [(d, "RSI") for d in divs_rsi] + [(d, "OBV") for d in obv_divs]
             if all_divs:
                 for d, src in all_divs[-5:]:
