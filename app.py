@@ -399,6 +399,7 @@ def main():
     struct = ctx.struct; fg = ctx.fg; fg_label = ctx.fg_label
     fg_emoji = ctx.fg_emoji; fg_advice = ctx.fg_advice
     macd_bull = ctx.macd_bull; obv_up = ctx.obv_up; rsi_v = ctx.rsi_v
+    h_v = ctx.h_v
     al = ctx.al
     gold_zone_price = ctx.gold_zone_price; gold_zone_components = ctx.gold_zone_components
     cp_score = ctx.cp_score; cp_max = ctx.cp_max; cp_breakdown = ctx.cp_breakdown

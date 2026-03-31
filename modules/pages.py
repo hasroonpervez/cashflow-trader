@@ -77,6 +77,7 @@ class DashContext:
     fg_advice: str = ""
     rsi_v: float = 0.0
     macd_bull: bool = False
+    h_v: object = None
     obv_up: bool = True
     al: list = field(default_factory=list)
     # Diamond / Gold / Confluence
@@ -175,8 +176,9 @@ def build_context(ticker: str, cfg: dict) -> Optional[DashContext]:
     ctx.fg = Sentiment.fear_greed(df, ctx.vix_v)
     ctx.fg_label, ctx.fg_emoji, ctx.fg_advice = Sentiment.interpret(ctx.fg)
 
-    ml_v, sl_v, _ = TA.macd(df["Close"])
+    ml_v, sl_v, h_v = TA.macd(df["Close"])
     ctx.macd_bull = ml_v.iloc[-1] > sl_v.iloc[-1]
+    ctx.h_v = h_v
     obv_s = TA.obv(df)
     ctx.obv_up = obv_s.iloc[-1] > obv_s.iloc[-20] if len(obv_s) >= 20 else True
     ctx.rsi_v = float(TA.rsi(df["Close"]).iloc[-1])
