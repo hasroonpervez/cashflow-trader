@@ -74,6 +74,25 @@ Persisted locally via atomic writes (`.tmp` → `os.replace`). On Streamlit Clou
 
 Keys: `watchlist`, `scanner_sort_mode`, `strat_focus`, `strat_horizon`, `mini_mode`, `overlay_ema`, `overlay_fib`, `overlay_gann`, `overlay_sr`, `overlay_ichi`, `overlay_super`, `overlay_diamonds`, `overlay_gold`.
 
+### Chart Layer Persistence
+
+Technical Chart layer toggles persist to `config.json` and are restored on the next app run:
+
+- EMAs & Bollinger
+- Fibonacci
+- Gann Sq9
+- S/R levels
+- Ichimoku
+- Supertrend
+- Diamonds
+- Gold zone
+
+Layer preferences are saved immediately when each toggle changes.
+
+### Earnings Data Fallback
+
+If the earnings calendar endpoint returns no rows, the app falls back to the primary earnings date feed and still renders a usable "Upcoming Earnings" row (Date / When / Source).
+
 ---
 
 ## Technical Indicators
@@ -94,7 +113,7 @@ Keys: `watchlist`, `scanner_sort_mode`, `strat_focus`, `strat_horizon`, `mini_mo
 
 - Yahoo Finance may throttle or block symbols on Streamlit Cloud (more liberal locally)
 - Config persistence is local-only; Cloud deploys reset the filesystem
-- `st.expander()` is avoided — all collapsible UI uses `st.checkbox()` toggles (Streamlit rendering bug workaround)
+- Streamlit Cloud cold starts and rapid reruns can surface transient `missing ScriptRunContext` warnings in logs; these are typically non-fatal
 - Micro-cap tickers (e.g. BMNR) may lack options chains; the desk falls back gracefully
 
 ---
