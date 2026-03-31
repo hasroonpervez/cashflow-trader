@@ -8,6 +8,15 @@ import plotly.graph_objects as go
 
 from .ta import TA
 
+def _index_pos(idx_obj):
+    """Normalize df.index.get_loc result to a single integer position."""
+    if isinstance(idx_obj, (int, np.integer)):
+        return int(idx_obj)
+    if isinstance(idx_obj, slice):
+        return idx_obj.start
+    arr = np.asarray(idx_obj)
+    return int(arr.flat[-1])
+
 # Re-export plotly theme constants (originally in data.py)
 from .data import (
     _PLOTLY_UI_CONFIG, _PLOTLY_PAPER_BG, _PLOTLY_PLOT_BG, _PLOTLY_GRID,
