@@ -66,7 +66,7 @@ from modules.data import (
     fetch_info, fetch_options, compute_iv_rank_proxy, fetch_news,
     fetch_earnings_date, fetch_earnings_calendar_display, fetch_macro,
     _PLOTLY_UI_CONFIG, _PLOTLY_PAPER_BG, _PLOTLY_PLOT_BG,
-    _PLOTLY_CASH_UP, _PLOTLY_CASH_DOWN, _PLOTLY_GRID, _PLOTLY_FONT_MAIN,
+    _PLOTLY_CASH_UP, _PLOTLY_CASH_DOWN, _PLOTLY_GRID, _PLOTLY_FONT_MAIN, _PLOTLY_BLUE,
 )
 from modules.ta import TA
 from modules.options import (
