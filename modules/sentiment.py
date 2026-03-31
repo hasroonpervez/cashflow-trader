@@ -1,0 +1,94 @@
+"""
+Sentiment, Backtest simulator, and Alerts scanner.
+"""
+import streamlit as st
+import pandas as pd
+import numpy as np
+import math
+from datetime import datetime
+
+from .ta import TA
+from .data import fetch_stock
+
+class Sentiment:
+    @staticmethod
+    def fear_greed(df, vix_val=None):
+        sc = [min(100, max(0, TA.rsi(df["Close"]).iloc[-1]))]
+        sma200 = df["Close"].rolling(200).mean().iloc[-1] if len(df) >= 200 else df["Close"].mean()
+        sc.append(min(100, max(0, 50 + (df["Close"].iloc[-1]/sma200-1)*500)))
+        if len(df) >= 20:
+            sc.append(min(100, max(0, 50 + (df["Close"].iloc[-1]/df["Close"].iloc[-20]-1)*300)))
+            cv = df["Close"].pct_change().iloc[-20:].std()*np.sqrt(252)*100
+            hv = df["Close"].pct_change().std()*np.sqrt(252)*100
+            sc.append(max(0, min(100, 100-cv/max(hv,1)*50)))
+        if vix_val and vix_val > 0: sc.append(max(0, min(100, 100-(vix_val-12)*3)))
+        return np.mean(sc)
+
+    @staticmethod
+    def interpret(s):
+        if s >= 80: return "Extreme Greed","🔴","Everyone is euphoric. Sell calls aggressively and collect the hype premium."
+        if s >= 60: return "Greed","🟠","Market is confident. Sell covered calls at higher strikes to ride the wave."
+        if s >= 40: return "Neutral","🟡","Market is calm. Standard premium selling works great here."
+        if s >= 20: return "Fear","🟢","Fear is elevated. Premiums are fat. Sell aggressively and collect extra cash."
+        return "Extreme Fear","💚","Maximum panic. Premiums are huge. Sell puts at deep discounts and get paid."
+
+class Backtest:
+    @staticmethod
+    def cc_sim(df, otm_pct=.05, hold=30, iv_m=1.0):
+        results = []; rvol = df["Close"].pct_change().rolling(20).std()*np.sqrt(252)
+        i = 20
+        while i < len(df) - hold:
+            entry = df["Close"].iloc[i]; strike = entry*(1+otm_pct)
+            iv = rvol.iloc[i]
+            if pd.isna(iv) or iv <= 0: iv = 0.5
+            iv *= iv_m; tf = math.sqrt(hold/365)
+            d1a = otm_pct/(iv*tf) if iv*tf > 0 else 1
+            prem = entry*iv*tf*max(.05,.4-.3*min(d1a,2)); prem = max(prem, entry*.003)
+            exit_p = df["Close"].iloc[i+hold]
+            if exit_p >= strike: profit = (strike-entry)+prem; out = "Called Away"
+            else: profit = prem+(exit_p-entry); out = "Expired OTM"
+            results.append({"entry_date":df.index[i],"exit_date":df.index[i+hold],
+                "entry":entry,"strike":strike,"exit":exit_p,"iv_est":iv*100,
+                "premium":prem,"profit":profit,"ret_pct":profit/entry*100,"outcome":out})
+            i += hold
+        return pd.DataFrame(results)
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def run_cc_sim_cached(ticker: str, period: str, otm_pct: float, hold_days: int, iv_mult: float) -> pd.DataFrame:
+    """Premium simulator: reuse cached OHLC; avoids recomputing the same sweep on every interaction."""
+    df_bt = fetch_stock(ticker, period, "1d")
+    if df_bt is None or len(df_bt) < hold_days + 20:
+        return pd.DataFrame()
+    return Backtest.cc_sim(df_bt, otm_pct, hold_days, iv_mult)
+
+
+class Alerts:
+    @staticmethod
+    def scan(df, ticker, vix_val=None):
+        alerts = []; close = df["Close"].iloc[-1]; rv = TA.rsi(df["Close"]).iloc[-1]
+        if rv < 30: alerts.append({"t":"bullish","p":"HIGH","m":f"{ticker} RSI is {rv:.1f}. Stock is oversold. Great time to sell puts and collect cash."})
+        elif rv > 70: alerts.append({"t":"bearish","p":"MEDIUM","m":f"{ticker} RSI is {rv:.1f}. Stock is overbought. Sell covered calls now."})
+        ml, sl, _ = TA.macd(df["Close"])
+        if len(ml) >= 2:
+            if ml.iloc[-1] > sl.iloc[-1] and ml.iloc[-2] <= sl.iloc[-2]:
+                alerts.append({"t":"bullish","p":"HIGH","m":f"{ticker} MACD just crossed bullish. Buyers are taking over."})
+            elif ml.iloc[-1] < sl.iloc[-1] and ml.iloc[-2] >= sl.iloc[-2]:
+                alerts.append({"t":"bearish","p":"MEDIUM","m":f"{ticker} MACD just crossed bearish. Sellers are gaining control."})
+        u, _, lo = TA.bollinger(df["Close"])
+        if len(u)>1:
+            bw = (u.iloc[-1]-lo.iloc[-1])/((u.iloc[-1]+lo.iloc[-1])/2)*100
+            if bw < 5: alerts.append({"t":"neutral","p":"HIGH","m":f"{ticker} Bollinger squeeze detected. A big move is coming soon."})
+        if vix_val and vix_val > 30: alerts.append({"t":"bullish","p":"HIGH","m":f"VIX is {vix_val:.1f}. Extreme fear. Premiums are huge right now."})
+        elif vix_val and vix_val > 25: alerts.append({"t":"bullish","p":"MEDIUM","m":f"VIX is {vix_val:.1f}. Fear is elevated. Good time to sell options."})
+        st_l, st_d = TA.supertrend(df)
+        if len(st_d) >= 2:
+            if st_d.iloc[-1]==1 and st_d.iloc[-2]==-1: alerts.append({"t":"bullish","p":"HIGH","m":f"{ticker} Supertrend just flipped BULLISH. The price floor is rising."})
+            elif st_d.iloc[-1]==-1 and st_d.iloc[-2]==1: alerts.append({"t":"bearish","p":"HIGH","m":f"{ticker} Supertrend just flipped BEARISH. The price ceiling is falling."})
+        rsi_s = TA.rsi(df["Close"]); divs = TA.detect_divergences(df["Close"], rsi_s)
+        for d in divs[-2:]:
+            alerts.append({"t":d["type"],"p":"MEDIUM","m":f"{ticker} RSI {d['type']} divergence near ${d['price']:.2f}. Early warning of a reversal."})
+        return alerts
+
+
+
