@@ -1072,6 +1072,7 @@ def main():
 
             # Ichimoku + OBV row
             above_cloud = not pd.isna(sa_ich.iloc[-1]) and not pd.isna(sb_ich.iloc[-1]) and price > max(sa_ich.iloc[-1], sb_ich.iloc[-1])
+            obv_s = TA.obv(df)
             ou = obv_s.iloc[-1] > obv_s.iloc[-20] if len(obv_s) >= 20 else True
             il, ir = st.columns([1, 2])
             with il:
