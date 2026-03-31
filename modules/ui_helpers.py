@@ -308,15 +308,15 @@ def _fragment_technical_zone(
     st.markdown("##### Chart layers")
     o1, o2 = st.columns(2)
     with o1:
-        show_ind = st.toggle("EMAs & Bollinger", key="sb_ema")
-        show_gann = st.toggle("Gann Sq9", key="sb_gann")
-        show_ichi = st.toggle("Ichimoku", key="sb_ichi")
-        show_diamonds = st.toggle("Diamonds", key="sb_diamonds")
+        show_ind = st.toggle("EMAs & Bollinger", key="sb_ema", on_change=_persist_overlay_prefs)
+        show_gann = st.toggle("Gann Sq9", key="sb_gann", on_change=_persist_overlay_prefs)
+        show_ichi = st.toggle("Ichimoku", key="sb_ichi", on_change=_persist_overlay_prefs)
+        show_diamonds = st.toggle("Diamonds", key="sb_diamonds", on_change=_persist_overlay_prefs)
     with o2:
-        show_fib = st.toggle("Fibonacci", key="sb_fib")
-        show_sr = st.toggle("S/R levels", key="sb_sr")
-        show_super = st.toggle("Supertrend", key="sb_super")
-        show_gold_zone = st.toggle("Gold zone", key="sb_gold_zone")
+        show_fib = st.toggle("Fibonacci", key="sb_fib", on_change=_persist_overlay_prefs)
+        show_sr = st.toggle("S/R levels", key="sb_sr", on_change=_persist_overlay_prefs)
+        show_super = st.toggle("Supertrend", key="sb_super", on_change=_persist_overlay_prefs)
+        show_gold_zone = st.toggle("Gold zone", key="sb_gold_zone", on_change=_persist_overlay_prefs)
 
     fig_p, fig_v, fig_r, fig_m = build_chart(
         df,
