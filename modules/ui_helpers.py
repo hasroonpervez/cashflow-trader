@@ -12,8 +12,9 @@ from .ta import TA
 from .data import _PLOTLY_UI_CONFIG
 from .options import (
     calc_gold_zone, calc_confluence_points, detect_diamonds,
-    latest_diamond_status, diamond_win_rate, compute_iv_rank_proxy,
+    latest_diamond_status, diamond_win_rate,
 )
+from .data import compute_iv_rank_proxy
 from .chart import build_chart
 from .config import save_config, load_config, _overlay_prefs_from_session
 
