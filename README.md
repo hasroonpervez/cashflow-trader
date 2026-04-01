@@ -1,6 +1,6 @@
 # CashFlow Command Center v14.1
 
-**Single-screen options income desk for PLTR and multi-ticker watchlists.**
+**Single-screen options income desk and multi-ticker watchlists.**
 
 Glanceable execution guidance, Diamond buy/sell signals, Gold Zone confluence, Black-Scholes + Corrado-Su options math, and a full technical chart stack — all in a Streamlit dashboard built for mobile-first traders who sell covered calls and cash-secured puts for weekly income.
 
