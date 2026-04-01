@@ -104,6 +104,7 @@ class DashContext:
     bluf_dte: int = 0
     bluf_calls: Any = None
     bluf_puts: Any = None
+    gamma_flip: Any = None
     opt_exps: list = field(default_factory=list)
     cc_scan_rows: list = field(default_factory=list)
     csp_scan_rows: list = field(default_factory=list)
@@ -184,22 +185,8 @@ def build_context(ticker: str, cfg: dict) -> Optional[DashContext]:
     ctx.rsi_v = float(TA.rsi(df["Close"]).iloc[-1])
     ctx.al = Alerts.scan(df, ticker, ctx.vix_v)
 
-    # Diamond / Gold / Confluence
+    # Gold (initial) → options (uses POC/HVN) → gamma flip → Gold fuse → confluence → diamonds
     ctx.gold_zone_price, ctx.gold_zone_components = calc_gold_zone(df, ctx.df_wk)
-    ctx.cp_score, ctx.cp_max, ctx.cp_breakdown, ctx.cp_bearish = calc_confluence_points(
-        df, ctx.df_wk, ctx.vix_v, gold_zone_price=ctx.gold_zone_price
-    )
-    ctx.diamonds = detect_diamonds(
-        df,
-        ctx.df_wk,
-        use_quant=bool(ctx.cfg.get("use_quant_models", DEFAULT_CONFIG["use_quant_models"])),
-    )
-    ctx.latest_d = latest_diamond_status(ctx.diamonds)
-    ctx.d_wr, ctx.d_avg, ctx.d_n = diamond_win_rate(df, ctx.diamonds, forward_bars=10)
-
-    ctx.cp_color = "#10b981" if ctx.cp_score >= 7 else ("#f59e0b" if ctx.cp_score >= 4 else "#ef4444")
-    ctx.cp_label = "STRONG BULLISH" if ctx.cp_score >= 7 else ("BULLISH LEAN" if ctx.cp_score >= 5 else ("MIXED" if ctx.cp_score >= 3 else "BEARISH"))
-
     ctx.daily_struct = ctx.struct
     ctx.weekly_struct = "UNKNOWN"
     if ctx.df_wk is not None and len(ctx.df_wk) >= 20:
@@ -207,6 +194,41 @@ def build_context(ticker: str, cfg: dict) -> Optional[DashContext]:
 
     # Options fetch (enables MC-PoP fusion into Quant Edge when chain rows exist)
     _fetch_options_context(ctx)
+    ctx.gamma_flip = None
+    try:
+        if ctx.bluf_calls is not None and ctx.bluf_puts is not None:
+            _c = ctx.bluf_calls.copy() if not ctx.bluf_calls.empty else pd.DataFrame()
+            _p = ctx.bluf_puts.copy() if not ctx.bluf_puts.empty else pd.DataFrame()
+            if not _c.empty:
+                _c["type"] = "call"
+            if not _p.empty:
+                _p["type"] = "put"
+            if not _c.empty or not _p.empty:
+                _odf = pd.concat([_c, _p], ignore_index=True)
+                _Ty = max(1, int(ctx.bluf_dte or 30)) / 365.0
+                _gex = Opt.calc_gamma_exposure(_odf, ctx.price, rfr=ctx.rfr, T_years=_Ty)
+                ctx.gamma_flip = Opt.find_gamma_flip(_gex)
+    except Exception:
+        ctx.gamma_flip = None
+
+    ctx.gold_zone_price, ctx.gold_zone_components = calc_gold_zone(
+        df, ctx.df_wk, gamma_flip_price=ctx.gamma_flip
+    )
+    ctx.cp_score, ctx.cp_max, ctx.cp_breakdown, ctx.cp_bearish = calc_confluence_points(
+        df, ctx.df_wk, ctx.vix_v, gold_zone_price=ctx.gold_zone_price
+    )
+    ctx.diamonds = detect_diamonds(
+        df,
+        ctx.df_wk,
+        use_quant=bool(ctx.cfg.get("use_quant_models", DEFAULT_CONFIG["use_quant_models"])),
+        gamma_flip_price=ctx.gamma_flip,
+        gold_zone_price=ctx.gold_zone_price,
+    )
+    ctx.latest_d = latest_diamond_status(ctx.diamonds)
+    ctx.d_wr, ctx.d_avg, ctx.d_n = diamond_win_rate(df, ctx.diamonds, forward_bars=10)
+
+    ctx.cp_color = "#10b981" if ctx.cp_score >= 7 else ("#f59e0b" if ctx.cp_score >= 4 else "#ef4444")
+    ctx.cp_label = "STRONG BULLISH" if ctx.cp_score >= 7 else ("BULLISH LEAN" if ctx.cp_score >= 5 else ("MIXED" if ctx.cp_score >= 3 else "BEARISH"))
     _opt_edge_rows = list(ctx.cc_scan_rows or []) + list(ctx.csp_scan_rows or [])
     ctx.qs, ctx.qb = quant_edge_score(
         df,

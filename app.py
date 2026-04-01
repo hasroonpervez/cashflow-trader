@@ -1,6 +1,6 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  CASHFLOW COMMAND CENTER v17.0 FREE EDITION · LIQUIDITY & GREEKS       ║
+║  CASHFLOW COMMAND CENTER v18.0 FREE EDITION · LIQUIDITY & GEX          ║
 ║  Modular architecture: same UI, same logic, clean separation.           ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 """
@@ -16,7 +16,7 @@ if _app_root not in sys.path:
 import streamlit as st
 
 st.set_page_config(
-    page_title="CashFlow Command Center v17.0 Free Edition",
+    page_title="CashFlow Command Center v18.0 Free Edition",
     page_icon="💰",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -115,6 +115,7 @@ for _import_try in range(_IMPORT_KEYERROR_RETRIES):
                 _persist_overlay_prefs,
                 streamlit_df_widget_key,
                 streamlit_show_dataframe,
+                _theta_gamma_desk_line,
             )
 
             from modules.css import _CSS, _MINI_MODE_DENSITY_CSS, inject_css_and_navbar
@@ -154,7 +155,7 @@ def main():
 
     # ── Watchlist editor (must run before Mission Control so sb_scanner is committed same run)
     _wl_expanded = bool(st.session_state.pop("_open_watchlist_editor", False))
-    st.caption("CashFlow Command Center · v17.0 Free Edition")
+    st.caption("Institutional Risk Oversight & Gamma Exposure Architecture.")
     def _persist_watchlist_text_callback():
         raw = st.session_state.get("sb_scanner", "")
         w = _parse_watchlist_string(raw)
@@ -527,7 +528,7 @@ def main():
         "<div style='margin:2px 0 10px 0'>"
         "<span style='font-size:0.72rem;color:#c4b5fd;padding:3px 10px;border-radius:6px;"
         "border:1px solid rgba(139,92,246,0.45);background:rgba(76,29,149,0.22);font-weight:600;letter-spacing:0.04em'>"
-        "v17.0 · Liquidity & Greeks Mode</span></div>",
+        "v18.0 · LIQUIDITY & GEX</span></div>",
         unsafe_allow_html=True,
     )
     qs_color = ctx.qs_color; qs_status = ctx.qs_status
@@ -535,6 +536,15 @@ def main():
     bluf_exp = ctx.bluf_exp; bluf_dte = ctx.bluf_dte
     bluf_calls = ctx.bluf_calls; bluf_puts = ctx.bluf_puts
     opt_exps = ctx.opt_exps; ref_iv_bluf = ctx.ref_iv_bluf
+    st.session_state["_cf_bluf_cc_pick"] = bluf_cc
+    st.session_state["_cf_bluf_csp_pick"] = bluf_csp
+    st.session_state["_cf_gamma_flip"] = None
+    try:
+        _gf_ctx = getattr(ctx, "gamma_flip", None)
+        if _gf_ctx is not None and np.isfinite(float(_gf_ctx)):
+            st.session_state["_cf_gamma_flip"] = float(_gf_ctx)
+    except (TypeError, ValueError):
+        st.session_state["_cf_gamma_flip"] = None
     nc = ctx.nc; action_strat = ctx.action_strat; action_plain = ctx.action_plain
     mini_mode = ctx.mini_mode; mobile_chart_layout = ctx.mobile_chart_layout
 
@@ -1674,7 +1684,7 @@ def main():
                                         "MC PoP %": st.column_config.NumberColumn(
                                             "MC PoP %",
                                             format="%.1f%%",
-                                            help="10k antithetic simulations — v17.0 Liquidity & Greeks Mode",
+                                            help="10k antithetic simulations — v18.0 Liquidity & GEX Mode",
                                         ),
                                     },
                                 )
@@ -1703,7 +1713,7 @@ def main():
                                         cc_mc_pop_txt = f" | MC PoP: {_v:.1f}%"
                                 except (TypeError, ValueError):
                                     pass
-                            st.markdown(f"<div class='sb'>{opt_html}<strong>SELL {nc_s}x ${b['strike']:.0f}C @ ${b['mid']:.2f}</strong><br><span style='font-size:.85rem;color:#94a3b8'>Exp: {sel_exp} ({dte}DTE) | IV: {b['iv']:.1f}% | <strong style='color:{delta_color}'>\u0394 {b['delta']:.2f}</strong>{cc_mc_pop_txt}<br>Premium: <strong style='color:#10b981'>${b['prem_100'] * nc_s:,.0f}</strong> | OTM: {b['otm_pct']:.1f}% | Ann: {b['ann_yield']:.1f}% | OI: {b['oi']:,}</span></div>", unsafe_allow_html=True)
+                            st.markdown(f"<div class='sb'>{opt_html}<strong>SELL {nc_s}x ${b['strike']:.0f}C @ ${b['mid']:.2f}</strong><br><span style='font-size:.85rem;color:#94a3b8'>Exp: {sel_exp} ({dte}DTE) | IV: {b['iv']:.1f}% | <strong style='color:{delta_color}'>\u0394 {b['delta']:.2f}</strong>{cc_mc_pop_txt}<br>Premium: <strong style='color:#10b981'>${b['prem_100'] * nc_s:,.0f}</strong> | OTM: {b['otm_pct']:.1f}% | Ann: {b['ann_yield']:.1f}% | OI: {b['oi']:,}</span>{_theta_gamma_desk_line(b.get('theta_gamma_ratio'))}</div>", unsafe_allow_html=True)
                             if st.checkbox("All CC strikes", key="exp_5"):
                                 _cc_df = _options_scan_dataframe(cc, put_table=False)
                                 streamlit_show_dataframe(
@@ -1735,7 +1745,7 @@ def main():
                                         csp_mc_pop_txt = f" | MC PoP: {_v:.1f}%"
                                 except (TypeError, ValueError):
                                     pass
-                            st.markdown(f"<div class='sb'>{opt_html_p}<strong>SELL 1x ${b['strike']:.0f}P @ ${b['mid']:.2f}</strong><br><span style='font-size:.85rem;color:#94a3b8'>Exp: {sel_exp} ({dte}DTE) | IV: {b['iv']:.1f}% | <strong style='color:{delta_color_p}'>\u0394 {b['delta']:.2f}</strong>{csp_mc_pop_txt}<br>Premium: <strong style='color:#10b981'>${b['prem_100']:,.0f}</strong> | OTM: {b['otm_pct']:.1f}% | Eff buy: ${b['eff_buy']:.2f} | OI: {b['oi']:,}</span></div>", unsafe_allow_html=True)
+                            st.markdown(f"<div class='sb'>{opt_html_p}<strong>SELL 1x ${b['strike']:.0f}P @ ${b['mid']:.2f}</strong><br><span style='font-size:.85rem;color:#94a3b8'>Exp: {sel_exp} ({dte}DTE) | IV: {b['iv']:.1f}% | <strong style='color:{delta_color_p}'>\u0394 {b['delta']:.2f}</strong>{csp_mc_pop_txt}<br>Premium: <strong style='color:#10b981'>${b['prem_100']:,.0f}</strong> | OTM: {b['otm_pct']:.1f}% | Eff buy: ${b['eff_buy']:.2f} | OI: {b['oi']:,}</span>{_theta_gamma_desk_line(b.get('theta_gamma_ratio'))}</div>", unsafe_allow_html=True)
                             if st.checkbox("All CSP strikes", key="exp_6"):
                                 _csp_df = _options_scan_dataframe(csp, put_table=True)
                                 streamlit_show_dataframe(
@@ -1804,7 +1814,7 @@ def main():
                             st.markdown(f"""<div class='diamond-blue'>
                                 <div style='font-size:1rem;font-weight:700;margin-bottom:8px'>🔷 BLUE DIAMOND AUTO SUGGESTIONS</div>
                                 <div style='color:#94a3b8;font-size:.85rem;margin-bottom:10px'>
-                                    A Blue Diamond fired {(df.index[-1] - latest_d['date']).days} day(s) ago at ${latest_d['price']:.2f} with confluence {latest_d['score']}/9.
+                                    A Blue Diamond fired {(df.index[-1] - latest_d['date']).days} day(s) ago at ${latest_d['price']:.2f} with composite score {latest_d['score']}.
                                     Historical probability of profit: <strong style='color:#10b981'>{d_wr:.0f}%</strong> ({d_n} signals backtested).
                                 </div>
                                 <div style='color:#e2e8f0;font-size:.9rem;line-height:1.8'>""", unsafe_allow_html=True)
@@ -1833,7 +1843,7 @@ def main():
                                 <div style='font-size:1rem;font-weight:700;margin-bottom:8px'>💎 PINK DIAMOND: DEFENSIVE POSTURE</div>
                                 <div style='color:#94a3b8;font-size:.85rem;margin-bottom:10px'>
                                     A Pink Diamond fired {(df.index[-1] - latest_d['date']).days} day(s) ago at ${latest_d['price']:.2f}.
-                                    Confluence dropped to {latest_d['score']}/9. Momentum is exhausting.
+                                    Confluence composite dropped to {latest_d['score']}. Momentum is exhausting.
                                 </div>
                                 <div style='color:#e2e8f0;font-size:.9rem;line-height:1.8'>""", unsafe_allow_html=True)
                             if cs:
@@ -2250,6 +2260,10 @@ def main():
                                         <div style='font-size:.65rem;color:#64748b;text-transform:uppercase'>Diamond</div>
                                         <span class='diamond-badge {r["d_class"]}'>{r['d_status']}</span>
                                     </div>
+                                    <div style='text-align:center;min-width:100px'>
+                                        <div style='font-size:.65rem;color:#64748b;text-transform:uppercase'>GEX Regime</div>
+                                        <div class='mono' style='font-size:.72rem;color:#e2e8f0;font-weight:700;line-height:1.25'>{_html_mod.escape(str(r.get("GEX Regime") or "—"))}</div>
+                                    </div>
                                     <div style='text-align:center;min-width:72px'>
                                         <div style='font-size:.65rem;color:#64748b;text-transform:uppercase'>PoP</div>
                                         <div class='mono' style='font-size:.82rem;color:#c4b5fd;font-weight:700'>{(f"{float(r.get('diamond_pop', 0)):.0f}%" if int(r.get("diamond_n") or 0) > 0 else "—")}</div>
@@ -2287,6 +2301,7 @@ def main():
                                         else "—"
                                     ),
                                     "EM Safety": r.get("EM Safety", "—"),
+                                    "GEX Regime": r.get("GEX Regime", "—"),
                                     "Gold Zone Dist %": float(r["dist_gz"]),
                                     "Daily": r["struct"],
                                     "Summary": r["summary"],
@@ -2321,6 +2336,10 @@ def main():
                                     "EM Safety": st.column_config.TextColumn(
                                         "EM Safety",
                                         help="1-σ implied move vs scanner short-put strike: SAFE if strike < spot − EM (else MONITOR).",
+                                    ),
+                                    "GEX Regime": st.column_config.TextColumn(
+                                        "GEX Regime",
+                                        help="Gamma Flip: the price level where market maker hedging accelerates volatility. 🛡️ STABLE = spot above flip; ⚠️ TURBULENT = spot below flip.",
                                     ),
                                     "Gold Zone Dist %": st.column_config.NumberColumn("Gold Zone Dist", format="%+.1f%%"),
                                     "Daily": st.column_config.TextColumn("Daily"),

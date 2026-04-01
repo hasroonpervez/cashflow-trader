@@ -87,6 +87,34 @@ def render_mode_badge(use_quant: bool):
     st.markdown(badge_html, unsafe_allow_html=True)
 
 
+def _theta_gamma_desk_line(theta_gamma_ratio):
+    """Θ/Γ line for Diamond / recommended-trade context (desk CC or CSP row)."""
+    if theta_gamma_ratio is None:
+        return ""
+    try:
+        r = float(theta_gamma_ratio)
+    except (TypeError, ValueError):
+        return ""
+    if not np.isfinite(r):
+        return ""
+    if r > 2.0:
+        return (
+            "<div style='margin:10px 0 4px 0;font-size:.88rem;color:#94a3b8'>"
+            f"Θ/Γ Ratio: <strong style='color:#e2e8f0'>{r:.2f}</strong> · "
+            "<span style='color:#10b981'>✅ High Decay Efficiency</span></div>"
+        )
+    if r < 0.5:
+        return (
+            "<div style='margin:10px 0 4px 0;font-size:.88rem;color:#94a3b8'>"
+            f"Θ/Γ Ratio: <strong style='color:#e2e8f0'>{r:.2f}</strong> · "
+            "<span style='color:#f59e0b'>⚠️ Gamma Risk (Squeeze Likely)</span></div>"
+        )
+    return (
+        "<div style='margin:10px 0 4px 0;font-size:.88rem;color:#94a3b8'>"
+        f"Θ/Γ Ratio: <strong style='color:#e2e8f0'>{r:.2f}</strong></div>"
+    )
+
+
 def _factor_checklist_labels():
     return {
         "Supertrend": "Supertrend supports buyers",
@@ -701,7 +729,7 @@ def _fragment_technical_zone(
         "Technical Chart",
         f"{ticker} gets four dedicated panels: price, volume, RSI, and MACD. Zoom each one on its own. "
         "Tweak layers below; those toggles refresh the visuals without another Yahoo pull.",
-        tip_plain="Candles show OHLC. EMA and Bollinger frame trend and volatility. Fib, Gann, and S/R are reference rails you can mute. Diamonds flag confluence. Gold line is the Gold Zone. Volume shows participation. RSI shows heat. MACD shows momentum versus its signal.",
+        tip_plain="Candles show OHLC. EMA and Bollinger frame trend and volatility. Fib, Gann, and S/R are reference rails you can mute. Diamonds flag confluence. Gold line is the Gold Zone. **Gamma Flip:** the price level where market-maker hedging accelerates volatility (neon dashed line when chain GEX resolves). Volume shows participation. RSI shows heat. MACD shows momentum versus its signal.",
     )
     st.markdown("##### Chart layers")
     o1, o2 = st.columns(2)
@@ -722,6 +750,16 @@ def _fragment_technical_zone(
         _iv_em = _em_ctx.get("iv_pct")
         _dte_em = _em_ctx.get("dte")
         _exp_em = _em_ctx.get("expiry")
+    _gf_chart = st.session_state.get("_cf_gamma_flip")
+    try:
+        if _gf_chart is not None:
+            _gf_chart = float(_gf_chart)
+            if not np.isfinite(_gf_chart):
+                _gf_chart = None
+        else:
+            _gf_chart = None
+    except (TypeError, ValueError):
+        _gf_chart = None
     fig_p, fig_v, fig_r, fig_m = build_chart(
         df,
         ticker,
@@ -737,6 +775,7 @@ def _fragment_technical_zone(
         em_iv_pct=_iv_em,
         em_days_to_expiry=_dte_em if _dte_em and int(_dte_em) > 0 else None,
         em_expiry=_exp_em,
+        gamma_flip_price=_gf_chart,
     )
     st.plotly_chart(fig_p, use_container_width=True, config=_PLOTLY_UI_CONFIG)
     st.divider()
@@ -767,7 +806,7 @@ def _fragment_technical_zone(
                         f"<div class='{cls}'>"
                         f"<div style='font-size:1.1rem;font-weight:700;margin-bottom:4px'>{icon} {label}</div>"
                         f"<div style='color:#94a3b8;font-size:.85rem'>Date: {d['date'].strftime('%b %d, %Y')} ({age}d ago)<br>"
-                        f"Price: ${d['price']:.2f} | Score: {d['score']}/9 | RSI: {d['rsi']:.0f}<br>"
+                        f"Price: ${d['price']:.2f} | Score: {d['score']} (composite) | RSI: {d['rsi']:.0f}<br>"
                         f"<span style='color:#fbbf24;font-size:.8rem'>📊 {prob_txt}</span></div></div>",
                         unsafe_allow_html=True,
                     )
@@ -825,15 +864,26 @@ def _fragment_technical_zone(
                         _em_safe_d.get("iv_pct"),
                         _em_safe_d.get("dte"),
                     )
+                _bluf_desk = (
+                    st.session_state.get("_cf_bluf_cc_pick")
+                    if latest_d["type"] == "blue"
+                    else st.session_state.get("_cf_bluf_csp_pick")
+                )
+                _tgr_desk = (
+                    _theta_gamma_desk_line(_bluf_desk.get("theta_gamma_ratio"))
+                    if isinstance(_bluf_desk, dict)
+                    else ""
+                )
                 st.markdown(
                     f"<div style='background:rgba(15,23,42,.95);border:1px solid {why_color};border-radius:12px;padding:18px 20px;margin:12px 0'>"
                     f"<div style='font-size:.8rem;color:{why_color};text-transform:uppercase;letter-spacing:.1em;font-weight:700;margin-bottom:6px'>"
                     f"Why This {why_type}?</div>"
-                    f"<div style='color:#e2e8f0;font-size:.95rem;margin-bottom:6px'>Signal fired at <strong>{latest_d['score']}/9</strong> confluence. "
-                    f"Live checklist now shows <strong>{passed}/7</strong> headline factors green.</div>"
+                    f"<div style='color:#e2e8f0;font-size:.95rem;margin-bottom:6px'>Signal strength: <strong>{latest_d['score']}</strong> composite "
+                    f"(9-pt confluence plus desk modifiers). Live checklist: <strong>{passed}/7</strong> headline factors green.</div>"
                     f"<div style='color:#94a3b8;font-size:.88rem;margin-bottom:12px;line-height:1.5'>{why_action}</div>"
                     f"{_diamond_em_html}"
                     f"{quant_overlay}"
+                    f"{_tgr_desk}"
                     f"{win_badge}"
                     f"<div style='font-size:.72rem;color:#64748b;text-transform:uppercase;margin-bottom:6px'>Diamond checklist</div>"
                     f"<div>{factor_lines}</div>"
@@ -1018,7 +1068,7 @@ def _options_scan_column_config(*, put_table: bool):
         "MC PoP %": st.column_config.NumberColumn(
             "MC PoP %",
             format="%.1f%%",
-            help="10k antithetic simulations — v17.0 Liquidity & Greeks Mode",
+            help="10k antithetic simulations — v18.0 Liquidity & GEX Mode",
         ),
         "Vol": st.column_config.NumberColumn("Volume", format="%.0f"),
         "OI": st.column_config.NumberColumn("OI", format="%.0f"),

@@ -44,7 +44,7 @@ def _chart_hoverlabel():
 def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_sr=True,
                 show_ichi=False, show_super=False, diamonds=None, gold_zone=None,
                 mobile_layout=False, em_lower=None, em_upper=None, em_expiry=None,
-                em_iv_pct=None, em_days_to_expiry=None):
+                em_iv_pct=None, em_days_to_expiry=None, gamma_flip_price=None):
     """Build four separate figures: price (+ overlays), volume, RSI, MACD — easier to read than one stacked chart.
 
     When ``mobile_layout`` is True (narrow UA / phone), the price panel drops the legend, tightens margins,
@@ -194,6 +194,38 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
             annotation_text=f"Gold ${gold_zone:.2f}", annotation_position=ann_side,
             annotation_font=dict(color="#fde047", size=11, family="JetBrains Mono"),
         )
+
+    _gf = None
+    try:
+        if gamma_flip_price is not None and np.isfinite(float(gamma_flip_price)):
+            _gf = float(gamma_flip_price)
+    except (TypeError, ValueError):
+        _gf = None
+    if _gf is not None:
+        fig_p.add_hline(
+            y=_gf,
+            line_dash="dash",
+            line_color="#39FF14",
+            line_width=2,
+            opacity=0.95,
+            annotation_text="GAMMA FLIP (Volatility Trigger)",
+            annotation_position=ann_side,
+            annotation_font=dict(size=10, color="#39FF14", family="JetBrains Mono"),
+        )
+        if float(last_px) < _gf:
+            try:
+                y_lo = float(df["Low"].min()) * 0.997
+                y_hi = float(df["High"].max()) * 1.003
+                if np.isfinite(y_lo) and np.isfinite(y_hi) and y_hi > y_lo:
+                    fig_p.add_hrect(
+                        y0=y_lo,
+                        y1=y_hi,
+                        fillcolor="rgba(255, 0, 0, 0.05)",
+                        line_width=0,
+                        layer="below",
+                    )
+            except Exception:
+                pass
 
     try:
         if (

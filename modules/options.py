@@ -1,6 +1,7 @@
 """
 Options analytics — Black-Scholes, Greeks, EV, Kelly, Volatility Skew,
-Quant Edge Score, Gold Zone, Confluence Points, Diamond Signals, Opt scanner.
+Quant Edge Score, Gold Zone, GEX / gamma-flip engine, Confluence Points,
+Diamond Signals, Opt scanner.
 """
 import streamlit as st
 import pandas as pd
@@ -15,7 +16,7 @@ except ImportError:  # keep app usable if scipy is unavailable
     norm = None
 
 from .ta import TA
-from .data import fetch_stock
+from .data import fetch_stock, fetch_options
 from .streamlit_threading import make_script_ctx_pool, submit_with_script_ctx
 
 try:
@@ -404,10 +405,11 @@ def weekly_trend_label(df_wk):
 # ═════════════════════════════════════════════════════════════════════════
 
 @st.cache_data(ttl=120, show_spinner=False)
-def calc_gold_zone(df, df_wk=None):
+def calc_gold_zone(df, df_wk=None, gamma_flip_price=None):
     """Gold Zone: mean of POC, Fib 61.8%, Gann Sq9, and 200-day SMA (institutional anchor).
     Nearest HVN within 2% of spot is fused as a primary anchor alongside POC/Fib.
-    ``df_wk`` is accepted for API compatibility; SMA 200 replaces weekly S/R in the blend."""
+    ``df_wk`` is accepted for API compatibility; SMA 200 replaces weekly S/R in the blend.
+    When ``gamma_flip_price`` is within 5% of spot, it is fused as **Gamma Flip** support."""
     price = df["Close"].iloc[-1]
     components = {}
 
@@ -435,6 +437,14 @@ def calc_gold_zone(df, df_wk=None):
     if gann:
         nearest = min(gann.values(), key=lambda x: abs(x - price))
         components["Gann Sq9"] = nearest
+
+    try:
+        if gamma_flip_price is not None:
+            gf = float(gamma_flip_price)
+            if np.isfinite(gf) and gf > 0 and abs(gf / float(price) - 1.0) <= 0.05:
+                components["Gamma Flip"] = round(gf, 2)
+    except (TypeError, ValueError):
+        pass
 
     if components:
         gold_zone = round(np.mean(list(components.values())), 2)
@@ -627,13 +637,23 @@ def _hurst_adaptive_signal_periods(close: pd.Series):
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def detect_diamonds(df, df_wk=None, lookback=None, use_quant=False):
+def detect_diamonds(
+    df,
+    df_wk=None,
+    lookback=None,
+    use_quant=False,
+    gamma_flip_price=None,
+    gold_zone_price=None,
+):
     """Blue Diamond (strict): point-in-time **daily** confluence **crosses** to 7+ (was <7 prior bar),
     **daily structure BULLISH**, **weekly trend not BEARISH**, **volume ≥ 90% of 20-day volume SMA**,
     plus ATR blow-off guard inside the institutional filter.
 
     Pink Diamond: confluence collapse (≤3 after ≥5) **or** RSI > 75 with fading score;
     weekly bias can be **BULLISH** too (take-profit / de-risk in extended runs).
+
+    When ``gamma_flip_price`` and ``gold_zone_price`` are set, Blue **composite** score adds **+2**
+    if price is above the flip and Gold Zone sits below it, and **−3** if price is below the flip.
 
     ``lookback`` is reserved for future use (unused). Scan window is capped to the last
     ``_DIAMOND_SCAN_TAIL_BARS`` rows so long histories stay responsive."""
@@ -723,11 +743,23 @@ def detect_diamonds(df, df_wk=None, lookback=None, use_quant=False):
                 lo, hi = min(poc_sub, hvn_p), max(poc_sub, hvn_p)
                 if lo < pi < hi:
                     magnet = 1
+            gex_adj = 0
+            try:
+                if gamma_flip_price is not None:
+                    gf = float(gamma_flip_price)
+                    if np.isfinite(gf) and gf > 0:
+                        gz = float(gold_zone_price) if gold_zone_price is not None else None
+                        if pi > gf and gz is not None and np.isfinite(gz) and gz < gf:
+                            gex_adj += 2
+                        if pi < gf:
+                            gex_adj -= 3
+            except (TypeError, ValueError):
+                pass
             diamonds.append({
                 "date": df.index[i],
                 "price": pi,
                 "type": "blue",
-                "score": sc + magnet,
+                "score": sc + magnet + gex_adj,
                 "rsi": rsi_i,
                 "weekly": wk_bias,
                 "suggested_shares": size_suggestion,
@@ -805,9 +837,42 @@ def scan_single_ticker(tkr, correlation_haircut=1.0):
         chg_pct = (price / prev - 1) * 100
 
         qs, _ = quant_edge_score(df)
-        gold_zone, gz_comp = calc_gold_zone(df, df_wk)
+
+        gamma_flip_sc = None
+        gex_regime = "—"
+        try:
+            _, opt_exps_s = fetch_options(tkr)
+            if opt_exps_s:
+                exp_s = opt_exps_s[min(2, len(opt_exps_s) - 1)]
+                raw_s, _ = fetch_options(tkr, exp_s)
+                c_s, p_s = raw_s if isinstance(raw_s, (tuple, list)) and len(raw_s) == 2 else (pd.DataFrame(), pd.DataFrame())
+                c_s = c_s if isinstance(c_s, pd.DataFrame) else pd.DataFrame()
+                p_s = p_s if isinstance(p_s, pd.DataFrame) else pd.DataFrame()
+                if not c_s.empty or not p_s.empty:
+                    ct = c_s.copy()
+                    pt = p_s.copy()
+                    if not ct.empty:
+                        ct["type"] = "call"
+                    if not pt.empty:
+                        pt["type"] = "put"
+                    odf = pd.concat([ct, pt], ignore_index=True)
+                    dte_g = max(1, (datetime.strptime(str(exp_s)[:10], "%Y-%m-%d") - datetime.now()).days)
+                    gex_s = Opt.calc_gamma_exposure(odf, float(price), rfr=0.045, T_years=dte_g / 365.0)
+                    gf_s = Opt.find_gamma_flip(gex_s)
+                    if gf_s is not None and np.isfinite(float(gf_s)):
+                        gamma_flip_sc = float(gf_s)
+                        gex_regime = "🛡️ STABLE" if float(price) > gamma_flip_sc else "⚠️ TURBULENT"
+        except Exception:
+            pass
+
+        gold_zone, gz_comp = calc_gold_zone(df, df_wk, gamma_flip_price=gamma_flip_sc)
         cp_score, cp_max, cp_bd, _ = calc_confluence_points(df, df_wk, None, gold_zone_price=gold_zone)
-        diamonds = detect_diamonds(df, df_wk)
+        diamonds = detect_diamonds(
+            df,
+            df_wk,
+            gamma_flip_price=gamma_flip_sc,
+            gold_zone_price=gold_zone,
+        )
         latest_d = latest_diamond_status(diamonds)
         dist_gz = (price / gold_zone - 1) * 100 if gold_zone else 0
 
@@ -904,6 +969,7 @@ def scan_single_ticker(tkr, correlation_haircut=1.0):
             "scanner_mc_pop": round(scanner_avg_mc, 1),
             "gz_hvn": gz_comp.get("HVN"),
             "EM Safety": em_safety,
+            "GEX Regime": gex_regime,
         }
     except Exception:
         return None
@@ -918,6 +984,89 @@ class Opt:
     DELTA_LOW, DELTA_HIGH = 0.15, 0.20
     MIN_OI, MIN_VOL = 100, 10
     RELAXED_MIN_OI, RELAXED_MIN_VOL = 10, 1
+
+    @staticmethod
+    def calc_gamma_exposure(opts_df, spot_price, rfr=0.045, T_years=None):
+        """Per-strike dealer GEX (calls +, puts −) using vectorized gamma × OI × S²/100."""
+        try:
+            if opts_df is None or getattr(opts_df, "empty", True):
+                return pd.Series(dtype=float)
+            if "openInterest" not in opts_df.columns or "strike" not in opts_df.columns:
+                return pd.Series(dtype=float)
+            S = float(spot_price)
+            if not math.isfinite(S) or S <= 0:
+                return pd.Series(dtype=float)
+            Ty = float(T_years) if T_years is not None else (30.0 / 365.0)
+            Ty = max(Ty, 1e-12)
+            r = float(rfr)
+            df = opts_df.copy()
+            df["strike"] = pd.to_numeric(df["strike"], errors="coerce")
+            df["openInterest"] = pd.to_numeric(df["openInterest"], errors="coerce").fillna(0.0)
+            df = df[np.isfinite(df["strike"].to_numpy()) & (df["openInterest"] > 0)]
+            if df.empty:
+                return pd.Series(dtype=float)
+            if "type" not in df.columns:
+                return pd.Series(dtype=float)
+            df["_t"] = df["type"].astype(str).str.lower().str.strip()
+            chunks = []
+            for otype in ("call", "put"):
+                sub = df[df["_t"] == otype]
+                if sub.empty:
+                    continue
+                kv = sub["strike"].to_numpy(dtype=float)
+                iv_raw = sub["impliedVolatility"] if "impliedVolatility" in sub.columns else None
+                if iv_raw is None:
+                    iv = np.zeros(len(sub), dtype=float)
+                else:
+                    iv = pd.to_numeric(iv_raw, errors="coerce").fillna(0.0).to_numpy(dtype=float)
+                iv_dec = np.maximum(np.where(iv > 0, iv, 0.5), 0.001)
+                _, gamma_v = _vectorized_theta_gamma(S, kv, Ty, r, iv_dec, otype)
+                sub = sub.copy()
+                sub["_gamma_vec"] = gamma_v
+                chunks.append(sub)
+            if not chunks:
+                return pd.Series(dtype=float)
+            merged = pd.concat(chunks, ignore_index=True)
+            sign = np.where(merged["_t"].to_numpy() == "put", -1.0, 1.0)
+            scale = (S * S) / 100.0
+            merged["GEX"] = merged["_gamma_vec"].to_numpy(dtype=float) * merged["openInterest"].to_numpy(dtype=float) * scale * sign
+            return merged.groupby("strike", sort=True)["GEX"].sum()
+        except Exception:
+            return pd.Series(dtype=float)
+
+    @staticmethod
+    def find_gamma_flip(gex_by_strike):
+        """Strike where cumulative GEX (sorted by strike) crosses from positive to negative."""
+        try:
+            if gex_by_strike is None or len(gex_by_strike) < 2:
+                return None
+            s = gex_by_strike.sort_index()
+            cum = np.asarray(s.cumsum(), dtype=float)
+            strikes = np.asarray(s.index, dtype=float)
+            if cum.size < 2 or strikes.size != cum.size:
+                return None
+            sig = np.sign(cum)
+            run = 0.0
+            sig2 = np.zeros_like(sig, dtype=float)
+            for i in range(len(sig)):
+                v = sig[i]
+                if v == 0.0:
+                    sig2[i] = run
+                else:
+                    sig2[i] = v
+                    run = v
+            cross_idx = np.where(np.diff(sig2) != 0)[0]
+            for j in cross_idx:
+                c0, c1 = float(cum[j]), float(cum[j + 1])
+                k0, k1 = float(strikes[j]), float(strikes[j + 1])
+                if c0 > 0 and c1 < 0:
+                    if abs(c1 - c0) < 1e-18:
+                        return k1
+                    t = -c0 / (c1 - c0)
+                    return float(k0 + t * (k1 - k0))
+            return None
+        except Exception:
+            return None
 
     @staticmethod
     def calc_expected_move(price, iv, days_to_expiry):
