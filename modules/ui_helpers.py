@@ -274,11 +274,11 @@ def _fragment_technical_zone(
     struct,
     mini_mode,
     mobile_chart_layout,
-    **kwargs,
 ):
     """Charts + overlay toggles + diamond cards + gold zone copy. Reruns without refetching Yahoo data."""
-    # Pop from kwargs so callers can pass use_quant=... reliably under @st.fragment / mixed deploy versions.
-    use_quant = bool(kwargs.pop("use_quant", False))
+    # Quant mode is stored in session_state (not passed as a kwarg) because @st.fragment reruns
+    # may not forward arbitrary kwargs to the inner function reliably on all Streamlit versions.
+    use_quant = bool(st.session_state.get("_cf_use_quant_models", False))
     if mini_mode:
         chg_pct = 0.0
         if len(df) >= 2:

@@ -45,7 +45,7 @@ footer,
 import html as _html_mod
 import pandas as pd
 import numpy as np
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from datetime import datetime, timedelta
 import plotly.graph_objects as go
 import plotly.express as px
@@ -62,6 +62,7 @@ if "bt_hold" not in st.session_state:
     st.session_state.bt_hold = 5
 
 # ── Module imports ──
+from modules.streamlit_threading import make_script_ctx_pool
 from modules.config import (
     load_config, save_config, DEFAULT_CONFIG, CONFIG_PATH,
     _hydrate_sidebar_prefs, _overlay_prefs_from_session,
@@ -872,6 +873,8 @@ def main():
     #  SECTION 1 — TECHNICAL CHART (fragment: overlay toggles without refetching Yahoo)
     # ══════════════════════════════════════════════════════════════════
     st.markdown('<div id="charts" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
+    # Fragment reruns must not rely on extra kwargs (Streamlit's @st.fragment can omit them).
+    st.session_state["_cf_use_quant_models"] = use_quant_models
     _fragment_technical_zone(
         df,
         df_wk,
@@ -887,7 +890,6 @@ def main():
         struct,
         mini_mode,
         mobile_chart_layout,
-        use_quant=use_quant_models,
     )
     chart_mood = "bull" if struct == "BULLISH" else ("bear" if struct == "BEARISH" else "neutral")
 
@@ -1914,9 +1916,11 @@ def main():
                     scan_progress = st.progress(0)
                     done_ct = 0
                     scan_failed = []
-                    with ThreadPoolExecutor(max_workers=workers) as pool:
+                    with make_script_ctx_pool(workers) as pool:
                         future_map = {
-                            pool.submit(scan_single_ticker, tkr, haircut_map.get(tkr, 1.0)): tkr
+                            pool.submit(
+                                scan_single_ticker, tkr, haircut_map.get(tkr, 1.0)
+                            ): tkr
                             for tkr in watchlist_tickers
                         }
                         for fut in as_completed(future_map):

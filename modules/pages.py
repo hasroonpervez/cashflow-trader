@@ -9,7 +9,6 @@ import numpy as np
 from dataclasses import dataclass, field
 from typing import Any, Optional
 from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .ta import TA
 from .data import (
@@ -33,6 +32,7 @@ from .config import (
     REF_NOTIONAL, RISK_PCT_EXAMPLE, KELLY_DISPLAY_CAP_PCT,
     EMA_EXTENSION_WARN_PCT,
 )
+from .streamlit_threading import make_script_ctx_pool
 from .ui_helpers import (
     _factor_checklist_labels, _confluence_why_trade_plain,
     _iv_rank_qualitative_words, _iv_rank_pill_html,
@@ -137,7 +137,7 @@ def build_context(ticker: str, cfg: dict) -> Optional[DashContext]:
 
     # ── Parallel fetch ──
     with st.spinner(f"Loading {ticker}..."):
-        with ThreadPoolExecutor(max_workers=7) as pool:
+        with make_script_ctx_pool(7) as pool:
             f_df = pool.submit(fetch_stock, ticker, "1y", "1d")
             f_wk = pool.submit(fetch_stock, ticker, "2y", "1wk")
             f_1mo = pool.submit(fetch_stock, ticker, "1mo", "1d")
