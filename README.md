@@ -121,8 +121,10 @@ The dashboard answers one question: **"What should I do right now?"**
 ```
 cashflow-trader/
 ├── app.py                    # Thin entrypoint: page config → CSS injection → main()
+├── tests/                    # pytest — correlation, allocation, earnings spark, BS/EV
 ├── config.json               # Watchlist & UI preferences (atomic JSON writes)
 ├── requirements.txt
+├── requirements-dev.txt      # pytest (optional local / CI)
 ├── .gitignore
 └── modules/
     ├── __init__.py
@@ -161,6 +163,15 @@ source venv/bin/activate       # macOS/Linux
 pip install -r requirements.txt
 streamlit run app.py
 ```
+
+### Tests (QA)
+
+```bash
+pip install -r requirements-dev.txt
+pytest tests/ -q
+```
+
+Covers `TA.get_correlation_matrix`, earnings runway spark series, `Opt.portfolio_allocation` / `_simple_corr_haircut`, and basic Black–Scholes / EV math (no live Yahoo calls).
 
 ## Deploy to Streamlit Cloud
 

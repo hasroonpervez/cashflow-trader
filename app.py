@@ -55,8 +55,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 import plotly.graph_objects as go
-import plotly.express as px
-import math, warnings, json, time, os, re
+import math, warnings, json, time, re
 import textwrap
 from pathlib import Path
 warnings.filterwarnings("ignore")

@@ -1,0 +1,3 @@
+# Local / CI QA only — not required to run Streamlit in production.
+-r requirements.txt
+pytest>=8.0

@@ -10,13 +10,30 @@ import math
 from math import log, sqrt, exp
 from datetime import datetime
 from concurrent.futures import as_completed
-try:
-    from scipy.stats import norm
-except ImportError:  # keep app usable if scipy is unavailable
-    norm = None
 
 from .ta import TA
 from .data import fetch_stock, fetch_options, fetch_news_headlines
+from .sentiment import Sentiment
+from .streamlit_threading import make_script_ctx_pool, submit_with_script_ctx
+
+try:
+    from scipy.stats import norm
+
+    _cdf = norm.cdf
+    _pdf = norm.pdf
+except ImportError:  # keep app usable if scipy is unavailable
+    norm = None
+
+    def _cdf(x):
+        a1, a2, a3, a4, a5 = 0.254829592, -0.284496736, 1.421413741, -1.453152027, 1.061405429
+        sign = 1 if x >= 0 else -1
+        x = abs(x) / sqrt(2)
+        t = 1.0 / (1.0 + 0.3275911 * x)
+        y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * exp(-x * x)
+        return 0.5 * (1.0 + sign * y)
+
+    def _pdf(x):
+        return exp(-0.5 * x * x) / sqrt(2 * 3.14159265359)
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -35,21 +52,6 @@ def watchlist_correlation_matrix_cached(closes_wide: pd.DataFrame):
         return mat
     except Exception:
         return None
-from .sentiment import Sentiment
-from .streamlit_threading import make_script_ctx_pool, submit_with_script_ctx
-
-try:
-    from scipy.stats import norm as _norm
-    _cdf = _norm.cdf; _pdf = _norm.pdf
-except ImportError:
-    def _cdf(x):
-        a1,a2,a3,a4,a5 = 0.254829592,-0.284496736,1.421413741,-1.453152027,1.061405429
-        sign = 1 if x >= 0 else -1; x = abs(x)/sqrt(2)
-        t = 1.0/(1.0+0.3275911*x)
-        y = 1.0-(((((a5*t+a4)*t)+a3)*t+a2)*t+a1)*t*exp(-x*x)
-        return 0.5*(1.0+sign*y)
-    def _pdf(x):
-        return exp(-0.5*x*x)/sqrt(2*3.14159265359)
 
 def bs_price(S, K, T, r, sigma, option_type="call"):
     """Black-Scholes option price. S=spot, K=strike, T=years, r=risk-free rate, sigma=IV."""
