@@ -63,7 +63,7 @@ from pathlib import Path
 warnings.filterwarnings("ignore")
 
 if "edge_log" not in st.session_state:
-    st.session_state.edge_log = pd.DataFrame(columns=["Time", "Ticker", "Retail", "Quant", "Delta"])
+    st.session_state.edge_log = pd.DataFrame(columns=["Time", "Ticker", "Retail", "Quant", "Delta", "Preview"])
 if "bt_thresh" not in st.session_state:
     st.session_state.bt_thresh = 70
 if "bt_hold" not in st.session_state:
@@ -105,7 +105,7 @@ for _import_try in range(_IMPORT_KEYERROR_RETRIES):
                 render_mode_badge,
                 _explain, _section, _mini_sparkline, _glance_sparkline_svg,
                 _glance_metric_card, _render_html_block, _parse_watchlist_string,
-                _fragment_technical_zone, _df_price_levels, _style_price_levels_table,
+                _fragment_technical_zone, _fragment_rolling_edge_capture, _df_price_levels, _style_price_levels_table,
                 _earnings_calendar_column_config, _style_earnings_next_highlight,
                 _PRICE_LEVEL_COLUMN_CONFIG, _options_scan_dataframe,
                 _options_scan_column_config, _style_propdesk_highlight,
@@ -118,6 +118,20 @@ for _import_try in range(_IMPORT_KEYERROR_RETRIES):
         if _import_try >= _IMPORT_KEYERROR_RETRIES - 1:
             raise
         time.sleep(0.08 * (2**_import_try))
+
+# Migrate legacy edge_log sessions (added Preview column for watchlist matrix).
+_el = st.session_state.get("edge_log")
+if isinstance(_el, pd.DataFrame) and not _el.empty and "Preview" not in _el.columns and "Quant" in _el.columns:
+    try:
+        from modules.options import quant_edge_status_line as _qesl
+
+        _el2 = _el.copy()
+        _el2["Preview"] = _el2["Quant"].apply(
+            lambda q: _qesl(float(q)) if pd.notna(q) else "",
+        )
+        st.session_state.edge_log = _el2
+    except Exception:
+        pass
 
 # ── Inject theme + navbar (must happen before any widgets) ──
 inject_css_and_navbar()
@@ -942,6 +956,7 @@ def main():
     st.markdown('<div id="charts" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
     # Fragment reruns must not rely on extra kwargs (Streamlit's @st.fragment can omit them).
     st.session_state["_cf_use_quant_models"] = use_quant_models
+    st.session_state["_cf_vix_snapshot"] = float(vix_v or 0.0)
     _fragment_technical_zone(
         df,
         df_wk,
@@ -1079,24 +1094,12 @@ def main():
                     <div style='font-size:.85rem;color:#94a3b8'>{_qe_blurb}</div></div>""",
                     unsafe_allow_html=True,
                 )
+                with st.expander("📝 Rolling Edge Capture Log (live matrix edge market)", expanded=False):
+                    _fragment_rolling_edge_capture()
                 if use_quant_models:
                     retail_score, retail_breakdown = quant_edge_score(df, vix_val=vix_v, use_quant=False)
                     inst_score, inst_breakdown = qs, qb
                     delta_q = inst_score - retail_score
-                    try:
-                        new_row = {
-                            "Time": datetime.now().strftime("%H:%M:%S"),
-                            "Ticker": ticker,
-                            "Retail": int(retail_score),
-                            "Quant": int(inst_score),
-                            "Delta": int(delta_q),
-                        }
-                        df_log = st.session_state.edge_log
-                        df_log = df_log[df_log["Ticker"] != new_row["Ticker"]]
-                        df_log = pd.concat([pd.DataFrame([new_row]), df_log], ignore_index=True).head(50)
-                        st.session_state.edge_log = df_log
-                    except Exception:
-                        pass
                     st.metric(
                         label="Quant Edge (Institutional)",
                         value=f"{inst_score:.0f}/100",
@@ -1161,104 +1164,6 @@ def main():
                                     hide_index=True,
                                     column_config={"Score": st.column_config.NumberColumn(format="%.1f")},
                                 )
-                    with st.expander("📝 Rolling Edge Capture Log", expanded=False):
-                        st.caption("Live tracking of Institutional vs Retail score deltas across your session.")
-                        if not st.session_state.edge_log.empty:
-                            df_log = st.session_state.edge_log
-                            try:
-                                mean_delta = df_log["Delta"].mean()
-                                hit_rate = (df_log["Quant"] > df_log["Retail"]).mean() * 100
-
-                                best_idx = df_log["Delta"].idxmax()
-                                worst_idx = df_log["Delta"].idxmin()
-
-                                best_ticker = df_log.loc[best_idx, "Ticker"]
-                                best_delta = int(df_log.loc[best_idx, "Delta"])
-                                worst_ticker = df_log.loc[worst_idx, "Ticker"]
-                                worst_delta = int(df_log.loc[worst_idx, "Delta"])
-
-                                sc1, sc2, sc3, sc4 = st.columns(4)
-                                sc1.metric(
-                                    "Mean Edge Δ",
-                                    f"{mean_delta:+.1f}",
-                                    help="Average point difference between Quant and Retail scores.",
-                                )
-                                sc2.metric(
-                                    "Quant > Retail",
-                                    f"{hit_rate:.0f}%",
-                                    help="Win rate where the Quant engine scores higher than Retail.",
-                                )
-                                sc3.metric("Max Divergence", f"{best_delta:+d}", delta=best_ticker, delta_color="off")
-                                sc4.metric("Min Divergence", f"{worst_delta:+d}", delta=worst_ticker, delta_color="off")
-
-                                # --- INJECT EDGE MATRIX HEATMAP ---
-                                try:
-                                    st.markdown("<br>", unsafe_allow_html=True)
-
-                                    # Keep only the latest scan per ticker to avoid duplicate blocks.
-                                    df_latest = df_log.drop_duplicates(subset=["Ticker"], keep="first").copy()
-                                    df_latest["Size_Score"] = df_latest["Quant"].apply(lambda x: max(1, x))
-
-                                    fig = px.treemap(
-                                        df_latest,
-                                        path=[px.Constant("Session Watchlist"), "Ticker"],
-                                        values="Size_Score",
-                                        color="Delta",
-                                        color_continuous_scale="RdYlGn",
-                                        color_continuous_midpoint=0,
-                                        custom_data=["Retail", "Quant", "Delta"],
-                                    )
-
-                                    fig.update_traces(
-                                        hovertemplate="<b>%{label}</b><br>Quant Score: %{customdata[1]}<br>Retail Score: %{customdata[0]}<br>Edge Delta: %{customdata[2]:+d}<extra></extra>",
-                                        textinfo="label+value",
-                                        texttemplate="<b>%{label}</b><br>Score: %{value}<br>Δ %{color:+.1f}",
-                                    )
-
-                                    fig.update_layout(
-                                        margin=dict(t=30, l=10, r=10, b=10),
-                                        paper_bgcolor="rgba(0,0,0,0)",
-                                        plot_bgcolor="rgba(0,0,0,0)",
-                                        font=dict(color="#94a3b8"),
-                                        title=dict(text="Live Market Edge Matrix", font=dict(size=14, color="#e2e8f0")),
-                                    )
-
-                                    st.plotly_chart(fig, use_container_width=True)
-                                except Exception:
-                                    pass  # Fail silently if the map cannot render
-                                # ----------------------------------
-
-                                st.divider()
-                                try:
-                                    csv_data = df_log.to_csv(index=False).encode("utf-8")
-                                    dl_col1, dl_col2 = st.columns([8, 2])
-                                    with dl_col2:
-                                        st.download_button(
-                                            label="📥 Export to CSV",
-                                            data=csv_data,
-                                            file_name=f"quant_edge_log_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-                                            mime="text/csv",
-                                            use_container_width=True,
-                                        )
-                                except Exception:
-                                    pass
-                            except Exception:
-                                pass
-                            st.dataframe(
-                                df_log,
-                                use_container_width=True,
-                                hide_index=True,
-                                column_config={
-                                    "Time": st.column_config.TextColumn("Time"),
-                                    "Ticker": st.column_config.TextColumn("Ticker", width="small"),
-                                    "Retail": st.column_config.NumberColumn("Retail", format="%d"),
-                                    "Quant": st.column_config.NumberColumn("Quant", format="%d"),
-                                    "Delta": st.column_config.NumberColumn("Delta", format="%+d"),
-                                },
-                            )
-                        else:
-                            st.info("Log is empty. Scan a ticker to record edge data.")
-
                     with st.expander("⏳ Time-Machine Backtester (Historical Edge)", expanded=False):
                         st.caption("Simulates buying this asset every time the Quant Edge flashes, holding for N days.")
 

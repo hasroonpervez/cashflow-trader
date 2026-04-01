@@ -7,12 +7,15 @@ import html as _html_mod
 import pandas as pd
 import numpy as np
 import textwrap
+from datetime import datetime
+import plotly.express as px
 
 from .ta import TA
 from .data import _PLOTLY_UI_CONFIG
 from .options import (
     calc_gold_zone, calc_confluence_points, detect_diamonds,
     latest_diamond_status, diamond_win_rate,
+    scan_watchlist_edge_rows, quant_edge_status_line,
 )
 from .data import compute_iv_rank_proxy
 from .chart import build_chart
@@ -261,6 +264,145 @@ def _parse_watchlist_string(s):
             items.append(t)
             seen.add(t)
     return items
+
+
+@st.fragment(run_every=90.0)
+def _fragment_rolling_edge_capture():
+    """Full-watchlist quant vs retail edge log + matrix; reruns on a timer without blocking the rest of the app."""
+    st.caption(
+        "Live matrix edge market: scans **entire watchlist** in parallel (~90s refresh). "
+        "Sorted by **Quant** score; **Preview** matches the headline desk read for that score."
+    )
+    wl = _parse_watchlist_string(st.session_state.get("sb_scanner", ""))
+    use_q = bool(st.session_state.get("_cf_use_quant_models", False))
+    vx = st.session_state.get("_cf_vix_snapshot")
+    try:
+        vxf = float(vx) if vx is not None else 0.0
+    except (TypeError, ValueError):
+        vxf = 0.0
+    vix_arg = vxf if vxf > 0 else None
+
+    if not wl:
+        st.info("Add tickers under **Edit watchlist symbols** to populate the edge matrix.")
+        return
+
+    with st.spinner("Scanning watchlist for edge scores…"):
+        rows, failed_syms = scan_watchlist_edge_rows(wl, vix_arg, use_q)
+    if rows:
+        st.session_state.edge_log = pd.DataFrame(rows)
+        st.session_state["_edge_matrix_updated"] = datetime.now().strftime("%H:%M:%S")
+    else:
+        st.warning("Could not load daily prices for any watchlist symbol. Check symbols or try again shortly.")
+
+    df_log = st.session_state.edge_log
+    if df_log is None or df_log.empty:
+        return
+
+    if "Preview" not in df_log.columns:
+        df_log = df_log.copy()
+        df_log["Preview"] = df_log["Quant"].apply(lambda q: quant_edge_status_line(float(q)))
+
+    # Enforce score ordering (Quant high → low) for table + treemap even if session held stale rows.
+    df_log = df_log.sort_values(by=["Quant", "Delta", "Ticker"], ascending=[False, False, True]).reset_index(drop=True)
+
+    try:
+        _n_ok = len(df_log)
+        _n_wl = len(wl)
+        st.caption(
+            f"Last watchlist scan: **{st.session_state.get('_edge_matrix_updated', '—')}** · "
+            f"**{_n_ok}** / **{_n_wl}** symbols scored · ordered by **Quant** (highest first)"
+        )
+        if failed_syms:
+            st.caption("No daily bars: " + ", ".join(f"`{s}`" for s in failed_syms))
+        mean_delta = df_log["Delta"].mean()
+        hit_rate = (df_log["Quant"] > df_log["Retail"]).mean() * 100
+        best_idx = df_log["Delta"].idxmax()
+        worst_idx = df_log["Delta"].idxmin()
+        best_ticker = df_log.loc[best_idx, "Ticker"]
+        best_delta = int(df_log.loc[best_idx, "Delta"])
+        worst_ticker = df_log.loc[worst_idx, "Ticker"]
+        worst_delta = int(df_log.loc[worst_idx, "Delta"])
+        sc1, sc2, sc3, sc4 = st.columns(4)
+        sc1.metric(
+            "Mean Edge Δ",
+            f"{mean_delta:+.1f}",
+            help="Average point difference between Quant and Retail scores.",
+        )
+        sc2.metric(
+            "Quant > Retail",
+            f"{hit_rate:.0f}%",
+            help="Share of names where Quant scores higher than Retail.",
+        )
+        sc3.metric("Max Divergence", f"{best_delta:+d}", delta=best_ticker, delta_color="off")
+        sc4.metric("Min Divergence", f"{worst_delta:+d}", delta=worst_ticker, delta_color="off")
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        # Treemap: one row per ticker, already sorted by Quant (desc); box size tracks Quant score.
+        df_latest = df_log.drop_duplicates(subset=["Ticker"], keep="first").copy()
+        df_latest = df_latest.sort_values(by=["Quant", "Delta", "Ticker"], ascending=[False, False, True])
+        df_latest["Size_Score"] = df_latest["Quant"].apply(lambda x: max(1, int(x)))
+        if "Preview" not in df_latest.columns:
+            df_latest["Preview"] = df_latest["Quant"].apply(lambda q: quant_edge_status_line(float(q)))
+
+        fig = px.treemap(
+            df_latest,
+            path=[px.Constant("Session Watchlist"), "Ticker"],
+            values="Size_Score",
+            color="Delta",
+            color_continuous_scale="RdYlGn",
+            color_continuous_midpoint=0,
+            custom_data=["Retail", "Quant", "Delta", "Preview"],
+        )
+        fig.update_traces(
+            hovertemplate=(
+                "<b>%{label}</b><br>Quant: %{customdata[1]} · Retail: %{customdata[0]}<br>"
+                "Δ %{customdata[2]:+d}<br><i>%{customdata[3]}</i><extra></extra>"
+            ),
+            textinfo="label+value",
+            texttemplate="<b>%{label}</b><br>Q %{customdata[1]}<br>Δ %{customdata[2]:+d}",
+        )
+        fig.update_layout(
+            margin=dict(t=30, l=10, r=10, b=10),
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="#94a3b8"),
+            title=dict(
+                text="Live Market Edge Matrix — full watchlist, Quant score (high → low)",
+                font=dict(size=14, color="#e2e8f0"),
+            ),
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    except Exception:
+        pass
+
+    st.divider()
+    try:
+        csv_data = df_log.to_csv(index=False).encode("utf-8")
+        dl_col1, dl_col2 = st.columns([8, 2])
+        with dl_col2:
+            st.download_button(
+                label="📥 Export to CSV",
+                data=csv_data,
+                file_name=f"quant_edge_log_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
+    except Exception:
+        pass
+    st.session_state.edge_log = df_log
+    st.dataframe(
+        df_log,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Time": st.column_config.TextColumn("Time"),
+            "Ticker": st.column_config.TextColumn("Ticker", width="small"),
+            "Retail": st.column_config.NumberColumn("Retail", format="%d"),
+            "Quant": st.column_config.NumberColumn("Quant", format="%d"),
+            "Delta": st.column_config.NumberColumn("Delta", format="%+d"),
+            "Preview": st.column_config.TextColumn("Preview (vs Quant)", width="large"),
+        },
+    )
 
 
 @st.fragment

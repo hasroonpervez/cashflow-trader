@@ -8,6 +8,7 @@ import numpy as np
 import math
 from math import log, sqrt, exp
 from datetime import datetime
+from concurrent.futures import as_completed
 try:
     from scipy.stats import norm
 except ImportError:  # keep app usable if scipy is unavailable
@@ -15,6 +16,7 @@ except ImportError:  # keep app usable if scipy is unavailable
 
 from .ta import TA
 from .data import fetch_stock
+from .streamlit_threading import make_script_ctx_pool, submit_with_script_ctx
 
 try:
     from scipy.stats import norm as _norm
@@ -241,6 +243,60 @@ def quant_edge_score(df, vix_val=None, options_data=None, use_quant=False):
     composite = round(float(np.mean(list(sc.values()))), 1)
     sc["model"] = "retail"
     return composite, sc
+
+
+def quant_edge_status_line(qs: float) -> str:
+    """One-line desk read aligned with DashContext.qs_status."""
+    if qs > 70:
+        return "PRIME SELLING ENVIRONMENT"
+    if qs > 50:
+        return "DECENT SETUP"
+    return "STAND DOWN. WAIT FOR A CLEANER ENTRY."
+
+
+def _edge_row_worker(sym: str, vix_val, use_quant: bool):
+    """Fetch daily bars and compute retail vs quant edge for one symbol (thread-pool worker)."""
+    df = fetch_stock(sym, "1y", "1d")
+    if df is None or df.empty:
+        return None
+    retail_s, _ = quant_edge_score(df, vix_val=vix_val, use_quant=False)
+    inst_s, _ = quant_edge_score(df, vix_val=vix_val, use_quant=use_quant)
+    r_int = int(round(float(retail_s)))
+    q_int = int(round(float(inst_s)))
+    return {
+        "Ticker": sym.upper().strip(),
+        "Retail": r_int,
+        "Quant": q_int,
+        "Delta": q_int - r_int,
+        "Preview": quant_edge_status_line(float(inst_s)),
+    }
+
+
+def scan_watchlist_edge_rows(watch_items: list[str], vix_val, use_quant: bool) -> tuple[list[dict], list[str]]:
+    """Fetch daily bars for **every** watchlist symbol (one task each), then sort by Quant (desc), Delta (desc), Ticker.
+
+    Returns ``(rows, failed_tickers)`` where ``failed_tickers`` are symbols with no usable OHLC after fetch.
+    """
+    syms = [s.strip().upper() for s in watch_items if s and str(s).strip()]
+    if not syms:
+        return [], []
+    n_workers = max(1, min(8, len(syms)))
+    rows: list[dict] = []
+    ts = datetime.now().strftime("%H:%M:%S")
+    with make_script_ctx_pool(n_workers) as pool:
+        futures = [submit_with_script_ctx(pool, _edge_row_worker, sym, vix_val, use_quant) for sym in syms]
+        for fut in as_completed(futures):
+            try:
+                r = fut.result()
+                if r:
+                    r["Time"] = ts
+                    rows.append(r)
+            except Exception:
+                pass
+    got = {r["Ticker"] for r in rows}
+    failed = [s for s in syms if s not in got]
+    rows.sort(key=lambda x: (-x["Quant"], -x["Delta"], x["Ticker"]))
+    return rows, failed
 
 
 def weekly_trend_label(df_wk):
