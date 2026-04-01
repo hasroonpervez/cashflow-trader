@@ -1,5 +1,5 @@
 {
-  "watchlist": "PLTR,BMNR,AAPL,AMZN,NVDA,AMD,TSLA,SPY,QQQ",
+  "watchlist": "PLTR,BMNR,HIMS,RIVN,TSLA,QS,LCID,NIO,OPEN,ZETA,CIFR,BITF,RXRX,ABCL,IBRX,DNA,ABSI,SRFM,BYND,SOFI,SPY,QQQ,BTC,ETH",
   "scanner_sort_mode": "Custom watchlist order",
   "strat_focus": "Hybrid",
   "strat_horizon": "30 DTE",
@@ -11,5 +11,6 @@
   "overlay_ichi": false,
   "overlay_super": false,
   "overlay_diamonds": true,
-  "overlay_gold": true
+  "overlay_gold": true,
+  "use_quant_models": false
 }

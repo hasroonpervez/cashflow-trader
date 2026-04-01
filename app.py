@@ -133,16 +133,35 @@ def main():
     # ── Watchlist editor (must run before Mission Control so sb_scanner is committed same run)
     _wl_expanded = bool(st.session_state.pop("_open_watchlist_editor", False))
     st.caption("CashFlow Command Center · v15.0")
+    def _persist_watchlist_text_callback():
+        raw = st.session_state.get("sb_scanner", "")
+        w = _parse_watchlist_string(raw)
+        if not w:
+            return
+        csv = ",".join(w)
+        b = load_config()
+        if csv == (b.get("watchlist") or ""):
+            return
+        save_config(
+            {
+                **b,
+                "watchlist": csv,
+                "scanner_sort_mode": b.get("scanner_sort_mode", DEFAULT_CONFIG["scanner_sort_mode"]),
+            }
+        )
+
     with st.expander("Edit watchlist symbols", expanded=_wl_expanded):
         st.caption(
             "Drop in tickers separated by commas or line breaks. Shuffle the lineup with the controls. "
-            "Everything commits when the app saves your config."
+            "Your list is saved to **config.json** automatically when it changes (survives closing the browser). "
+            "On Streamlit Cloud, if saving fails, add a `watchlist` key in **App settings → Secrets**."
         )
         scanner_watchlist_raw = st.text_area(
             "Watchlist symbols",
             height=150,
             help="Paste from a spreadsheet, type commas, or put one ticker per line.",
             key="sb_scanner",
+            on_change=_persist_watchlist_text_callback,
             label_visibility="collapsed",
         )
         watch_items_sb = _parse_watchlist_string(scanner_watchlist_raw)
@@ -239,8 +258,37 @@ def main():
 
         if st.button("Save and refresh", use_container_width=True, key="sb_save_refresh_main"):
             w = _parse_watchlist_string(st.session_state.get("sb_scanner", ""))
-            save_config({**load_config(), "watchlist": ",".join(w)})
-            st.rerun()
+            if not w:
+                st.warning("Add at least one ticker before saving.")
+            else:
+                _bc = load_config()
+                if save_config({**_bc, "watchlist": ",".join(w)}):
+                    st.rerun()
+                else:
+                    st.error(
+                        "Could not write **config.json** (read-only filesystem). "
+                        "Paste this list into Streamlit **Secrets** as `watchlist = \"...\"` for durable Cloud storage."
+                    )
+
+    # Persist watchlist whenever session text differs from disk — survives new browser tabs/sessions on the same deployment.
+    _auto_wl = _parse_watchlist_string(st.session_state.get("sb_scanner", ""))
+    if _auto_wl:
+        _auto_csv = ",".join(_auto_wl)
+        _disk_cfg = load_config()
+        if _auto_csv != (_disk_cfg.get("watchlist") or ""):
+            _merged = {
+                **_disk_cfg,
+                "watchlist": _auto_csv,
+                "scanner_sort_mode": _disk_cfg.get("scanner_sort_mode", DEFAULT_CONFIG["scanner_sort_mode"]),
+            }
+            if save_config(_merged):
+                cfg = load_config()
+            elif not st.session_state.get("_cf_watchlist_disk_warned"):
+                st.session_state["_cf_watchlist_disk_warned"] = True
+                st.toast(
+                    "Watchlist not written to disk. Use Streamlit Secrets `watchlist` for Cloud, or run the app locally.",
+                    icon="⚠️",
+                )
 
     # ── GLOBAL COMMAND BAR (HUD — first paint in main column, directly under sticky nav)
     scanner_watchlist_raw = st.session_state.get("sb_scanner", cfg.get("watchlist", ""))

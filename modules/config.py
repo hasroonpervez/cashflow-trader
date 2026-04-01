@@ -2,6 +2,8 @@
 Config persistence — watchlist, scanner, strategy, chart overlays.
 Atomic JSON writes, st.secrets overlay for Streamlit Cloud.
 """
+from __future__ import annotations
+
 import streamlit as st
 import json, os
 from pathlib import Path
@@ -9,7 +11,10 @@ from pathlib import Path
 CONFIG_PATH = Path(__file__).parent.parent / "config.json"
 
 DEFAULT_CONFIG = {
-    "watchlist": "PLTR,BMNR,AAPL,AMZN,NVDA,AMD,TSLA,SPY,QQQ",
+    "watchlist": (
+        "PLTR,BMNR,HIMS,RIVN,TSLA,QS,LCID,NIO,OPEN,ZETA,CIFR,BITF,RXRX,ABCL,IBRX,"
+        "DNA,ABSI,SRFM,BYND,SOFI,SPY,QQQ,BTC,ETH"
+    ),
     "scanner_sort_mode": "Custom watchlist order",
     "strat_focus": "Hybrid",
     "strat_horizon": "30 DTE",
@@ -63,8 +68,9 @@ def _streamlit_secrets_flat():
 
 
 def load_config():
-    """Local `config.json` merged over defaults; optional `st.secrets` overlay for Cloud."""
-    merged = {**DEFAULT_CONFIG, **_streamlit_secrets_flat()}
+    """Defaults + `st.secrets` scalars + `config.json`; then `watchlist` from Secrets wins if set (Cloud-friendly)."""
+    secrets_flat = _streamlit_secrets_flat()
+    merged = {**DEFAULT_CONFIG, **secrets_flat}
     try:
         if CONFIG_PATH.exists():
             with open(CONFIG_PATH) as f:
@@ -74,11 +80,14 @@ def load_config():
                 merged.pop(k, None)
     except Exception:
         pass
+    wl_secret = secrets_flat.get("watchlist")
+    if wl_secret is not None and str(wl_secret).strip():
+        merged["watchlist"] = str(wl_secret).strip()
     merged["use_quant_models"] = bool(merged.get("use_quant_models", DEFAULT_CONFIG["use_quant_models"]))
     return merged
 
-def save_config(cfg):
-    """Atomic write — writes to .tmp first, then renames. Zero corruption risk."""
+def save_config(cfg) -> bool:
+    """Atomic write — writes to .tmp first, then renames. Returns False if the host cannot write (e.g. read-only Cloud)."""
     try:
         cfg = {**DEFAULT_CONFIG, **(cfg or {})}
         cfg["use_quant_models"] = bool(cfg.get("use_quant_models", DEFAULT_CONFIG["use_quant_models"]))
@@ -86,8 +95,9 @@ def save_config(cfg):
         with open(temp_path, "w") as f:
             json.dump(cfg, f, indent=2)
         os.replace(temp_path, CONFIG_PATH)
+        return True
     except Exception:
-        pass
+        return False
 
 
 def _overlay_prefs_from_session():

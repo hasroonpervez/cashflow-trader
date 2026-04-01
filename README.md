@@ -88,7 +88,9 @@ If the app fails to import, check Cloud logs: mismatched commits (e.g. `app.py` 
 
 ## Config (`config.json`)
 
-Persisted locally via atomic writes (`.tmp` → `os.replace`). On Streamlit Cloud the filesystem resets on deploy, so preferences are ephemeral unless backed by `st.secrets`.
+Persisted locally via atomic writes (`.tmp` → `os.replace`). The watchlist **auto-saves** when you edit it (and on each script rerun if the text area differs from disk), so a new browser session reloads from `config.json` on the same machine or container.
+
+On Streamlit Cloud the repo’s `config.json` is read from git; **runtime writes** may be blocked (read-only). If saving fails, set a top-level secret `watchlist = "PLTR,AAPL,..."` (comma-separated, one line) in **Settings → Secrets** so the list survives redeploys.
 
 Keys: `watchlist`, `scanner_sort_mode`, `strat_focus`, `strat_horizon`, `mini_mode`, `overlay_ema`, `overlay_fib`, `overlay_gann`, `overlay_sr`, `overlay_ichi`, `overlay_super`, `overlay_diamonds`, `overlay_gold`, `use_quant_models`.
 
