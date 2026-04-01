@@ -535,6 +535,28 @@ def main():
     nc = ctx.nc; action_strat = ctx.action_strat; action_plain = ctx.action_plain
     mini_mode = ctx.mini_mode; mobile_chart_layout = ctx.mobile_chart_layout
 
+    _risk_closes_df = pd.DataFrame()
+    _portfolio_lr_df = pd.DataFrame()
+    _simple_corr_mult = 1.0
+    try:
+        _risk_syms = list(dict.fromkeys([str(t).strip().upper() for t in watch_items if t]))[:20]
+        _tku = str(ticker).strip().upper()
+        if _tku not in _risk_syms:
+            _risk_syms.append(_tku)
+        _cm = {}
+        for _rt in _risk_syms:
+            _rdf = fetch_stock(_rt, "1y", "1d")
+            if _rdf is not None and not _rdf.empty and "Close" in _rdf.columns:
+                _cm[_rt] = pd.to_numeric(_rdf["Close"], errors="coerce")
+        _risk_closes_df = pd.DataFrame(_cm).dropna(how="all")
+        if len(_risk_closes_df.columns) >= 2 and len(_risk_closes_df) >= 5:
+            _portfolio_lr_df = np.log(_risk_closes_df / _risk_closes_df.shift(1)).dropna()
+            _simple_corr_mult = Opt._simple_corr_haircut(_risk_syms, _tku, _portfolio_lr_df)
+    except Exception:
+        _risk_closes_df = pd.DataFrame()
+        _portfolio_lr_df = pd.DataFrame()
+        _simple_corr_mult = 1.0
+
     # HEADER: Live Pulse
     last_update = datetime.now().strftime("%H:%M:%S")
     tk_hdr = _html_mod.escape(ticker)
@@ -690,6 +712,24 @@ def main():
         tk_esc = _html_mod.escape(ticker)
         _ref_rank_iv = _miv if _miv > 0 else ref_iv_bluf
         iv_badge_html = _iv_rank_pill_html(ticker, price, _ref_rank_iv)
+        _mc_hdr = "—"
+        try:
+            _mpv = master_b.get("mc_pop")
+            if _mpv is not None and math.isfinite(float(_mpv)):
+                _mc_hdr = f"{float(_mpv):.1f}%"
+        except (TypeError, ValueError):
+            pass
+        _hvn_hdr = "—"
+        try:
+            _hv = gold_zone_components.get("HVN") if isinstance(gold_zone_components, dict) else None
+            if _hv is not None and math.isfinite(float(_hv)):
+                _hvn_hdr = f"${float(_hv):,.2f}"
+        except (TypeError, ValueError):
+            pass
+        _prob_subhdr = (
+            f"<div style='font-size:.78rem;color:#c4b5fd;font-weight:600;margin:0 0 10px 0;letter-spacing:.02em'>"
+            f"MC PoP: {_mc_hdr} | HVN Floor: {_hvn_hdr} | Risk Multiplier: {_simple_corr_mult:.2f}x</div>"
+        )
         if master_kind == "cc":
             n_c = nc
             prem_tot = _mprem * n_c
@@ -742,6 +782,7 @@ def main():
             f"<div class='trade-master'>"
             f"{trade_hdr_html}"
             f"{iv_badge_html}"
+            f"{_prob_subhdr}"
             f"<p style='color:#e2e8f0;font-size:1.05rem;line-height:1.55;margin:0 0 14px 0;font-weight:600'>{headline}</p>"
             f"<div class='strike-big' style='margin:8px 0 6px 0'>${_html_mod.escape(strike_s)}</div>"
             f"{_walk_seg}"
@@ -1559,7 +1600,7 @@ def main():
                                         "MC PoP %": st.column_config.NumberColumn(
                                             "MC PoP %",
                                             format="%.1f%%",
-                                            help="Short-premium Monte Carlo PoP (seeded GBM, antithetic normals).",
+                                            help="10k antithetic simulations • v16.0 Probability Mode",
                                         ),
                                     },
                                 )
@@ -1567,10 +1608,12 @@ def main():
                                 st.caption("No strikes with usable bid/ask for MC PoP in this snapshot.")
                         except Exception:
                             st.caption("MC PoP chain table unavailable for this expiration.")
+                    _desk_poc = gold_zone_components.get("POC") if isinstance(gold_zone_components, dict) else None
+                    _desk_hvn = gold_zone_components.get("HVN") if isinstance(gold_zone_components, dict) else None
                     s1, s2 = st.columns(2)
                     with s1:
                         st.markdown("#### Covered Calls")
-                        cc = Opt.covered_calls(price, calls, dte, rfr)
+                        cc = Opt.covered_calls(price, calls, dte, rfr, poc=_desk_poc, hvn_anchor=_desk_hvn)
                         if cc:
                             opt_cc = next((c for c in cc if c.get("optimal")), cc[0])
                             b = opt_cc; nc_s = 1
@@ -1599,7 +1642,7 @@ def main():
                             st.info("No covered call strikes met pricing/liquidity checks in this snapshot. Try a nearby expiry or refresh.")
                     with s2:
                         st.markdown("#### Cash Secured Puts")
-                        csp = Opt.cash_secured_puts(price, puts, dte, rfr)
+                        csp = Opt.cash_secured_puts(price, puts, dte, rfr, poc=_desk_poc, hvn_anchor=_desk_hvn)
                         if csp:
                             opt_csp = next((c for c in csp if c.get("optimal")), csp[0])
                             b = opt_csp
@@ -1836,20 +1879,25 @@ def main():
                 kelly_overlap = 0.0
                 kelly_corr_haircut = 1.0
                 try:
-                    risk_symbols = list(dict.fromkeys([t for t in watch_items if t]))[:20]
-                    if ticker not in risk_symbols:
-                        risk_symbols.append(ticker)
-                    risk_closes = {}
-                    for rt in risk_symbols:
-                        rdf = fetch_stock(rt, "1y", "1d")
-                        if rdf is not None and not rdf.empty and "Close" in rdf.columns:
-                            risk_closes[rt] = pd.to_numeric(rdf["Close"], errors="coerce")
-                    risk_corr = PortfolioRisk.build_correlation_matrix(pd.DataFrame(risk_closes).dropna(how="all"))
-                    kelly_overlap = PortfolioRisk.get_overlap_score(risk_corr, ticker)
-                    kelly_corr_haircut = PortfolioRisk.calc_kelly_haircut(kelly_overlap)
+                    if not _risk_closes_df.empty and len(_risk_closes_df.columns) >= 2:
+                        risk_corr = PortfolioRisk.build_correlation_matrix(_risk_closes_df)
+                        kelly_overlap = PortfolioRisk.get_overlap_score(risk_corr, ticker)
+                        kelly_corr_haircut = PortfolioRisk.calc_kelly_haircut(kelly_overlap)
                 except Exception:
                     kelly_overlap = 0.0
                     kelly_corr_haircut = 1.0
+                kelly_effective_haircut = float(kelly_corr_haircut) * float(_simple_corr_mult)
+                _k_mc = None
+                if bluf_cc:
+                    try:
+                        _k_mc = float(bluf_cc["mc_pop"]) if bluf_cc.get("mc_pop") is not None else None
+                    except (TypeError, ValueError):
+                        _k_mc = None
+                elif bluf_csp:
+                    try:
+                        _k_mc = float(bluf_csp["mc_pop"]) if bluf_csp.get("mc_pop") is not None else None
+                    except (TypeError, ValueError):
+                        _k_mc = None
                 if bluf_cc:
                     k_pop = min(85, max(50, 100 - bluf_cc["otm_pct"] * 5))
                     k_win = bluf_cc["prem_100"]
@@ -1859,7 +1907,8 @@ def main():
                         use_quant=use_quant_models,
                         expected_return=exp_ret,
                         variance=ret_var,
-                        correlation_haircut=kelly_corr_haircut,
+                        correlation_haircut=kelly_effective_haircut,
+                        avg_mc_pop=_k_mc,
                     )
                     k_source = f"CC ${bluf_cc['strike']:.0f}"
                 elif bluf_csp:
@@ -1871,7 +1920,8 @@ def main():
                         use_quant=use_quant_models,
                         expected_return=exp_ret,
                         variance=ret_var,
-                        correlation_haircut=kelly_corr_haircut,
+                        correlation_haircut=kelly_effective_haircut,
+                        avg_mc_pop=_k_mc,
                     )
                     k_source = f"CSP ${bluf_csp['strike']:.0f}"
                 if k_half > 0:
@@ -1888,7 +1938,7 @@ def main():
                         f"<div class='tc'><div style='font-size:.75rem;color:#64748b'>KELLY HALF MODE · UI CAP</div>"
                         f"<div class='mono' style='font-size:1.3rem;color:{kc}'>{k_show:.1f}% = ${k_dollars:,.0f}</div>"
                         f"<div style='font-size:.7rem;color:#64748b;margin-top:4px'>Raw half Kelly {k_half:.1f}% · full Kelly {k_full:.1f}% · {k_source}. "
-                        f"Corr overlap {kelly_overlap:.2f} · haircut x{kelly_corr_haircut:.2f}. Display max {k_cap:.0f}% for risk hygiene.{capped_note}</div></div>",
+                        f"Corr overlap {kelly_overlap:.2f} · overlap haircut x{kelly_corr_haircut:.2f} · simple corr x{_simple_corr_mult:.2f}. Display max {k_cap:.0f}% for risk hygiene.{capped_note}</div></div>",
                         unsafe_allow_html=True)
                     _explain("Kelly Criterion in plain English",
                         f"The Kelly formula can suggest large fractions; here we show <strong>Half Kelly</strong> then <strong>cap the headline at {k_cap:.0f}%</strong> "
@@ -2023,6 +2073,7 @@ def main():
                         except Exception:
                             pass
                     closes_df = pd.DataFrame(closes_map).dropna(how="all")
+                    log_returns_df = np.log(closes_df / closes_df.shift(1)).dropna()
                     corr_matrix = PortfolioRisk.build_correlation_matrix(closes_df)
                     overlap_map = {tkr: PortfolioRisk.get_overlap_score(corr_matrix, tkr) for tkr in watchlist_tickers}
                     haircut_map = {tkr: PortfolioRisk.calc_kelly_haircut(overlap_map.get(tkr, 0.0)) for tkr in watchlist_tickers}
@@ -2042,11 +2093,13 @@ def main():
                     with make_script_ctx_pool(workers) as pool:
                         future_map = {}
                         for tkr in watchlist_tickers:
+                            _simp = Opt._simple_corr_haircut(watchlist_tickers, tkr, log_returns_df)
+                            _comb = float(haircut_map.get(tkr, 1.0)) * float(_simp)
                             fut = submit_with_script_ctx(
                                 pool,
                                 scan_single_ticker,
                                 tkr,
-                                haircut_map.get(tkr, 1.0),
+                                _comb,
                             )
                             future_map[fut] = tkr
                         for fut in as_completed(future_map):
@@ -2060,6 +2113,9 @@ def main():
                                 if result:
                                     result["overlap"] = overlap
                                     result["haircut"] = haircut
+                                    result["risk_multiplier"] = float(
+                                        Opt._simple_corr_haircut(watchlist_tickers, tkr, log_returns_df)
+                                    )
                                     result["Adj. Kelly %"] = float(result.get("kelly_half", 0.0))
                                     scanner_results.append(result)
                             except Exception as e:
@@ -2103,6 +2159,7 @@ def main():
                                     <div style='text-align:center;min-width:90px'>
                                         <div style='font-size:.65rem;color:#64748b;text-transform:uppercase'>Adj. Kelly</div>
                                         <div class='mono' style='font-size:.82rem;color:#93c5fd;font-weight:700'>{r.get('Adj. Kelly %', 0.0):.1f}%</div>
+                                        <div style='font-size:.58rem;color:#64748b;margin-top:3px;line-height:1.25'>MC PoP {float(r.get('scanner_mc_pop') or 0):.1f}% · HVN {('—' if r.get('hvn_floor') is None else f"${float(r['hvn_floor']):,.0f}")} · R×{float(r.get('risk_multiplier') or 1):.2f}</div>
                                     </div>
                                     <div style='text-align:center;min-width:100px'>
                                         <div style='font-size:.65rem;color:#64748b;text-transform:uppercase'>Confluence</div>

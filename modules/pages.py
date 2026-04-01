@@ -107,6 +107,8 @@ class DashContext:
     bluf_calls: Any = None
     bluf_puts: Any = None
     opt_exps: list = field(default_factory=list)
+    cc_scan_rows: list = field(default_factory=list)
+    csp_scan_rows: list = field(default_factory=list)
     ref_iv_bluf: Any = None
     nc: int = 1
     action_strat: str = ""
@@ -166,7 +168,6 @@ def build_context(ticker: str, cfg: dict) -> Optional[DashContext]:
     ctx.lo52 = float(df["Low"].min())
     ctx.vix_v = ctx.macro.get("VIX", {}).get("price", 0)
     use_quant = bool(ctx.cfg.get("use_quant_models", DEFAULT_CONFIG["use_quant_models"]))
-    ctx.qs, ctx.qb = quant_edge_score(df, ctx.vix_v, use_quant=use_quant)
 
     # Earnings
     _parse_earnings(ctx)
@@ -206,11 +207,17 @@ def build_context(ticker: str, cfg: dict) -> Optional[DashContext]:
     if ctx.df_wk is not None and len(ctx.df_wk) >= 20:
         ctx.weekly_struct, _, _ = TA.market_structure(ctx.df_wk)
 
+    # Options fetch (enables MC-PoP fusion into Quant Edge when chain rows exist)
+    _fetch_options_context(ctx)
+    _opt_edge_rows = list(ctx.cc_scan_rows or []) + list(ctx.csp_scan_rows or [])
+    ctx.qs, ctx.qb = quant_edge_score(
+        df,
+        ctx.vix_v,
+        options_data=_opt_edge_rows if _opt_edge_rows else None,
+        use_quant=use_quant,
+    )
     ctx.qs_color = "#10b981" if ctx.qs > 70 else ("#f59e0b" if ctx.qs > 50 else "#ef4444")
     ctx.qs_status = "PRIME SELLING ENVIRONMENT" if ctx.qs > 70 else ("DECENT SETUP" if ctx.qs > 50 else "STAND DOWN. WAIT FOR A CLEANER ENTRY.")
-
-    # Options fetch
-    _fetch_options_context(ctx)
 
     # Chart mood
     ctx.chart_mood = "bull" if ctx.struct == "BULLISH" else ("bear" if ctx.struct == "BEARISH" else "neutral")
@@ -257,6 +264,9 @@ def _fetch_options_context(ctx: DashContext):
     ctx.bluf_cc, ctx.bluf_csp, ctx.bluf_exp, ctx.bluf_dte = None, None, None, 0
     ctx.bluf_calls, ctx.bluf_puts = pd.DataFrame(), pd.DataFrame()
     ctx.opt_exps = []
+    ctx.cc_scan_rows, ctx.csp_scan_rows = [], []
+    _poc = ctx.gold_zone_components.get("POC") if isinstance(ctx.gold_zone_components, dict) else None
+    _hvn_a = ctx.gold_zone_components.get("HVN") if isinstance(ctx.gold_zone_components, dict) else None
     tk_hdr = _html_mod.escape(ctx.ticker)
     try:
         _, ctx.opt_exps = fetch_options(ctx.ticker)
@@ -273,8 +283,32 @@ def _fetch_options_context(ctx: DashContext):
                 )
                 ctx.bluf_calls = ctx.bluf_calls if isinstance(ctx.bluf_calls, pd.DataFrame) else pd.DataFrame()
                 ctx.bluf_puts = ctx.bluf_puts if isinstance(ctx.bluf_puts, pd.DataFrame) else pd.DataFrame()
-                cc_list = Opt.covered_calls(ctx.price, ctx.bluf_calls, ctx.bluf_dte, ctx.rfr) if not ctx.bluf_calls.empty else []
-                csp_list = Opt.cash_secured_puts(ctx.price, ctx.bluf_puts, ctx.bluf_dte, ctx.rfr) if not ctx.bluf_puts.empty else []
+                cc_list = (
+                    Opt.covered_calls(
+                        ctx.price,
+                        ctx.bluf_calls,
+                        ctx.bluf_dte,
+                        ctx.rfr,
+                        poc=_poc,
+                        hvn_anchor=_hvn_a,
+                    )
+                    if not ctx.bluf_calls.empty
+                    else []
+                )
+                csp_list = (
+                    Opt.cash_secured_puts(
+                        ctx.price,
+                        ctx.bluf_puts,
+                        ctx.bluf_dte,
+                        ctx.rfr,
+                        poc=_poc,
+                        hvn_anchor=_hvn_a,
+                    )
+                    if not ctx.bluf_puts.empty
+                    else []
+                )
+                ctx.cc_scan_rows = list(cc_list or [])
+                ctx.csp_scan_rows = list(csp_list or [])
                 if cc_list:
                     ctx.bluf_cc = next((c for c in cc_list if c.get("optimal")), cc_list[0])
                 if csp_list:

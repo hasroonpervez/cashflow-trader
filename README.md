@@ -10,8 +10,10 @@ Glanceable execution guidance, Diamond buy/sell signals, Gold Zone confluence, B
 
 - **Monte Carlo PoP (v16)** — `MonteCarloEngine.calc_pop` uses **fixed RNG seed 42**, **antithetic** standard normals, optional **`dividend_yield`**, optional **`skew`** tilt on shocks (complements **Corrado–Su** closed-form pricing elsewhere), and neutral **50%** fallback when inputs are invalid so the UI stays calm on bad quotes.
 - **Full chain table** — Cash Flow Strategies includes an expander with **every strike** and a **MC PoP %** column (short-premium framing), wrapped in **try/except** so thin chains never take down the page.
-- **HVN on chart** — `TA.get_volume_nodes` builds **high-volume nodes** from recent volume-at-price; the main price panel draws **semi-transparent dashed “HVN”** horizontals (try/except guarded).
-- **Scanner PoP** — Market Scanner adds a **PoP** column: **historical Diamond win rate** (same `diamond_win_rate` methodology as the main dashboard).
+- **HVN on chart** — `TA.get_volume_nodes` returns **price + volume weight** per node; the price panel draws weighted **HVN (Institutional Liquidity)** horizontals (thicker / deeper purple near the **Gold Zone**, try/except guarded).
+- **Probability fusion (desk + edge)** — **Gold Zone** blends the nearest **HVN within 2% of spot** with POC, Fib, SMA200, and Gann. **Blue Diamond** rows can gain a **+1 liquidity magnet** when spot sits **between POC and that HVN**. Prop-desk **strike scores** add the same **+1** when the strike lies **between POC and HVN**. **Quant Edge** adds **0.25 × (avg MC PoP of top strikes ÷ 100)** when option chain rows are present (context build after Yahoo chain load).
+- **Kelly governors** — Half/full Kelly (discrete and continuous paths) scale by **(max(1, MC PoP) / 85)^0.5** when MC PoP is available. **`Opt._simple_corr_haircut`** blends watchlist correlation into sizing (**max(0.35, 1 − mean ρ)**), wrapped in **try/except** with a **1.0** fallback; the **Market Scanner** multiplies the existing overlap haircut by this factor for **Adj. Kelly**.
+- **Scanner PoP** — **PoP** column remains **historical Diamond win rate**; each row also shows a **scanner MC PoP** proxy (30D short-put Monte Carlo), **HVN floor**, and **risk multiplier** under Adj. Kelly.
 - **Config default** — `use_quant_models` defaults to **`true`** in `modules/config.py` (institutional quant path on fresh installs); override in `config.json` or Secrets as needed.
 
 ---
@@ -31,10 +33,10 @@ Glanceable execution guidance, Diamond buy/sell signals, Gold Zone confluence, B
 
 The dashboard answers one question: **"What should I do right now?"**
 
-- **BLUF Action Card** — plain-English trade recommendation with a specific strike, expiry, broker checklist, optional **walk-up limit** for short premium, and **MC PoP %** from the Monte Carlo engine
+- **BLUF Action Card** — plain-English trade recommendation with a specific strike, expiry, broker checklist, optional **walk-up limit** for short premium, **MC PoP %**, **HVN floor**, and **correlation risk multiplier** sub-header on the Recommended Trade card
 - **Traffic Light Indicators** — green/amber/red across Quant Edge Score, Confluence, Market Structure
 - **Diamond Signals** — Blue (buy zone) and Pink (take profit) triggered by 7+/9 confluence crossover; diamond scan uses **Hurst-adaptive RSI/MACD** and a MACD confirmation in strong trending regimes
-- **Gold Zone** — dynamic institutional anchor fusing Volume Profile POC, Fib 61.8%, 200-SMA, Gann Sq9
+- **Gold Zone** — dynamic institutional anchor fusing Volume Profile POC, Fib 61.8%, 200-SMA, Gann Sq9, and **nearest HVN (within 2% of spot)** when volume nodes resolve
 - **Feature-Flagged Institutional Mode** — one-click toggle between retail and quant engines (default **on** in v16)
 - **A/B Quant Diagnostics** — institutional vs retail Quant Edge delta shown live
 - **Rolling Edge Capture Log** — scans the **entire watchlist in parallel** (thread pool + `ScriptRunContext`), refreshes on a **`@st.fragment` timer (~90s)** so the rest of the page stays responsive, sorts rows by **Quant** score, adds a **Preview** line per symbol (same desk read as the headline Quant gauge: prime / decent / stand down), summary metrics, treemap hover with preview text, and CSV export
@@ -78,7 +80,7 @@ cashflow-trader/
 - `st.set_page_config()` is the first Streamlit call in `app.py` (required)
 - CSS/navbar injection happens immediately after via `inject_css_and_navbar()`
 - Modules never call `st.*` at import time — only when their functions are invoked
-- `@st.cache_data` decorators work correctly because `streamlit` is imported in each module
+- `@st.cache_data` decorators work correctly because `streamlit` is imported in each module (`quant_edge_score` is intentionally **uncached** so optional chain-based MC fusion stays hash-safe)
 
 **Parallel fetches and Streamlit Cloud:**
 

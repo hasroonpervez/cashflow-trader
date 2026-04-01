@@ -87,10 +87,17 @@ def kelly_criterion(
     variance=0.0,
     risk_free_rate=0.05,
     correlation_haircut=1.0,
+    avg_mc_pop=None,
 ):
     """Kelly Criterion: optimal bankroll fraction.
     f* = W - (1-W)/R where W = win probability, R = win/loss payout ratio.
     Returns (full_kelly_pct, half_kelly_pct) as percentages."""
+    pop_mult = 1.0
+    if avg_mc_pop is not None:
+        try:
+            pop_mult = (max(1.0, float(avg_mc_pop)) / 85.0) ** 0.5
+        except (TypeError, ValueError):
+            pop_mult = 1.0
     if use_quant and variance > 0:
         full = continuous_kelly(
             expected_return,
@@ -98,6 +105,7 @@ def kelly_criterion(
             variance,
             half_kelly=False,
             correlation_haircut=correlation_haircut,
+            pop_mult=pop_mult,
         )
         half = continuous_kelly(
             expected_return,
@@ -105,6 +113,7 @@ def kelly_criterion(
             variance,
             half_kelly=True,
             correlation_haircut=correlation_haircut,
+            pop_mult=pop_mult,
         )
         return round(full, 1), round(half, 1)
     if loss_amount <= 0 or win_amount <= 0 or win_prob_pct <= 0 or win_prob_pct >= 100:
@@ -113,9 +122,9 @@ def kelly_criterion(
     R = win_amount / loss_amount
     if R < 1e-12:
         return 0.0, 0.0
-    full = W - (1 - W) / R
-    half = full / 2
-    return round(max(0.0, full) * 100, 1), round(max(0.0, half) * 100, 1)
+    full_frac = max(0.0, W - (1 - W) / R) * pop_mult
+    half_frac = full_frac / 2
+    return round(full_frac * 100, 1), round(half_frac * 100, 1)
 
 def bs_corrado_su(S, K, T, r, sigma, skew=0.0, kurt=3.0, option_type="call"):
     """
@@ -145,7 +154,14 @@ def bs_corrado_su(S, K, T, r, sigma, skew=0.0, kurt=3.0, option_type="call"):
     return max(0.0, float(bs_px + (skew * q3) + ((kurt - 3.0) * q4)))
 
 
-def continuous_kelly(expected_return, risk_free_rate, variance, half_kelly=True, correlation_haircut=1.0):
+def continuous_kelly(
+    expected_return,
+    risk_free_rate,
+    variance,
+    half_kelly=True,
+    correlation_haircut=1.0,
+    pop_mult=1.0,
+):
     """
     Calculates optimal continuous-time allocation (Merton's Portfolio Problem).
     Applies a mathematical haircut if the asset is highly correlated to the portfolio.
@@ -154,7 +170,10 @@ def continuous_kelly(expected_return, risk_free_rate, variance, half_kelly=True,
         return 0.0
     f_star = (expected_return - risk_free_rate) / variance
     allocation = f_star / 2.0 if half_kelly else f_star
-    final_allocation = max(0.0, min(1.0, allocation)) * 100 * correlation_haircut
+    pm = float(pop_mult) if pop_mult is not None else 1.0
+    if not np.isfinite(pm) or pm < 0:
+        pm = 1.0
+    final_allocation = max(0.0, min(1.0, allocation)) * 100 * correlation_haircut * pm
     return final_allocation
 
 
@@ -179,7 +198,52 @@ def calc_vol_skew(price, calls_df, puts_df, otm_pct=0.10):
     return None, put_iv, call_iv
 
 
-@st.cache_data(ttl=120, show_spinner=False)
+def nearest_hvn_within_pct(price, nodes, pct=0.02):
+    """Nearest HVN price within ±pct of spot. ``nodes`` from ``TA.get_volume_nodes`` (list of dicts)."""
+    if price is None or price <= 0 or not nodes:
+        return None, None
+    p0 = float(price)
+    best = None
+    for n in nodes:
+        if isinstance(n, dict):
+            p = float(n.get("price", 0) or 0)
+            w = float(n.get("volume_weight", 1.0) or 1.0)
+        else:
+            p, w = float(n), 1.0
+        if p <= 0 or not np.isfinite(p):
+            continue
+        if abs(p / p0 - 1.0) > pct:
+            continue
+        d = abs(p - p0)
+        if best is None or d < best[0]:
+            best = (d, p, w)
+    if best is None:
+        return None, None
+    return best[1], best[2]
+
+
+def _quant_edge_mc_pop_boost(options_data, top_n=8):
+    """Fusion term: ``0.25 * (avg MC PoP of top strikes / 100)`` for Quant Edge composite."""
+    if not options_data:
+        return 0.0, None
+    rows = [r for r in options_data if isinstance(r, dict) and r.get("mc_pop") is not None]
+    if not rows:
+        return 0.0, None
+    try:
+        rows_sorted = sorted(
+            rows,
+            key=lambda x: float(x.get("score", 0) or 0),
+            reverse=True,
+        )[:top_n]
+        arr = np.array([float(x["mc_pop"]) for x in rows_sorted], dtype=float)
+        if arr.size == 0:
+            return 0.0, None
+        avg = float(np.mean(arr))
+        return float(0.25 * (avg / 100.0)), avg
+    except Exception:
+        return 0.0, None
+
+
 def quant_edge_score(df, vix_val=None, options_data=None, use_quant=False):
     """Composite 0-100 using five de-correlated dimensions (no Supertrend here — that
     belongs in confluence/diamond context, not double-counted with EMA trend):
@@ -198,12 +262,15 @@ def quant_edge_score(df, vix_val=None, options_data=None, use_quant=False):
             ffd_series = TA.frac_diff_ffd(df["Close"])
             ffd_last = float(ffd_series.iloc[-1]) if ffd_series is not None and len(ffd_series) > 0 else 0.0
             edge = 50.0 + (ffd_last * 10.0) - (high_vol_regime * 20.0)
-            edge = float(max(0.0, min(100.0, edge)))
+            mc_boost, mc_avg_top = _quant_edge_mc_pop_boost(options_data)
+            edge = float(max(0.0, min(100.0, edge + mc_boost)))
             breakdown = {
                 "regime_prob_high_vol": round(high_vol_regime, 4),
                 "ffd_last": round(ffd_last, 4),
                 "model": "institutional",
             }
+            if mc_avg_top is not None:
+                breakdown["mc_pop_top_avg"] = round(mc_avg_top, 1)
             return round(edge, 1), breakdown
         except Exception:
             pass
@@ -241,6 +308,12 @@ def quant_edge_score(df, vix_val=None, options_data=None, use_quant=False):
         if _k in sc and isinstance(sc[_k], (int, float)):
             sc[_k] = round(float(sc[_k]), 1)
     composite = round(float(np.mean(list(sc.values()))), 1)
+    mc_boost, mc_avg_top = _quant_edge_mc_pop_boost(options_data)
+    if mc_boost > 0:
+        composite = round(float(max(0.0, min(100.0, composite + mc_boost))), 1)
+        sc["mc_pop_edge"] = round(mc_boost, 4)
+        if mc_avg_top is not None:
+            sc["mc_pop_top_avg"] = round(mc_avg_top, 1)
     sc["model"] = "retail"
     return composite, sc
 
@@ -333,9 +406,18 @@ def weekly_trend_label(df_wk):
 @st.cache_data(ttl=120, show_spinner=False)
 def calc_gold_zone(df, df_wk=None):
     """Gold Zone: mean of POC, Fib 61.8%, Gann Sq9, and 200-day SMA (institutional anchor).
+    Nearest HVN within 2% of spot is fused as a primary anchor alongside POC/Fib.
     ``df_wk`` is accepted for API compatibility; SMA 200 replaces weekly S/R in the blend."""
     price = df["Close"].iloc[-1]
     components = {}
+
+    try:
+        nodes = TA.get_volume_nodes(df)
+        hvn_px, _hvn_w = nearest_hvn_within_pct(float(price), nodes, 0.02)
+        if hvn_px is not None:
+            components["HVN"] = round(float(hvn_px), 2)
+    except Exception:
+        pass
 
     vp = TA.volume_profile(df)
     if not vp.empty:
@@ -622,15 +704,35 @@ def detect_diamonds(df, df_wk=None, lookback=None, use_quant=False):
                 quant_exit_price = 0.0
 
         if is_blue_diamond:
+            magnet = 0
+            try:
+                vp_sub = TA.volume_profile(sub)
+                poc_sub = (
+                    float(vp_sub.loc[vp_sub["volume"].idxmax(), "mid"])
+                    if not vp_sub.empty
+                    else None
+                )
+            except Exception:
+                poc_sub = None
+            try:
+                nodes_sub = TA.get_volume_nodes(sub)
+                hvn_p, _ = nearest_hvn_within_pct(pi, nodes_sub, 0.02)
+            except Exception:
+                hvn_p = None
+            if poc_sub is not None and hvn_p is not None:
+                lo, hi = min(poc_sub, hvn_p), max(poc_sub, hvn_p)
+                if lo < pi < hi:
+                    magnet = 1
             diamonds.append({
                 "date": df.index[i],
                 "price": pi,
                 "type": "blue",
-                "score": sc,
+                "score": sc + magnet,
                 "rsi": rsi_i,
                 "weekly": wk_bias,
                 "suggested_shares": size_suggestion,
                 "trailing_exit": quant_exit_price,
+                "liquidity_magnet": magnet,
             })
 
         # Pink: collapse or RSI exhaustion — allow BULLISH weeks too (fade / de-risk in extended runs)
@@ -703,7 +805,7 @@ def scan_single_ticker(tkr, correlation_haircut=1.0):
         chg_pct = (price / prev - 1) * 100
 
         qs, _ = quant_edge_score(df)
-        gold_zone, _ = calc_gold_zone(df, df_wk)
+        gold_zone, gz_comp = calc_gold_zone(df, df_wk)
         cp_score, cp_max, cp_bd, _ = calc_confluence_points(df, df_wk, None, gold_zone_price=gold_zone)
         diamonds = detect_diamonds(df, df_wk)
         latest_d = latest_diamond_status(diamonds)
@@ -711,6 +813,29 @@ def scan_single_ticker(tkr, correlation_haircut=1.0):
 
         struct, _, _ = TA.market_structure(df)
         wk_lbl, _ = weekly_trend_label(df_wk)
+
+        nodes_s = TA.get_volume_nodes(df)
+        hvn_floor, _ = nearest_hvn_within_pct(price, nodes_s, 0.02)
+
+        T_scan = 30.0 / 365.0
+        sig_scan = float(df["Close"].pct_change().tail(20).std() * np.sqrt(252))
+        if not np.isfinite(sig_scan) or sig_scan <= 0:
+            sig_scan = 0.35
+        sig_scan = float(min(0.95, max(0.12, sig_scan)))
+        K_scan = price * 0.97
+        prem_scan = max(0.01, float(bs_price(price, K_scan, T_scan, 0.045, sig_scan, "put")) * 0.85)
+        scanner_avg_mc = float(
+            MonteCarloEngine.calc_pop(
+                S=float(price),
+                K=float(K_scan),
+                T=T_scan,
+                r=0.045,
+                sigma=sig_scan,
+                premium=prem_scan,
+                option_type="put",
+                strat="short",
+            )
+        )
 
         ret = df["Close"].pct_change().dropna()
         exp_ret = float(ret.mean() * 252) if len(ret) > 0 else 0.0
@@ -723,6 +848,7 @@ def scan_single_ticker(tkr, correlation_haircut=1.0):
             expected_return=exp_ret,
             variance=ret_var,
             correlation_haircut=correlation_haircut,
+            avg_mc_pop=scanner_avg_mc,
         )
 
         d_status = "None"
@@ -763,6 +889,9 @@ def scan_single_ticker(tkr, correlation_haircut=1.0):
             "Adj. Kelly %": k_half,
             "diamond_pop": float(d_wr),
             "diamond_n": int(d_n),
+            "hvn_floor": float(hvn_floor) if hvn_floor is not None else None,
+            "scanner_mc_pop": round(scanner_avg_mc, 1),
+            "gz_hvn": gz_comp.get("HVN"),
         }
     except Exception:
         return None
@@ -777,6 +906,38 @@ class Opt:
     DELTA_LOW, DELTA_HIGH = 0.15, 0.20
     MIN_OI, MIN_VOL = 100, 10
     RELAXED_MIN_OI, RELAXED_MIN_VOL = 10, 1
+
+    @staticmethod
+    def _simple_corr_haircut(watchlist_tickers, symbol, returns_df):
+        try:
+            if len(watchlist_tickers) < 2 or returns_df is None or getattr(returns_df, "empty", True):
+                return 1.0
+            sym = str(symbol).strip().upper()
+            if sym not in returns_df.columns:
+                return 1.0
+            c = returns_df.corr(numeric_only=True)
+            if sym not in c.columns:
+                return 1.0
+            others = c[sym].drop(sym, errors="ignore")
+            if others.empty:
+                return 1.0
+            avg_corr = float(others.mean())
+            if not np.isfinite(avg_corr):
+                return 1.0
+            return float(max(0.35, 1.0 - avg_corr))
+        except Exception:
+            return 1.0
+
+    @staticmethod
+    def _liquidity_magnet_bonus(strike, poc, hvn_anchor):
+        try:
+            if poc is None or hvn_anchor is None:
+                return 0
+            s, p, h = float(strike), float(poc), float(hvn_anchor)
+            lo, hi = min(p, h), max(p, h)
+            return 1 if lo < s < hi else 0
+        except (TypeError, ValueError):
+            return 0
 
     @staticmethod
     def _safe_mc_pop(**kwargs):
@@ -797,7 +958,7 @@ class Opt:
         return base
 
     @staticmethod
-    def covered_calls(price, calls_df, dte=30, rfr=0.045):
+    def covered_calls(price, calls_df, dte=30, rfr=0.045, poc=None, hvn_anchor=None):
         if calls_df is None or calls_df.empty: return []
         rows = []; T_y = max(dte, 1) / 365
         for _, r in calls_df.iterrows():
@@ -820,11 +981,12 @@ class Opt:
                 option_type="call",
                 strat="short",
             )
+            _mag = Opt._liquidity_magnet_bonus(s, poc, hvn_anchor)
             rows.append({"strike": s, "bid": b, "ask": a, "mid": mid, "iv": iv * 100 if iv else 0,
                          "volume": vol, "oi": oi, "otm_pct": otm, "prem_yield": py, "ann_yield": ann,
                          "prem_100": mid * 100, "breakeven": price - mid,
                          "delta": round(delta, 3), "optimal": False,
-                         "score": Opt._sc(otm, py, ann, vol, delta), "mc_pop": round(mc_pop, 1)})
+                         "score": Opt._sc(otm, py, ann, vol, delta) + _mag, "mc_pop": round(mc_pop, 1)})
         # Relax liquidity gates if strict pass returns nothing (common on thin chains / after-hours).
         if not rows:
             for _, r in calls_df.iterrows():
@@ -847,11 +1009,12 @@ class Opt:
                     option_type="call",
                     strat="short",
                 )
+                _mag = Opt._liquidity_magnet_bonus(s, poc, hvn_anchor)
                 rows.append({"strike": s, "bid": b, "ask": a, "mid": mid, "iv": iv * 100 if iv else 0,
                              "volume": vol, "oi": oi, "otm_pct": otm, "prem_yield": py, "ann_yield": ann,
                              "prem_100": mid * 100, "breakeven": price - mid,
                              "delta": round(delta, 3), "optimal": False,
-                             "score": Opt._sc(otm, py, ann, vol, delta), "mc_pop": round(mc_pop, 1)})
+                             "score": Opt._sc(otm, py, ann, vol, delta) + _mag, "mc_pop": round(mc_pop, 1)})
         rows.sort(key=lambda x: x["score"], reverse=True)
         if rows:
             best = min(range(len(rows)), key=lambda i: abs(rows[i]["delta"] - Opt.DELTA_TARGET))
@@ -859,7 +1022,7 @@ class Opt:
         return rows[:8]
 
     @staticmethod
-    def cash_secured_puts(price, puts_df, dte=30, rfr=0.045):
+    def cash_secured_puts(price, puts_df, dte=30, rfr=0.045, poc=None, hvn_anchor=None):
         if puts_df is None or puts_df.empty: return []
         rows = []; T_y = max(dte, 1) / 365
         for _, r in puts_df.iterrows():
@@ -882,11 +1045,12 @@ class Opt:
                 option_type="put",
                 strat="short",
             )
+            _mag = Opt._liquidity_magnet_bonus(s, poc, hvn_anchor)
             rows.append({"strike": s, "bid": b, "ask": a, "mid": mid, "iv": iv * 100 if iv else 0,
                          "volume": vol, "oi": oi, "otm_pct": otm, "prem_yield": py, "ann_yield": ann,
                          "prem_100": mid * 100, "eff_buy": s - mid, "cash_req": s * 100,
                          "delta": round(delta, 3), "optimal": False,
-                         "score": Opt._sc(otm, py, ann, vol, delta), "mc_pop": round(mc_pop, 1)})
+                         "score": Opt._sc(otm, py, ann, vol, delta) + _mag, "mc_pop": round(mc_pop, 1)})
         if not rows:
             for _, r in puts_df.iterrows():
                 s, b, a = r.get("strike", 0), r.get("bid", 0), r.get("ask", 0)
@@ -908,11 +1072,12 @@ class Opt:
                     option_type="put",
                     strat="short",
                 )
+                _mag = Opt._liquidity_magnet_bonus(s, poc, hvn_anchor)
                 rows.append({"strike": s, "bid": b, "ask": a, "mid": mid, "iv": iv * 100 if iv else 0,
                              "volume": vol, "oi": oi, "otm_pct": otm, "prem_yield": py, "ann_yield": ann,
                              "prem_100": mid * 100, "eff_buy": s - mid, "cash_req": s * 100,
                              "delta": round(delta, 3), "optimal": False,
-                             "score": Opt._sc(otm, py, ann, vol, delta), "mc_pop": round(mc_pop, 1)})
+                             "score": Opt._sc(otm, py, ann, vol, delta) + _mag, "mc_pop": round(mc_pop, 1)})
         rows.sort(key=lambda x: x["score"], reverse=True)
         if rows:
             best = min(range(len(rows)), key=lambda i: abs(abs(rows[i]["delta"]) - Opt.DELTA_TARGET))

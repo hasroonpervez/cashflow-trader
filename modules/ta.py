@@ -177,10 +177,14 @@ class TA:
         out = []
         for ivl in hvn.index:
             try:
-                out.append(float(ivl.mid))
-            except (AttributeError, TypeError, ValueError):
+                px = float(ivl.mid)
+                vw = float(vprofile.loc[ivl])
+                if np.isfinite(px) and vw >= 0:
+                    out.append({"price": px, "volume_weight": vw})
+            except (AttributeError, TypeError, ValueError, KeyError):
                 continue
-        return sorted(out)
+        out.sort(key=lambda x: x["price"])
+        return out
 
     @staticmethod
     def detect_divergences(price_series, indicator_series, lookback=30):

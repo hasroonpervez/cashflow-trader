@@ -912,7 +912,7 @@ def _options_scan_column_config(*, put_table: bool):
         "MC PoP %": st.column_config.NumberColumn(
             "MC PoP %",
             format="%.1f%%",
-            help="Monte Carlo short-premium PoP: antithetic GBM, seed 42, optional dividend yield in drift; aligns with desk tables.",
+            help="10k antithetic simulations • v16.0 Probability Mode",
         ),
         "Vol": st.column_config.NumberColumn("Volume", format="%.0f"),
         "OI": st.column_config.NumberColumn("OI", format="%.0f"),

@@ -179,17 +179,47 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
 
     try:
         hvn_levels = TA.get_volume_nodes(df)
-        for y in sorted(hvn_levels, key=lambda x: abs(float(x) - last_px))[:10]:
-            fig_p.add_hline(
-                y=float(y),
-                line_dash="dash",
-                line_color="rgba(167,139,250,0.42)",
-                line_width=1.15,
-                opacity=0.5,
-                annotation_text="HVN",
-                annotation_position=ann_side,
-                annotation_font=dict(size=9, color="rgba(196,181,253,0.88)"),
+        if hvn_levels:
+            prices = np.array(
+                [float(n["price"]) for n in hvn_levels if isinstance(n, dict) and n.get("price") is not None],
+                dtype=float,
             )
+            weights = np.array(
+                [
+                    float(n.get("volume_weight", 1.0) or 1.0)
+                    for n in hvn_levels
+                    if isinstance(n, dict) and n.get("price") is not None
+                ],
+                dtype=float,
+            )
+            if prices.size > 0 and weights.size == prices.size:
+                wn = weights / (np.nanmax(weights) + 1e-12)
+                gz_ref = float(gold_zone) if gold_zone is not None and np.isfinite(float(gold_zone)) else None
+                near_gz = (
+                    np.abs(prices - gz_ref) / (gz_ref + 1e-12) <= 0.02
+                    if gz_ref is not None and gz_ref > 0
+                    else np.zeros(prices.shape[0], dtype=bool)
+                )
+                order = np.argsort(np.abs(prices - last_px))[:10]
+                for idx in order:
+                    y = float(prices[idx])
+                    base_w = 1.0 + 2.2 * float(wn[idx])
+                    op = 0.32 + 0.48 * float(wn[idx])
+                    r0, g0, b0 = 167, 139, 250
+                    if near_gz[idx]:
+                        base_w += 1.1
+                        op = min(0.92, op + 0.18)
+                        r0, g0, b0 = 139, 92, 246
+                    fig_p.add_hline(
+                        y=y,
+                        line_dash="dash",
+                        line_color=f"rgba({r0},{g0},{b0},{min(0.85, 0.38 + 0.45 * float(wn[idx]))})",
+                        line_width=max(1.0, min(4.0, base_w)),
+                        opacity=min(0.9, op),
+                        annotation_text="HVN (Institutional Liquidity)",
+                        annotation_position=ann_side,
+                        annotation_font=dict(size=9, color=f"rgba({min(255, r0 + 40)},{min(255, g0 + 40)},{min(255, b0 + 30)},0.92)"),
+                    )
     except Exception:
         pass
 
