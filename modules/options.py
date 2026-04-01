@@ -996,7 +996,11 @@ class MonteCarloEngine:
             return 0.0
 
         sims = int(max(100, simulations))
-        Z = np.random.standard_normal(sims)
+        half = sims // 2
+        if half < 1:
+            half = 1
+        Z_half = np.random.standard_normal(half)
+        Z = np.concatenate([Z_half, -Z_half])
         S_T = S * np.exp((r - 0.5 * sigma**2) * T + sigma * np.sqrt(T) * Z)
 
         if option_type == "put":
@@ -1014,5 +1018,6 @@ class MonteCarloEngine:
         else:
             return 0.0
 
-        return float((winning_paths / sims) * 100.0)
+        n_paths = int(Z.shape[0])
+        return float((winning_paths / n_paths) * 100.0) if n_paths > 0 else 0.0
 

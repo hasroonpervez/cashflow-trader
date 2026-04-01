@@ -3,6 +3,7 @@ Data layer — yfinance fetchers with retry/backoff, caching, macro dashboard.
 """
 from __future__ import annotations
 
+import sys
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -153,10 +154,17 @@ _PLOTLY_BLUE_DEEPER = "#1e40af"
 _PLOTLY_SLATE = "#64748b"
 
 
+@st.cache_data(ttl=300)
 def fetch_stock(ticker, period="1y", interval="1d"):
     def _fetch():
         df = _yfinance_ticker(ticker).history(period=period, interval=interval)
         if df.empty:
+            print(
+                f"[cashflow-trader] WARNING: fetch_stock empty DataFrame "
+                f"ticker={ticker!r} period={period!r} interval={interval!r}",
+                file=sys.stderr,
+                flush=True,
+            )
             return None
         df.index = pd.to_datetime(df.index)
         if df.index.tz is not None:

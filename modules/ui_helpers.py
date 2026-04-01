@@ -429,28 +429,42 @@ def _fragment_rolling_edge_capture():
                 "Same data as the bars; use whichever view is easier on your eyes.</div>",
                 unsafe_allow_html=True,
             )
+            # Diverging scale with a *dark* neutral band (not pale yellow): white labels stay readable on every tile.
+            _edge_gap_colorscale = [
+                [0.0, "#7f1d1d"],
+                [0.35, "#b91c1c"],
+                [0.5, "#1e293b"],
+                [0.65, "#15803d"],
+                [1.0, "#14532d"],
+            ]
+            _d_abs = float(df_latest["Delta"].abs().max() or 0)
+            _d_span = max(15.0, _d_abs * 1.15, 1.0)
+
             fig_tm = px.treemap(
                 df_latest,
                 path=[px.Constant("Watchlist"), "Ticker"],
                 values="Size_Score",
                 color="Delta",
-                color_continuous_scale="RdYlGn",
+                color_continuous_scale=_edge_gap_colorscale,
+                range_color=(-_d_span, _d_span),
                 color_continuous_midpoint=0,
                 custom_data=["Retail", "Quant", "Delta", "Preview"],
             )
             fig_tm.update_traces(
-                marker=dict(line=dict(width=2, color="rgba(15,23,42,0.92)")),
+                marker=dict(line=dict(width=2.5, color="rgba(2,6,23,0.95)")),
                 hovertemplate=(
                     "<b>%{label}</b><br>Quant: %{customdata[1]}<br>Retail: %{customdata[0]}<br>"
                     "Edge gap: %{customdata[2]:+d}<br><i>%{customdata[3]}</i><extra></extra>"
                 ),
                 textinfo="label+text",
                 texttemplate="<b>%{label}</b><br>Q %{customdata[1]}<br>gap %{customdata[2]:+d}",
-                textfont=dict(size=12, color="#f8fafc"),
+                textfont=dict(size=13, color="#f8fafc", family="system-ui, sans-serif"),
+                insidetextfont=dict(size=13, color="#f8fafc", family="system-ui, sans-serif"),
+                outsidetextfont=dict(size=12, color="#e2e8f0", family="system-ui, sans-serif"),
             )
             fig_tm.update_layout(
                 margin=dict(t=28, l=6, r=6, b=6),
-                height=400,
+                height=420,
                 paper_bgcolor="rgba(0,0,0,0)",
                 plot_bgcolor="rgba(0,0,0,0)",
                 font=dict(color="#cbd5e1", size=11),
@@ -462,12 +476,13 @@ def _fragment_rolling_edge_capture():
                 ),
                 coloraxis_colorbar=dict(
                     title=dict(
-                        text="Edge gap<br><sub>Quant minus Retail</sub>",
+                        text="Edge gap<br><sub>Quant minus Retail (points)</sub>",
                         font=dict(size=11, color="#94a3b8"),
                     ),
-                    thickness=12,
-                    tickfont=dict(color="#94a3b8", size=10),
-                    len=0.7,
+                    thickness=14,
+                    tickfont=dict(color="#cbd5e1", size=10),
+                    tickformat=".0f",
+                    len=0.72,
                 ),
             )
             st.plotly_chart(fig_tm, use_container_width=True)

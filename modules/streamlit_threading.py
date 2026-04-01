@@ -32,7 +32,12 @@ def _scriptrunner_ctx_apis():
 
 
 def make_script_ctx_pool(max_workers: int) -> ThreadPoolExecutor:
-    """ThreadPoolExecutor whose workers have ScriptRunContext attached from the first line of their lifetime."""
+    """ThreadPoolExecutor whose workers have ScriptRunContext attached from the first line of their lifetime.
+
+    For watchlist-style work, cap ``max_workers`` (e.g. ``min(8, len(tickers))``) and submit one
+    ``submit_with_script_ctx`` future per ticker: the executor queues excess tasks and idle workers
+    pull the next ticker immediately instead of spawning one thread per symbol.
+    """
     get_ctx, add_ctx = _scriptrunner_ctx_apis()
     captured = get_ctx() if get_ctx else None
 

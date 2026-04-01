@@ -1974,20 +1974,22 @@ def main():
 
                     scanner_results = []
                     n_scan = len(watchlist_tickers)
-                    workers = min(8, max(1, n_scan))
+                    workers = min(8, n_scan)
                     scan_progress = st.progress(0)
                     done_ct = 0
                     scan_failed = []
+                    # Submit all tickers to the pool queue; bounded workers drain tasks as they finish
+                    # (avoids 1:1 thread-per-ticker churn on small Cloud CPUs).
                     with make_script_ctx_pool(workers) as pool:
-                        future_map = {
-                            submit_with_script_ctx(
+                        future_map = {}
+                        for tkr in watchlist_tickers:
+                            fut = submit_with_script_ctx(
                                 pool,
                                 scan_single_ticker,
                                 tkr,
                                 haircut_map.get(tkr, 1.0),
-                            ): tkr
-                            for tkr in watchlist_tickers
-                        }
+                            )
+                            future_map[fut] = tkr
                         for fut in as_completed(future_map):
                             done_ct += 1
                             tkr = future_map[fut]
