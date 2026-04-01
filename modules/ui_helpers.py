@@ -52,9 +52,8 @@ def _confluence_why_trade_plain(cp_breakdown, *, options_chain_available=True):
     """One-line copy for Recommended Trade tooltip — same 7 headline rows as Diamond checklist."""
     if not options_chain_available:
         return (
-            "The options feed did not return expirations for this symbol, so this card cannot anchor to a live strike or IV rank. "
-            "Quant Edge and Confluence above still describe tape quality. Retry during regular market hours, use Refresh below in Cash Flow Strategies, "
-            "or pick strikes in your broker from the same playbook (roughly 3–7% OTM, monthly-ish expiry)."
+            "No Yahoo expirations yet—this card can’t pin a strike or IV rank. "
+            "Cash Flow → Refresh options data, or use your broker. Tape quality is still in Quant Edge / Confluence above."
         )
     head = (
         "7/9 Diamond headline checklist: Supertrend (2), Ichimoku cloud (2), ADX DI (1), OBV (1), "
@@ -101,8 +100,8 @@ def _iv_rank_pill_html(ticker, price, ref_iv_pct=None, *, stub=None):
         return (
             pill_open
             + label
-            + "<span style='margin-left:10px;font-size:.8rem;font-weight:700;color:#94a3b8'>No options chain</span>"
-            + "<span style='font-size:.68rem;color:#64748b;margin-left:8px'>IV rank needs live expirations · try RTH or Refresh</span></div>"
+            + "<span style='margin-left:10px;font-size:.8rem;font-weight:700;color:#94a3b8'>No expirations</span>"
+            + "<span style='font-size:.68rem;color:#64748b;margin-left:8px'>IV rank needs a chain · Cash Flow → Refresh</span></div>"
         )
     if stub == "no_strike":
         return (

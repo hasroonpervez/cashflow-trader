@@ -6,7 +6,17 @@ import pandas as pd
 import numpy as np
 import yfinance as yf
 import time
+import requests
 from datetime import datetime, timedelta
+
+# Yahoo JSON API (same family yfinance uses) — fallback when Ticker.options is transiently empty.
+_YAHOO_OPTIONS_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/json",
+}
 
 # ─────────────────────────────────────────────────────────────────────────
 # RETRY WRAPPER — handles yfinance throttling gracefully
@@ -28,6 +38,83 @@ def retry_fetch(fn, retries=3, delay=2):
 def _yfinance_ticker(symbol: str):
     """Fresh ``yf.Ticker`` per call — avoids stale sessions and unbounded cached connections on large watchlists."""
     return yf.Ticker(str(symbol).upper().strip())
+
+
+def _option_expirations_yahoo_http(symbol: str) -> list[str]:
+    """List YYYY-MM-DD expiries from Yahoo's v7 options endpoint (no yfinance session state)."""
+    sym = str(symbol).upper().strip()
+    if not sym:
+        return []
+    url = f"https://query2.finance.yahoo.com/v7/finance/options/{sym}"
+    try:
+        r = requests.get(url, headers=_YAHOO_OPTIONS_HEADERS, timeout=14)
+        if r.status_code != 200:
+            return []
+        payload = r.json()
+        results = (payload.get("optionChain") or {}).get("result") or []
+        if not results:
+            return []
+        exp_unix = results[0].get("expirationDates") or []
+        out: list[str] = []
+        for u in exp_unix:
+            try:
+                ts = int(u)
+                if ts > 1e9:
+                    out.append(datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d"))
+            except (TypeError, ValueError, OSError):
+                continue
+        return sorted(set(out))
+    except Exception:
+        return []
+
+
+def _norm_option_expiry_str(x) -> str:
+    """Normalize any yfinance / API value to YYYY-MM-DD for stable lookups."""
+    if x is None:
+        return ""
+    s = str(x).strip()
+    return s[:10] if len(s) >= 10 else s
+
+
+def _option_expirations_yfinance(symbol: str, attempts: int = 5) -> list[str]:
+    """Read Ticker.options with backoff; prime with a small history pull on first try."""
+    sym = str(symbol).upper().strip()
+    for attempt in range(attempts):
+        try:
+            t = yf.Ticker(sym)
+            if attempt == 0:
+                try:
+                    t.history(period="5d", interval="1d")
+                except Exception:
+                    pass
+            raw = getattr(t, "options", None)
+            if raw is not None:
+                lst = [_norm_option_expiry_str(x) for x in list(raw)]
+                lst = [e for e in lst if len(e) >= 10]
+                if lst:
+                    return lst
+        except Exception:
+            pass
+        if attempt < attempts - 1:
+            time.sleep(0.12 * (2**attempt))
+    return []
+
+
+def _resolve_option_expiration_strings(symbol: str) -> list[str]:
+    """Merge yfinance listing + HTTP fallback; de-dupe and sort (chronological)."""
+    seen: list[str] = []
+    for src in (_option_expirations_yfinance(symbol), _option_expirations_yahoo_http(symbol)):
+        for e in src:
+            n = _norm_option_expiry_str(e)
+            if len(n) >= 10 and n not in seen:
+                seen.append(n)
+    if not seen:
+        return []
+    try:
+        seen.sort(key=lambda s: datetime.strptime(s[:10], "%Y-%m-%d"))
+    except Exception:
+        seen.sort()
+    return seen
 
 
 def _client_suggests_mobile_chart():
@@ -109,13 +196,18 @@ def fetch_info(ticker):
     except Exception:
         return {}
 
+@st.cache_data(ttl=90)
+def list_option_expiration_dates(ticker: str) -> tuple:
+    """Expiry strings only (short TTL): transient Yahoo/yfinance gaps recover without long poisoned cache."""
+    return tuple(_resolve_option_expiration_strings(ticker))
+
+
 @st.cache_data(ttl=300)
 def fetch_options(ticker, exp=None):
     """Fetch options chain. Always returns ((calls_df, puts_df), exps) for stable unpacking.
 
-    When ``exp`` is None, returns empty dataframes and only the expiration list (no ``option_chain``
-    download). Call again with a concrete expiry when you need strikes. This avoids pulling the
-    nearest expiry chain twice on every dashboard load.
+    Expiration list comes from ``list_option_expiration_dates`` (yfinance retries + Yahoo v7 HTTP
+    fallback + 90s cache). When ``exp`` is None, returns empty frames and only exps (no chain pull).
 
     If the requested expiry returns empty frames (illiquid / API gap), we walk forward through
     nearby listed expiries so BLUF and the Execution Strip never assume non-empty strikes."""
@@ -130,16 +222,14 @@ def fetch_options(ticker, exp=None):
         return calls_df, puts_df
 
     try:
-        t = _yfinance_ticker(ticker)
-        raw_exps = getattr(t, "options", None)
-        if raw_exps is None:
-            return empty, []
-        exps = [str(x) for x in list(raw_exps)]
+        exps = list(list_option_expiration_dates(ticker))
         if not exps:
             return empty, []
         if exp is None:
             return empty, exps
-        primary = exp if exp in exps else exps[0]
+        t = _yfinance_ticker(ticker)
+        exp_s = str(exp)[:10] if exp else ""
+        primary = exp_s if exp_s in exps else exps[0]
         candidates = [primary]
         for e in exps:
             if e not in candidates:
@@ -171,10 +261,10 @@ def compute_iv_rank_proxy(sym: str, spot: float, ref_iv_pct: float):
     if ref_iv_pct is None or spot is None or spot <= 0:
         return None
     try:
-        t = _yfinance_ticker(sym)
-        exps = list(getattr(t, "options", None) or [])[:14]
+        exps = list(list_option_expiration_dates(sym))[:14]
         if len(exps) < 2:
             return None
+        t = _yfinance_ticker(sym)
         samples = []
         for exp in exps:
             try:

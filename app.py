@@ -85,7 +85,7 @@ for _import_try in range(_IMPORT_KEYERROR_RETRIES):
             from modules.data import (
                 retry_fetch, _yfinance_ticker, _client_suggests_mobile_chart,
                 fetch_stock, _ticker_pct_change_1d, fetch_intraday_series,
-                fetch_info, fetch_options, compute_iv_rank_proxy, fetch_news,
+                fetch_info, fetch_options, list_option_expiration_dates, compute_iv_rank_proxy, fetch_news,
                 fetch_earnings_date, fetch_earnings_calendar_display, fetch_macro,
                 _PLOTLY_UI_CONFIG, _PLOTLY_PAPER_BG, _PLOTLY_PLOT_BG,
                 _PLOTLY_CASH_UP, _PLOTLY_CASH_DOWN, _PLOTLY_GRID, _PLOTLY_FONT_MAIN, _PLOTLY_BLUE, _PLOTLY_AXIS_TITLE,
@@ -668,15 +668,12 @@ def main():
             f"<div class='trade-master'>"
             f"{trade_hdr_html}"
             f"{_iv_off}"
-            f"<p style='color:#e2e8f0;font-size:1rem;line-height:1.55;margin:0 0 10px 0'>"
-            f"We are not getting option expirations from the data feed for <span class='mono'>{_html_mod.escape(ticker)}</span>. "
-            f"That usually means after-hours or weekend gaps, Yahoo throttling, or a brief API miss—not that the symbol has no options."
+            f"<p style='color:#e2e8f0;font-size:1rem;line-height:1.5;margin:0'>"
+            f"No option expirations from Yahoo for <span class='mono'>{_html_mod.escape(ticker)}</span> after retries. "
+            f"Use <a href='#strategies' style='color:#22d3ee'>Cash Flow</a> → <strong>Refresh options data</strong>, "
+            f"or pick strikes in your broker. Micro-caps may have no Yahoo chain even if options trade elsewhere."
             f"</p>"
-            f"<ul style='color:#94a3b8;font-size:.88rem;margin:0 0 12px 1.1rem;line-height:1.5'>"
-            f"<li>Try <strong style='color:#e2e8f0'>Refresh</strong> under <strong style='color:#e2e8f0'>Cash Flow Strategies</strong> during regular hours.</li>"
-            f"<li>Keep using <strong style='color:#e2e8f0'>Quant Edge</strong> and <strong style='color:#e2e8f0'>Confluence</strong> above for context; strike selection can wait until the chain loads.</li>"
-            f"</ul>"
-            f"<p style='color:#64748b;font-size:.8rem;margin:0'>Jump to <a href='#strategies' style='color:#22d3ee'>Cash Flow Strategies</a> for retry and expiry picker once the feed responds.</p>"
+            f"<p style='color:#64748b;font-size:.78rem;margin:10px 0 0 0'>Quant Edge and Confluence above still describe the tape.</p>"
             f"</div>"
         )
     else:
@@ -1707,6 +1704,7 @@ def main():
                     "Use **Refresh** to bust the cache and pull again. If it persists, open your broker’s chain for the same symbol."
                 )
                 if st.button("Refresh options data", key="retry_opts_chain", help="Clears cached option expirations and reloads"):
+                    list_option_expiration_dates.clear()
                     fetch_options.clear()
                     st.rerun()
 
