@@ -4,6 +4,14 @@
 ║  Modular architecture — same UI, same logic, clean separation.           ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 """
+import os
+import sys
+import threading
+
+# Streamlit Cloud and some runners leave cwd off sys.path; local imports need the app root.
+_app_root = os.path.dirname(os.path.abspath(__file__))
+if _app_root not in sys.path:
+    sys.path.insert(0, _app_root)
 
 import streamlit as st
 
@@ -61,45 +69,55 @@ if "bt_thresh" not in st.session_state:
 if "bt_hold" not in st.session_state:
     st.session_state.bt_hold = 5
 
-# ── Module imports ──
-from modules.streamlit_threading import make_script_ctx_pool, submit_with_script_ctx
-from modules.config import (
-    load_config, save_config, DEFAULT_CONFIG, CONFIG_PATH,
-    _hydrate_sidebar_prefs, _overlay_prefs_from_session,
-    REF_NOTIONAL, RISK_PCT_EXAMPLE, KELLY_DISPLAY_CAP_PCT,
-    EMA_EXTENSION_WARN_PCT,
-)
-from modules.data import (
-    retry_fetch, _yfinance_ticker, _client_suggests_mobile_chart,
-    fetch_stock, _ticker_pct_change_1d, fetch_intraday_series,
-    fetch_info, fetch_options, compute_iv_rank_proxy, fetch_news,
-    fetch_earnings_date, fetch_earnings_calendar_display, fetch_macro,
-    _PLOTLY_UI_CONFIG, _PLOTLY_PAPER_BG, _PLOTLY_PLOT_BG,
-    _PLOTLY_CASH_UP, _PLOTLY_CASH_DOWN, _PLOTLY_GRID, _PLOTLY_FONT_MAIN, _PLOTLY_BLUE, _PLOTLY_AXIS_TITLE,
-)
-from modules.ta import TA
-from modules.options import (
-    bs_price, bs_greeks, calc_ev, kelly_criterion, calc_vol_skew,
-    quant_edge_score, weekly_trend_label, calc_gold_zone,
-    calc_confluence_points, detect_diamonds, latest_diamond_status,
-    diamond_win_rate, scan_single_ticker, Opt, calc_skew_regime, PortfolioRisk, MonteCarloEngine,
-)
-from modules.sentiment import Sentiment, Backtest, Alerts, run_cc_sim_cached, QuantBacktest
-from modules.chart import build_chart, _chart_hoverlabel, build_skew_chart, build_correlation_heatmap
-from modules.ui_helpers import (
-    _factor_checklist_labels, _confluence_why_trade_plain,
-    _iv_rank_qualitative_words, _iv_rank_pill_html,
-    render_mode_badge,
-    _explain, _section, _mini_sparkline, _glance_sparkline_svg,
-    _glance_metric_card, _render_html_block, _parse_watchlist_string,
-    _fragment_technical_zone, _df_price_levels, _style_price_levels_table,
-    _earnings_calendar_column_config, _style_earnings_next_highlight,
-    _PRICE_LEVEL_COLUMN_CONFIG, _options_scan_dataframe,
-    _options_scan_column_config, _style_propdesk_highlight,
-    _persist_overlay_prefs,
-)
+# ── Module imports: serialize + retry on KeyError (Streamlit watcher vs import race; see streamlit#6404)
+_modules_import_lock = threading.Lock()
+_IMPORT_KEYERROR_RETRIES = 5
+for _import_try in range(_IMPORT_KEYERROR_RETRIES):
+    try:
+        with _modules_import_lock:
+            from modules.streamlit_threading import make_script_ctx_pool, submit_with_script_ctx
+            from modules.config import (
+                load_config, save_config, DEFAULT_CONFIG, CONFIG_PATH,
+                _hydrate_sidebar_prefs, _overlay_prefs_from_session,
+                REF_NOTIONAL, RISK_PCT_EXAMPLE, KELLY_DISPLAY_CAP_PCT,
+                EMA_EXTENSION_WARN_PCT,
+            )
+            from modules.data import (
+                retry_fetch, _yfinance_ticker, _client_suggests_mobile_chart,
+                fetch_stock, _ticker_pct_change_1d, fetch_intraday_series,
+                fetch_info, fetch_options, compute_iv_rank_proxy, fetch_news,
+                fetch_earnings_date, fetch_earnings_calendar_display, fetch_macro,
+                _PLOTLY_UI_CONFIG, _PLOTLY_PAPER_BG, _PLOTLY_PLOT_BG,
+                _PLOTLY_CASH_UP, _PLOTLY_CASH_DOWN, _PLOTLY_GRID, _PLOTLY_FONT_MAIN, _PLOTLY_BLUE, _PLOTLY_AXIS_TITLE,
+            )
+            from modules.ta import TA
+            from modules.options import (
+                bs_price, bs_greeks, calc_ev, kelly_criterion, calc_vol_skew,
+                quant_edge_score, weekly_trend_label, calc_gold_zone,
+                calc_confluence_points, detect_diamonds, latest_diamond_status,
+                diamond_win_rate, scan_single_ticker, Opt, calc_skew_regime, PortfolioRisk, MonteCarloEngine,
+            )
+            from modules.sentiment import Sentiment, Backtest, Alerts, run_cc_sim_cached, QuantBacktest
+            from modules.chart import build_chart, _chart_hoverlabel, build_skew_chart, build_correlation_heatmap
+            from modules.ui_helpers import (
+                _factor_checklist_labels, _confluence_why_trade_plain,
+                _iv_rank_qualitative_words, _iv_rank_pill_html,
+                render_mode_badge,
+                _explain, _section, _mini_sparkline, _glance_sparkline_svg,
+                _glance_metric_card, _render_html_block, _parse_watchlist_string,
+                _fragment_technical_zone, _df_price_levels, _style_price_levels_table,
+                _earnings_calendar_column_config, _style_earnings_next_highlight,
+                _PRICE_LEVEL_COLUMN_CONFIG, _options_scan_dataframe,
+                _options_scan_column_config, _style_propdesk_highlight,
+                _persist_overlay_prefs,
+            )
 
-from modules.css import _CSS, _MINI_MODE_DENSITY_CSS, inject_css_and_navbar
+            from modules.css import _CSS, _MINI_MODE_DENSITY_CSS, inject_css_and_navbar
+        break
+    except KeyError:
+        if _import_try >= _IMPORT_KEYERROR_RETRIES - 1:
+            raise
+        time.sleep(0.08 * (2**_import_try))
 
 # ── Inject theme + navbar (must happen before any widgets) ──
 inject_css_and_navbar()
