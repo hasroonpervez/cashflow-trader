@@ -92,6 +92,25 @@ def _iv_rank_qualitative_words(rank):
     return "Fair premium"
 
 
+def walk_up_limit_sell_per_share(bid, mid):
+    """
+    Walk-up limit for short premium (e.g. Robinhood): quote between bid and mid to improve fill quality.
+    Returns per-share credit limit, or None if mid is unusable.
+    """
+    try:
+        b = float(bid) if bid is not None else 0.0
+        m = float(mid) if mid is not None else 0.0
+    except (TypeError, ValueError):
+        return None
+    if m <= 0 or not np.isfinite(m):
+        return None
+    if not np.isfinite(b):
+        b = 0.0
+    b = max(0.0, b)
+    w = (b + m) / 2.0
+    return float(w) if np.isfinite(w) and w > 0 else None
+
+
 def _iv_rank_pill_html(ticker, price, ref_iv_pct=None, *, stub=None):
     """Recommended Trade card: always show an IV rank pill (numeric proxy, or a clear stub)."""
     pill_open = (

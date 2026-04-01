@@ -105,6 +105,7 @@ for _import_try in range(_IMPORT_KEYERROR_RETRIES):
                 render_mode_badge,
                 _explain, _section, _mini_sparkline, _glance_sparkline_svg,
                 _glance_metric_card, _render_html_block, _parse_watchlist_string,
+                walk_up_limit_sell_per_share,
                 _fragment_technical_zone, _fragment_rolling_edge_capture, _df_price_levels, _style_price_levels_table,
                 _earnings_calendar_column_config, _style_earnings_next_highlight,
                 _PRICE_LEVEL_COLUMN_CONFIG, _options_scan_dataframe,
@@ -719,12 +720,23 @@ def main():
                     _mc_pop_seg = f" · MC PoP: {_mc_pop_v:.1f}%"
             except (TypeError, ValueError):
                 pass
+        _mb_bid = master_b.get("bid", 0)
+        _mb_mid = master_b.get("mid", 0)
+        _walk = walk_up_limit_sell_per_share(_mb_bid, _mb_mid)
+        _walk_seg = ""
+        if _walk is not None:
+            _walk_seg = (
+                f"<div style='color:#a5f3fc;font-size:.86rem;margin-bottom:10px;font-weight:600'>"
+                f"Walk-up limit (sell credit): <span class='mono'>${_walk:.2f}</span> / sh "
+                f"<span style='color:#64748b;font-weight:500'>(bid + mid) / 2</span></div>"
+            )
         master_html = (
             f"<div class='trade-master'>"
             f"{trade_hdr_html}"
             f"{iv_badge_html}"
             f"<p style='color:#e2e8f0;font-size:1.05rem;line-height:1.55;margin:0 0 14px 0;font-weight:600'>{headline}</p>"
             f"<div class='strike-big' style='margin:8px 0 6px 0'>${_html_mod.escape(strike_s)}</div>"
+            f"{_walk_seg}"
             f"<div style='color:#94a3b8;font-size:.88rem;margin-bottom:12px'>Desk optimal strike · {iv_line}DTE {dte_m}{_mc_pop_seg}</div>"
             f"<div style='font-size:.75rem;font-weight:700;color:#a5f3fc;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px'>Broker checklist</div>"
             f"<div class='rh-stepper'>{stepper}</div>"
@@ -792,6 +804,18 @@ def main():
             _f_strike = float(fallback_row["strike"])
             _f_px = float(pd.to_numeric(fallback_row.get("est_px"), errors="coerce") or 0.0)
             _f_prem = _f_px * 100.0
+            _f_bid = float(pd.to_numeric(fallback_row.get("bid"), errors="coerce") or 0.0)
+            _f_mid = float(pd.to_numeric(fallback_row.get("mid"), errors="coerce") or 0.0)
+            if _f_mid <= 0 and _f_px > 0:
+                _f_mid = _f_px
+            _f_walk = walk_up_limit_sell_per_share(_f_bid, _f_mid if _f_mid > 0 else None)
+            _f_walk_html = ""
+            if _f_walk is not None:
+                _f_walk_html = (
+                    f"<div style='color:#a5f3fc;font-size:.85rem;margin:6px 0 8px 0;font-weight:600'>"
+                    f"Walk-up limit (sell credit): <span class='mono'>${_f_walk:.2f}</span> / sh "
+                    f"<span style='color:#64748b;font-weight:500'>(bid + mid) / 2</span></div>"
+                )
             _f_iv_raw = float(pd.to_numeric(fallback_row.get("impliedVolatility"), errors="coerce") or 0.0)
             _f_iv_pct = _f_iv_raw * 100.0 if _f_iv_raw > 0 else ref_iv_bluf
             _iv_fb = _iv_rank_pill_html(ticker, price, _f_iv_pct, stub=None if _f_iv_pct else "no_strike")
@@ -813,6 +837,7 @@ def main():
                 f"{_iv_fb}"
                 f"<p style='color:#e2e8f0;font-size:1rem;line-height:1.5;margin:0 0 10px 0;font-weight:600'>{_f_headline}</p>"
                 f"<div class='strike-big' style='margin:6px 0 4px 0'>${_f_strike:.0f}</div>"
+                f"{_f_walk_html}"
                 f"<div style='color:#94a3b8;font-size:.85rem'>{_f_note}</div>"
                 f"</div>"
             )

@@ -297,6 +297,20 @@ def _fetch_options_context(ctx: DashContext):
         except (TypeError, ValueError):
             pass
 
+    # Put skew: OTM put IV ≥ 20% above OTM call IV (normalized ratio) → lean CSP even on neutral tape
+    skew_puts_rich = False
+    try:
+        _, _piv, _civ = calc_vol_skew(ctx.price, ctx.bluf_calls, ctx.bluf_puts)
+        if (
+            _piv is not None
+            and _civ is not None
+            and float(_civ) > 0
+            and float(_piv) >= float(_civ) * 1.20
+        ):
+            skew_puts_rich = True
+    except Exception:
+        skew_puts_rich = False
+
     # Determine strategy
     ctx.nc = 1
     if ctx.struct == "BULLISH" and ctx.fg > 50:
@@ -310,6 +324,12 @@ def _fetch_options_context(ctx: DashContext):
         ctx.action_plain = (
             f"The tape is defensive (fear score {ctx.fg:.0f}). Protection costs more, which pays you to sell it. "
             f"Sell cash secured puts under spot. Assignment simply means you own {ctx.ticker} at the strike you chose."
+        )
+    elif skew_puts_rich and ctx.struct != "BEARISH":
+        ctx.action_strat = "SELL CASH SECURED PUTS"
+        ctx.action_plain = (
+            f"Volatility skew shows puts are materially richer than calls (hedging demand). "
+            f"Even with a neutral tape, selling cash secured puts under {ctx.ticker} captures that premium."
         )
     elif ctx.struct != "BEARISH":
         ctx.action_strat = "BULL PUT SPREAD"

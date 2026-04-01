@@ -2,6 +2,7 @@
 Options analytics — Black-Scholes, Greeks, EV, Kelly, Volatility Skew,
 Quant Edge Score, Gold Zone, Confluence Points, Diamond Signals, Opt scanner.
 """
+import hashlib
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -364,7 +365,7 @@ def calc_gold_zone(df, df_wk=None):
 #  CONFLUENCE POINTS — 0-to-9 scoring (Startup.io-inspired, enhanced)
 # ═════════════════════════════════════════════════════════════════════════
 
-def _calc_confluence_points_core(df, df_wk=None, vix_val=None, gold_zone_price=None):
+def _calc_confluence_points_core(df, df_wk=None, vix_val=None, gold_zone_price=None, rsi_period=14):
     """Same scoring as the dashboard confluence meter — not cached.
     Safe to call on ``df.iloc[:i+1]`` for point-in-time diamond detection.
     Pass ``gold_zone_price`` when the caller already computed Gold Zone on the same frame to avoid duplicate work."""
@@ -400,7 +401,7 @@ def _calc_confluence_points_core(df, df_wk=None, vix_val=None, gold_zone_price=N
     score += pts
     breakdown["OBV"] = {"pts": pts, "max": 1, "detail": "Accumulation" if obv_up else "Distribution"}
 
-    rsi_s = TA.rsi(df["Close"])
+    rsi_s = TA.rsi(df["Close"], rsi_period)
     divs = TA.detect_divergences(df["Close"], rsi_s)
     bull_div = any(d["type"] == "bullish" for d in divs[-3:])
     pts = 1 if bull_div else 0
@@ -426,10 +427,10 @@ def _calc_confluence_points_core(df, df_wk=None, vix_val=None, gold_zone_price=N
 
 
 @st.cache_data(ttl=300)
-def calc_confluence_points(df, df_wk=None, vix_val=None, gold_zone_price=None):
+def calc_confluence_points(df, df_wk=None, vix_val=None, gold_zone_price=None, rsi_period=14):
     """Compute 0-9 bullish confluence score with per-component breakdown.
     Returns (score, max_score, breakdown_dict, bearish_score)."""
-    return _calc_confluence_points_core(df, df_wk, vix_val, gold_zone_price)
+    return _calc_confluence_points_core(df, df_wk, vix_val, gold_zone_price, rsi_period=rsi_period)
 
 
 # ═════════════════════════════════════════════════════════════════════════
@@ -528,6 +529,22 @@ def quant_trailing_exit(df, atr_multiplier=3.0):
 _DIAMOND_SCAN_TAIL_BARS = 320
 
 
+def _hurst_adaptive_signal_periods(close: pd.Series):
+    """RSI length + MACD (fast, slow, signal) from Hurst: trending → slower, mean-reverting → faster."""
+    H = float(TA.hurst(close))
+    if H > 0.55:
+        rsi_p = 21
+    elif H < 0.45:
+        rsi_p = 8
+    else:
+        rsi_p = 14
+    k = rsi_p / 14.0
+    macd_fast = max(2, int(round(12 * k)))
+    macd_slow = max(macd_fast + 1, int(round(26 * k)))
+    macd_sig = max(2, int(round(9 * k)))
+    return rsi_p, macd_fast, macd_slow, macd_sig, H
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def detect_diamonds(df, df_wk=None, lookback=None, use_quant=False):
     """Blue Diamond (strict): point-in-time **daily** confluence **crosses** to 7+ (was <7 prior bar),
@@ -544,7 +561,9 @@ def detect_diamonds(df, df_wk=None, lookback=None, use_quant=False):
     if n < 55:
         return diamonds
 
-    rsi_series = TA.rsi(df["Close"])
+    rsi_p, mf, ms, mg, H = _hurst_adaptive_signal_periods(df["Close"])
+    rsi_series = TA.rsi(df["Close"], rsi_p)
+    ml_macd, sl_macd, _ = TA.macd(df["Close"], mf, ms, mg)
 
     wk_bias = "UNKNOWN"
     if df_wk is not None and len(df_wk) >= 26:
@@ -555,16 +574,25 @@ def detect_diamonds(df, df_wk=None, lookback=None, use_quant=False):
     scan_start = max(start, n - _DIAMOND_SCAN_TAIL_BARS)
     prev_score = 0
     if scan_start > start:
-        _psc, _, _, _ = _calc_confluence_points_core(df.iloc[:scan_start], df_wk, None)
+        _psc, _, _, _ = _calc_confluence_points_core(
+            df.iloc[:scan_start], df_wk, None, None, rsi_period=rsi_p
+        )
         prev_score = int(_psc)
 
     for i in range(scan_start, n):
         sub = df.iloc[: i + 1]
-        sc, _, bd, _ = _calc_confluence_points_core(sub, df_wk, None)
+        sc, _, bd, _ = _calc_confluence_points_core(sub, df_wk, None, None, rsi_period=rsi_p)
         struct_i = (bd.get("Structure") or {}).get("detail", "RANGING")
 
         rsi_i = float(rsi_series.iloc[i]) if not pd.isna(rsi_series.iloc[i]) else 50.0
         pi = float(df["Close"].iloc[i])
+
+        macd_bull_ok = True
+        if H > 0.55:
+            mlv = ml_macd.iloc[i]
+            slv = sl_macd.iloc[i]
+            if not pd.isna(mlv) and not pd.isna(slv):
+                macd_bull_ok = float(mlv) > float(slv)
 
         # Blue: 7+ cross + daily BULLISH + weekly not BEARISH + explicit 90% vol SMA gate + ATR filter
         is_blue_diamond = (
@@ -574,6 +602,7 @@ def detect_diamonds(df, df_wk=None, lookback=None, use_quant=False):
             and wk_bias != "BEARISH"
             and _blue_diamond_volume_gate(sub)
             and _blue_diamond_institutional_ok(sub)
+            and macd_bull_ok
         )
         size_suggestion = 0
         quant_exit_price = 0.0
@@ -978,6 +1007,16 @@ class PortfolioRisk:
         return 1.0
 
 
+def _mc_rng_seed(S, K, T, r, sigma, premium, option_type, strat, simulations):
+    """Stable seed so PoP does not flicker on Streamlit reruns for the same contract."""
+    payload = (
+        f"{float(S):.8g}|{float(K):.8g}|{float(T):.12g}|{float(r):.8g}|{float(sigma):.8g}|"
+        f"{float(premium):.8g}|{option_type}|{strat}|{int(simulations)}"
+    )
+    h = hashlib.sha256(payload.encode()).digest()
+    return int.from_bytes(h[:8], "big", signed=False) % (2**31 - 1)
+
+
 class MonteCarloEngine:
     @staticmethod
     def calc_pop(S, K, T, r, sigma, premium, option_type="put", strat="short", simulations=10000):
@@ -999,7 +1038,10 @@ class MonteCarloEngine:
         half = sims // 2
         if half < 1:
             half = 1
-        Z_half = np.random.standard_normal(half)
+        rng = np.random.default_rng(
+            _mc_rng_seed(S, K, T, r, sigma, premium, option_type, strat, sims)
+        )
+        Z_half = rng.standard_normal(half)
         Z = np.concatenate([Z_half, -Z_half])
         S_T = S * np.exp((r - 0.5 * sigma**2) * T + sigma * np.sqrt(T) * Z)
 
