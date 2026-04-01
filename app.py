@@ -620,39 +620,51 @@ def main():
         )
     else:
         # Fallback when strict OI/volume filters remove every strike.
-        # We still propose the nearest sensible OTM line from the current chain.
+        # Prefer 3-7% OTM candidates on the strategy side, then nearest to 5% OTM.
+        def _fallback_pick(df_opt, side):
+            if not isinstance(df_opt, pd.DataFrame) or df_opt.empty:
+                return None
+            w = df_opt.copy()
+            w["strike"] = pd.to_numeric(w.get("strike"), errors="coerce")
+            w["bid"] = pd.to_numeric(w.get("bid"), errors="coerce").fillna(0.0)
+            w["ask"] = pd.to_numeric(w.get("ask"), errors="coerce").fillna(0.0)
+            w["lastPrice"] = pd.to_numeric(w.get("lastPrice"), errors="coerce").fillna(0.0)
+            w["mid"] = (w["bid"] + w["ask"]) / 2.0
+            # After-hours feeds often carry zero bid/ask; use last trade as backup quote.
+            w["est_px"] = np.where(w["mid"] > 0.0, w["mid"], w["lastPrice"])
+            if side == "call":
+                w = w[w["strike"] > price].copy()
+                w["otm"] = (w["strike"] / price - 1.0) * 100.0
+                strike_sort = ["target_gap", "strike"]
+                asc = [True, True]
+            else:
+                w = w[w["strike"] < price].copy()
+                w["otm"] = (1.0 - w["strike"] / price) * 100.0
+                strike_sort = ["target_gap", "strike"]
+                asc = [True, False]
+            w = w[w["otm"].notna()].copy()
+            if w.empty:
+                return None
+            preferred = w[(w["otm"] >= 3.0) & (w["otm"] <= 7.0)].copy()
+            if preferred.empty:
+                preferred = w
+            preferred["target_gap"] = (preferred["otm"] - 5.0).abs()
+            return preferred.sort_values(strike_sort, ascending=asc).iloc[0]
+
         fallback_kind = None
         fallback_row = None
-        br = struct in ("BULLISH", "RANGING")
-        if br and isinstance(bluf_calls, pd.DataFrame) and not bluf_calls.empty:
-            c = bluf_calls.copy()
-            c["strike"] = pd.to_numeric(c.get("strike"), errors="coerce")
-            c["bid"] = pd.to_numeric(c.get("bid"), errors="coerce").fillna(0.0)
-            c["ask"] = pd.to_numeric(c.get("ask"), errors="coerce").fillna(0.0)
-            c["mid"] = (c["bid"] + c["ask"]) / 2.0
-            c = c[(c["strike"] > price) & (c["mid"] > 0.01)].copy()
-            if not c.empty:
-                c["otm"] = (c["strike"] / price - 1.0) * 100.0
-                c["target_gap"] = (c["otm"] - 5.0).abs()
-                fallback_row = c.sort_values(["target_gap", "strike"]).iloc[0]
-                fallback_kind = "cc"
-        if fallback_row is None and isinstance(bluf_puts, pd.DataFrame) and not bluf_puts.empty:
-            p = bluf_puts.copy()
-            p["strike"] = pd.to_numeric(p.get("strike"), errors="coerce")
-            p["bid"] = pd.to_numeric(p.get("bid"), errors="coerce").fillna(0.0)
-            p["ask"] = pd.to_numeric(p.get("ask"), errors="coerce").fillna(0.0)
-            p["mid"] = (p["bid"] + p["ask"]) / 2.0
-            p = p[(p["strike"] < price) & (p["mid"] > 0.01)].copy()
-            if not p.empty:
-                p["otm"] = (1.0 - p["strike"] / price) * 100.0
-                p["target_gap"] = (p["otm"] - 5.0).abs()
-                fallback_row = p.sort_values(["target_gap", "strike"], ascending=[True, False]).iloc[0]
-                fallback_kind = "csp"
+        prefer_put_side = action_strat in ("SELL CASH SECURED PUTS", "BULL PUT SPREAD")
+        side_order = [("csp", "put"), ("cc", "call")] if prefer_put_side else [("cc", "call"), ("csp", "put")]
+        for kind, side in side_order:
+            row = _fallback_pick(bluf_puts if side == "put" else bluf_calls, side)
+            if row is not None:
+                fallback_kind, fallback_row = kind, row
+                break
 
         if fallback_row is not None and bluf_exp:
             _f_strike = float(fallback_row["strike"])
-            _f_mid = float(fallback_row["mid"])
-            _f_prem = _f_mid * 100.0
+            _f_px = float(pd.to_numeric(fallback_row.get("est_px"), errors="coerce") or 0.0)
+            _f_prem = _f_px * 100.0
             _f_iv_raw = float(pd.to_numeric(fallback_row.get("impliedVolatility"), errors="coerce") or 0.0)
             _f_iv_pct = _f_iv_raw * 100.0 if _f_iv_raw > 0 else ref_iv_bluf
             _iv_fb = _iv_rank_pill_html(ticker, price, _f_iv_pct, stub=None if _f_iv_pct else "no_strike")
@@ -661,13 +673,13 @@ def main():
                     f"FALLBACK LINE: SELL {nc}x {_html_mod.escape(ticker)} ${_f_strike:.0f} CALLS EXP {bluf_exp}. "
                     f"EST CREDIT ${_f_prem * nc:,.0f}."
                 )
-                _f_note = "Strict desk liquidity filters blocked every strike; this is the nearest tradable OTM call."
+                _f_note = "Strict desk liquidity filters blocked every strike; this is the nearest 3-7% OTM call line."
             else:
                 _f_headline = (
                     f"FALLBACK LINE: SELL 1x {_html_mod.escape(ticker)} ${_f_strike:.0f} PUTS EXP {bluf_exp}. "
                     f"EST CREDIT ${_f_prem:,.0f}."
                 )
-                _f_note = "Strict desk liquidity filters blocked every strike; this is the nearest tradable OTM put."
+                _f_note = "Strict desk liquidity filters blocked every strike; this is the nearest 3-7% OTM put line."
             master_html = (
                 f"<div class='trade-master'>"
                 f"{trade_hdr_html}"
