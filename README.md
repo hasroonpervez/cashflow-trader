@@ -46,7 +46,9 @@ cashflow-trader/
     ├── options.py            # Black-Scholes, Corrado-Su, EV, Kelly, Quant Edge, Diamonds
     ├── sentiment.py          # Sentiment + HMM regime detection, CC sim, Alerts, QuantBacktest engine
     ├── chart.py              # Four-panel Plotly chart builder + volatility skew surface
-    ├── ui_helpers.py         # Sparklines, glance cards, sections, DataFrame styling
+    ├── ui_helpers.py         # Sparklines, glance cards, fragments, mode badge, DataFrame styling
+    ├── pages.py              # Optional page shell + parallel context build (uses threading helper)
+    ├── streamlit_threading.py # Thread pools with ScriptRunContext re-attach per task
     └── css.py                # Full CSS theme + Mini Mode + sidebar toggle JS
 ```
 
@@ -56,6 +58,11 @@ cashflow-trader/
 - CSS/navbar injection happens immediately after via `inject_css_and_navbar()`
 - Modules never call `st.*` at import time — only when their functions are invoked
 - `@st.cache_data` decorators work correctly because `streamlit` is imported in each module
+
+**Parallel fetches and Streamlit Cloud:**
+
+- Background `ThreadPoolExecutor` workers that call `@st.cache_data` need Streamlit’s `ScriptRunContext` on that thread. `make_script_ctx_pool()` plus `submit_with_script_ctx()` capture context when work is submitted and re-attach it at the start of each task (initializer-only attachment is not always enough after cache layers).
+- The technical chart lives in `@st.fragment`; quant vs retail mode is passed via `st.session_state` (not extra fragment kwargs) so deploys and fragment reruns stay compatible. Stale kwargs from older sessions are ignored safely on the fragment signature.
 
 ---
 
@@ -70,10 +77,12 @@ streamlit run app.py
 
 ## Deploy to Streamlit Cloud
 
-1. Push to GitHub
+1. Push to GitHub (app and `modules/` must stay in sync on the same branch the app tracks)
 2. Connect at [share.streamlit.io](https://share.streamlit.io)
 3. Set `app.py` as the main file
 4. (Optional) Add secrets in Streamlit Cloud dashboard under Settings → Secrets
+
+If the app fails to import, check Cloud logs: mismatched commits (e.g. `app.py` importing a symbol removed from `modules/ui_helpers.py`) cause immediate `ImportError` on boot.
 
 ---
 
@@ -144,7 +153,7 @@ If the earnings calendar endpoint returns no rows, the app falls back to the pri
 
 - Yahoo Finance may throttle or block symbols on Streamlit Cloud (more liberal locally)
 - Config persistence is local-only; Cloud deploys reset the filesystem
-- Streamlit Cloud cold starts and rapid reruns can surface transient `missing ScriptRunContext` warnings in logs; these are typically non-fatal
+- You may still see occasional `missing ScriptRunContext` lines in Cloud logs from threads outside the app’s pool (Streamlit labels many as ignorable in bare mode); parallel cached fetches use `submit_with_script_ctx` to minimize this
 - Micro-cap tickers (e.g. BMNR) may lack options chains; the desk falls back gracefully
 
 ---
