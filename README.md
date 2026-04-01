@@ -16,8 +16,8 @@ The dashboard answers one question: **"What should I do right now?"**
 - **Gold Zone** — dynamic institutional anchor fusing Volume Profile POC, Fib 61.8%, 200-SMA, Gann Sq9
 - **Feature-Flagged Institutional Mode** — one-click toggle between retail and quant engines
 - **A/B Quant Diagnostics** — institutional vs retail Quant Edge delta shown live
-- **Rolling Edge Capture Log** — session ledger of ticker-level deltas with summary strip and CSV export
-- **Market Edge Matrix** — real-time treemap of latest ticker scans, sized by Quant score and colored by Quant-Retail delta
+- **Rolling Edge Capture Log** — scans the **entire watchlist in parallel** (thread pool + `ScriptRunContext`), refreshes on a **`@st.fragment` timer (~90s)** so the rest of the page stays responsive, sorts rows by **Quant** score, adds a **Preview** line per symbol (same desk read as the headline Quant gauge: prime / decent / stand down), summary metrics, treemap hover with preview text, and CSV export
+- **Market Edge Matrix** — treemap inside the log, sized by Quant score and colored by Quant−Retail delta across all watchlist names
 - **De-correlated Quant Edge Score** — retail path uses five orthogonal dimensions (Trend, Momentum, Volume, Volatility, Structure)
 - **Institutional Quant Edge Path** — HMM regime detection + Fractional Differentiation synthesis
 - **Volatility Skew Surface** — put vs call IV smile chart with spot marker for fast tail-risk context
@@ -63,6 +63,7 @@ cashflow-trader/
 
 - Background `ThreadPoolExecutor` workers that call `@st.cache_data` need Streamlit’s `ScriptRunContext` on that thread. `make_script_ctx_pool()` plus `submit_with_script_ctx()` capture context when work is submitted and re-attach it at the start of each task (initializer-only attachment is not always enough after cache layers).
 - The technical chart lives in `@st.fragment`; quant vs retail mode is passed via `st.session_state` (not extra fragment kwargs) so deploys and fragment reruns stay compatible. Stale kwargs from older sessions are ignored safely on the fragment signature.
+- The **Rolling Edge Capture Log** uses a separate `@st.fragment(run_every=…)` that recomputes retail vs quant scores for every watchlist ticker; VIX and institutional mode are read from `st.session_state` (`_cf_vix_snapshot`, `_cf_use_quant_models`) so it stays aligned with the active ticker context.
 
 ---
 
@@ -142,7 +143,7 @@ If the earnings calendar endpoint returns no rows, the app falls back to the pri
 |---|---|
 | Corrado-Su Expansion | Adjust option pricing for skew and fat tails beyond Gaussian Black-Scholes assumptions |
 | Fractional Differentiation (FFD) | Improve stationarity while preserving memory in time-series dynamics |
-| HMM Regime Detection | Classify latent volatility regimes probabilistically from returns + rolling volatility |
+| HMM Regime Detection | Classify latent volatility regimes probabilistically (subsampled daily features, diagonal covariance, bounded EM iterations) to keep Cloud runs fast and logs quiet |
 | Continuous Kelly (Merton) | Compute variance-aware continuous-time allocation with optional half-Kelly |
 | OTM IV Skew Regime Ratio | Classify market-maker fear/greed posture from put-vs-call OTM implied volatility |
 | Vectorized Historical Edge Proxy | Backtest threshold/hold edge signals over daily history without UI lockups |
