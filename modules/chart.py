@@ -74,7 +74,8 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
                 show_ichi=False, show_super=False, diamonds=None, gold_zone=None,
                 mobile_layout=False, em_lower=None, em_upper=None, em_expiry=None,
                 em_iv_pct=None, em_days_to_expiry=None, gamma_flip_price=None,
-                earnings_days_to=None, iv_overlay_symbol=None):
+                earnings_days_to=None, iv_overlay_symbol=None,
+                shadow_lower=None, shadow_upper=None, opex_pin_price=None):
     """Build four separate figures: price (+ overlays), volume, RSI, MACD — easier to read than one stacked chart.
 
     When ``mobile_layout`` is True (narrow UA / phone), the price panel drops the legend, tightens margins,
@@ -368,6 +369,78 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
             if _cone_done:
                 _em_full += " Filled yellow cone extends to the active expiry."
             _overlay_rows.append(("#eab308", "Expected move (1σ)", _em_full))
+    except Exception:
+        pass
+
+    try:
+        _sl = _su = None
+        if shadow_lower is not None and shadow_upper is not None:
+            _sl, _su = float(shadow_lower), float(shadow_upper)
+        if (
+            _sl is not None
+            and _su is not None
+            and np.isfinite(_sl)
+            and np.isfinite(_su)
+            and _su > _sl
+        ):
+            fig_p.add_hrect(
+                y0=_sl,
+                y1=_su,
+                fillcolor="rgba(168, 85, 247, 0.14)",
+                line_width=0,
+                layer="below",
+            )
+            _sh_w = _su - _sl
+            _cmp = ""
+            try:
+                if (
+                    em_lower is not None
+                    and em_upper is not None
+                    and np.isfinite(float(em_lower))
+                    and np.isfinite(float(em_upper))
+                ):
+                    _iv_w = float(em_upper) - float(em_lower)
+                    if _iv_w > 0:
+                        if _sh_w < 0.88 * _iv_w:
+                            _cmp = " Shadow band narrower than IV 1σ — options may be overpricing move risk."
+                        elif _sh_w > 1.12 * _iv_w:
+                            _cmp = " Shadow band wider than IV 1σ — whale prints suggest break potential."
+                        else:
+                            _cmp = " Shadow vs IV band broadly aligned."
+            except Exception:
+                _cmp = ""
+            _overlay_rows.append(
+                (
+                    "#a855f7",
+                    "Shadow move (whale)",
+                    f"Purple band: ~70% of last 30d whale-volume (Z>2) close range (${_sl:,.0f}–${_su:,.0f}).{_cmp}",
+                )
+            )
+    except Exception:
+        pass
+
+    try:
+        if opex_pin_price is not None and np.isfinite(float(opex_pin_price)):
+            _op = float(opex_pin_price)
+            fig_p.add_hline(
+                y=_op,
+                line_dash="dot",
+                line_color="rgba(244, 114, 182, 0.95)",
+                line_width=1.6,
+                opacity=0.9,
+                annotation_text=f"Pin ${_op:.0f}",
+                annotation_position=_struct_label_side,
+                annotation_font=dict(size=9, color="#f472b6", family="JetBrains Mono"),
+                annotation_yshift=12,
+                **_struct_nudge,
+            )
+            _overlay_rows.append(
+                (
+                    "#f472b6",
+                    "Predicted OpEx pin",
+                    f"GEX gamma-wall blend with Θ/Γ magnet (${_op:,.0f}). Not a guarantee — positioning artifact.",
+                )
+            )
     except Exception:
         pass
 

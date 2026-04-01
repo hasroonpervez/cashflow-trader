@@ -1,12 +1,12 @@
-# CashFlow Command Center v21.0 — *Free Edition · Adaptive Intelligence*
+# CashFlow Command Center v22.0 — *Free Edition · Predictive Analytics*
 
 **Single-screen options income desk that grew from a basic multi-ticker scanner into a portfolio-aware command center.**
 
-**v21.0** upgrades the flow stack to **adaptive risk**: **volatility-adjusted whale Z-score** windows (**10 / 30 / 40** sessions from relative vol + path **efficiency**), **FFD return** innovations for **Pearson correlation** (watchlist heatmap, cluster guard, **`_simple_corr_haircut`**), **HMM** features on **FFD diff + rolling vol**, **synthetic GEX** with **1.2×** gamma weight on strikes aligned to **HVN** nodes, and fixed-width **`TA.apply_ffd`** (**≤50** lags, vectorized) for responsive UI. **v20.0** pillars remain: **cluster guard**, **Sentinel Ledger**, **$50k allocator**, **1h** matrix cache, **GEX / gamma flip**, **NLP** bias, **MC PoP**, **EM** rails, Kelly governors. **Data: Yahoo Finance only.**
+**v22.0** adds **predictive** layers on top of v21: **`Opt.predict_opex_pin`** (GEX gamma-wall + **Θ/Γ** magnetic blend), **`TA.get_shadow_move`** (70% whale-volume close band vs IV **Expected Move**, purple chart zone), **Bayesian-style news weighting** (forward **guidance / outlook / forecast** phrases outweigh trailing **beat / miss** in `Sentiment.analyze_news_bias`), and **Sentinel Ledger** columns **Dist. to pin %** + **Edge realization %** (Quant Edge vs `qs_at_entry`). **v21** adaptive stack (FFD correlation, adaptive whale Z, HVN GEX) remains. **Data: Yahoo Finance only.**
 
 ---
 
-## Evolution: v14 Basic Scanner → v21 Adaptive Intelligence
+## Evolution: v14 Basic Scanner → v22 Predictive Analytics
 
 | Era | Theme | You gain |
 |-----|--------|-----------|
@@ -15,9 +15,25 @@
 | **v17–v18** | Risk & liquidity | Expected Move on chart, Θ/Γ, **GEX** and **gamma flip** in Gold, Diamonds, scanner |
 | **v19** | Flow & language | **Volume Z-score** whale scaling, **NLP** bias on desk + scanner **Flow / Bias** |
 | **v20.0** | Portfolio | **Correlation heatmap**, **cluster penalty** across Blues, **Kelly-style allocator**, **Sentinel Ledger** |
-| **v21.0** | Adaptive quant | **Adaptive whale radar**, **FFD correlation + HMM**, **HVN-weighted GEX**, **v21.0 · ADAPTIVE INTELLIGENCE** branding |
+| **v21.0** | Adaptive quant | **Adaptive whale radar**, **FFD correlation + HMM**, **HVN-weighted GEX**, **ADAPTIVE INTELLIGENCE** branding |
+| **v22.0** | Predictive | **OpEx pin**, **Shadow EM**, **Bayesian NLP nuance**, **Sentinel alpha columns**, **v22.0 · PREDICTIVE ANALYTICS** |
 
-The Market Scanner still ranks the watchlist, but v20+ treats the list as a **portfolio**: overlap and co-movement inform both **signal scores** and **sizing**. **v21** sharpens that read with **memory-aware** correlations and a **regime-aware** volume baseline.
+The Market Scanner still ranks the watchlist, but v20+ treats the list as a **portfolio**: overlap and co-movement inform both **signal scores** and **sizing**. **v21** sharpens correlations and flow baselines; **v22** projects **pin risk**, **liquidity-implied range**, and **edge retention** on tracked legs.
+
+---
+
+## What’s new in v22.0 (Predictive Analytics)
+
+- **`Opt.predict_opex_pin(gex_series, theta_gamma_ratio, spot_price)`** — Locates the **gamma wall** (max **|GEX|** near spot when strong enough vs global), blends toward spot with weight **`clip(Θ/Γ / 2, 0.42, 0.97)`** so high decay-efficiency pins **stick**. Session: **`_cf_opex_pin`**, map **`_cf_opex_pin_map`** per ticker for the ledger.
+- **`TA.get_shadow_move(df, volume_z_score=None, lookback=30, whale_mass=0.70)`** — Sorts whale bars (**Z > 2**) by close; **central 70%** of whale **volume** defines **`low` / `high`**. Chart compares band width to IV **1σ** rails (overlay copy: narrow → vol rich; wide → break risk).
+- **`Sentiment.analyze_news_bias`** — Sorted **phrase lexicon** (longest first), **forward** weight **1.45×** vs **trailing** **0.82×**, neutral **prior**, headline-level evidence then **`tanh`** aggregate (mixed “miss + raised guidance” tilts bullish when forward hits).
+- **Chart** — Purple **`hrect`** shadow band; pink dotted **OpEx pin** line; legend rows in overlay key.
+- **Sentinel Ledger** — **`qs_at_entry`** on **Track Trade**; table columns **Dist. to pin %**, **Edge realization %**; metric **Edge realization (avg)** for active-ticker rows.
+- **UI** — Caption *Predictive Pinning, Bayesian News Nuance, & Shadow Liquidity Architecture.*; badge **v22.0 · PREDICTIVE ANALYTICS**.
+
+### Pinning theory (GEX, Θ/Γ, and “magnets”)
+
+Dealers hedge option **gamma** by trading the underlying. Near **expiry**, net **GEX** often concentrates at strikes with heavy **open interest**, creating a **gamma wall**: price can be **pinned** as hedging flow absorbs impulse moves. The **flip** level (zero net GEX) marks where that behavior changes sign. **Theta / gamma** on short-premium structures measures **decay versus convexity** — when **Θ/Γ** is high, daily premium burn dominates localized gamma risk, and the model treats the **wall** as a **stronger attractor** (`predict_opex_pin` raises the weight on the wall strike). This is a **heuristic** desk overlay, not a guarantee of settlement at a strike.
 
 ---
 
@@ -27,7 +43,7 @@ The Market Scanner still ranks the watchlist, but v20+ treats the list as a **po
 - **`TA.apply_ffd`** — Fixed-width fractional differentiation (**default `d=0.4`**, **≤50** weight lags, threshold trim, **`sliding_window_view`** dot-product). **`frac_diff_ffd`** delegates here for a bounded, UI-safe path.
 - **`TA.get_correlation_matrix` / `ffd_returns_from_closes`** — Pearson ρ on **first differences of FFD levels** per ticker (inner-joined dates, same **`lookback_days`** tail). Watchlist **haircut** and **Portfolio Risk** expander use this panel (with **log-return** fallback only if FFD alignment is too thin).
 - **`Opt.calc_gamma_exposure(..., hvn_prices=)`** — Strikes within a **liquidity band** of any **HVN** price get **1.2×** weight on **gamma × OI** before strike aggregation (desk **`pages.py`** path + **scanner** both pass **`TA.get_volume_nodes`**).
-- **UI** — Caption *Adaptive Risk Oversight, FFD Memory, & Synthetic GEX Architecture.*; badge **v21.0 · ADAPTIVE INTELLIGENCE**.
+- **UI** — Caption *(historical v21)* *Adaptive Risk Oversight, FFD Memory, & Synthetic GEX Architecture.*; badge superseded by **v22.0** above.
 
 ### Stationarity vs. memory (why FFD over plain returns)
 
@@ -51,11 +67,11 @@ Integer differentiation (**d = 1**, e.g. simple log-returns) pushes series towar
 - **Whale bonus (Blue Diamond)** — Blue **composite** score adds **+1** when **Z > 2.0** and **+2** when **Z > 3.0** on the signal bar (stacked with GEX and liquidity magnet). Missing or short volume history skips the bonus safely.
 - **Chart: institutional footprints** — On the **volume** panel, bars with **Z > 2.0** get **cyan (#00FFFF)** markers with hover **Institutional Flow (Z-Score: X.XX)**.
 - **News headlines (cached)** — `fetch_news_headlines(symbol)` stays at **`@st.cache_data(ttl=3600)`** (one hour) for Yahoo rate limits; used by the scanner, trade stack, diamond card, and NLP bias.
-- **NLP news bias** — `Sentiment.analyze_news_bias(headlines)` scores titles with a **keyword lexicon** into **−1.0 … +1.0** (bearish to bullish). Empty or unclassified headlines return **0.0** (neutral).
+- **NLP news bias** — `Sentiment.analyze_news_bias(headlines)` uses a **weighted lexicon** (v22: forward vs trailing tiers) into **−1.0 … +1.0**. Empty or unclassified headlines return **0.0** (neutral).
 - **UI: trade stack** — **News Bias (NLP)** colors the **aggregate score** and **News Sentiment** line: **emerald (#10b981)** if score **> 0.3**, **rose (#ef4444)** if **< −0.3**, else **slate (#94a3b8)**. **Institutional Flow** remains Normal / High Accumulation from the whale flag. **Why This Diamond?** repeats flow and sentiment when a signal is active.
 - **Scanner: Flow / Bias** — Column help documents the **Whale Alert (Z-Score)** definition. Rows show **🐋 WHALE** when the latest bar has **Z > 2.0** and **📈 BULLISH NEWS** / **📉 BEARISH NEWS** when bias crosses **±0.15**; otherwise **—** when data is missing.
 - **Chart: IV impact** — When **next earnings** is within **14 days**, the price panel annotates **Avg. Post-Earnings IV Crush** using a **realized-volatility proxy** averaged over up to **four prior** earnings cycles from Yahoo `earnings_dates`. If **IV rank proxy ≥ 90** or spot **IV** exceeds the **90th percentile** of **20-day realized vol** over the last year, the chart adds **⚠️ VEGA RISK: IV Crush likely**.
-- **Branding (v19)** — Page caption *Institutional Flow Tracking & NLP Sentiment Architecture.*; header badge **v19** (superseded by **v21.0** branding above).
+- **Branding (v19)** — Page caption *Institutional Flow Tracking & NLP Sentiment Architecture.*; header badge **v19** (superseded by **v22.0** branding above).
 
 ---
 
@@ -94,7 +110,7 @@ Integer differentiation (**d = 1**, e.g. simple log-returns) pushes series towar
 
 ---
 
-## Quant & desk history (v15.x → v21.0)
+## Quant & desk history (v15.x → v22.0)
 
 - **HMM regimes (FFD)** — Gaussian HMM trains on **FFD-level differences** plus short rolling volatility (stationary features with memory); `fit` / `predict_proba` stay inside `try/except` so singular covariance cases do not crash the app.
 - **Scanner threading** — Rolling Edge Capture and other modules still use a **bounded** pool with `submit_with_script_ctx`. **v20.0** runs the **full watchlist Diamond scan sequentially** so **cluster penalties** see a deterministic **peer-Blue** ordering (correlation context is shared across tickers in one pass).
@@ -144,10 +160,10 @@ cashflow-trader/
     ├── __init__.py
     ├── config.py             # Config persistence, defaults, st.secrets overlay
     ├── data.py               # yfinance fetchers, retry/backoff, fetch_stock cache (300s), macro
-    ├── ta.py                 # TA class — indicators, **`apply_ffd` (≤50 lags)**, volume profile, **get_volume_nodes (HVN)**, **adaptive `get_dark_pool_proxy`**, **`get_correlation_matrix` (90D FFD-return ρ, inner join)**
-    ├── options.py            # Black-Scholes, Corrado-Su, EV, Kelly, Quant Edge, Hurst-adaptive Diamonds, **GEX / gamma flip**, **cluster-aware Diamonds**, **`Opt.portfolio_allocation`**, **`watchlist_correlation_matrix_cached` (3600s)**, **MC PoP**, **`PortfolioRisk.build_correlation_matrix` → TA**
-    ├── sentiment.py          # Sentiment + HMM (FFD features), CC sim, Alerts, QuantBacktest engine
-    ├── chart.py              # Four-panel Plotly chart builder + skew surface + **correlation heatmap (RdBu_r)** + **HVN / Z-score / EM / gamma flip**
+    ├── ta.py                 # TA class — indicators, **`apply_ffd`**, **adaptive `get_dark_pool_proxy`**, **`get_shadow_move` (whale band)**, **`get_correlation_matrix`**, HVN / volume profile
+    ├── options.py            # Black-Scholes, Corrado-Su, EV, Kelly, Quant Edge, **GEX / gamma flip / `predict_opex_pin`**, Diamonds, **`Opt.portfolio_allocation`**, **`watchlist_correlation_matrix_cached`**, **MC PoP**, **`PortfolioRisk`**
+    ├── sentiment.py          # **Bayesian-style `analyze_news_bias`**, HMM (FFD), CC sim, Alerts, QuantBacktest
+    ├── chart.py              # Price / volume / RSI / MACD + **Shadow move (purple)** + **OpEx pin** + HVN / EM / gamma flip / correlation heatmap
     ├── ui_helpers.py         # Sparklines, glance cards, fragments, mode badge, DataFrame styling, **`sentinel_ledger_metrics`**, **expected_move_safety_html**, **Θ/Γ desk line**
     ├── pages.py              # Optional page shell + parallel context build (uses threading helper); **options → GEX → fused Gold → confluence → diamonds**
     ├── streamlit_threading.py # Thread pools with ScriptRunContext re-attach per task
@@ -253,7 +269,8 @@ If the earnings calendar endpoint returns no rows, the app falls back to the pri
 | Corrado-Su Expansion | Adjust option pricing for skew and fat tails beyond Gaussian Black-Scholes assumptions |
 | Monte Carlo PoP | Short-premium probability of profit under GBM; antithetic variates; seed **42**; optional dividend yield and skew tilt on paths |
 | Expected Move (1-σ) | `Spot × (IV%/100) × √(DTE/365.25)` for implied range context (chart + desk + scanner) |
-| **GEX & Gamma Flip** | **Vectorized gamma × OI** with dealer sign (calls **+**, puts **−**); optional **HVN liquidity weight (1.2×)**; cumulative strike GEX crosses define **zero-gamma** price for chart, scanner regime, Gold Zone, and Diamond modifiers |
+| **GEX & Gamma Flip** | **Vectorized gamma × OI** with dealer sign (calls **+**, puts **−**); optional **HVN liquidity weight (1.2×)**; cumulative strike GEX crosses define **zero-gamma**; **`predict_opex_pin`** blends **gamma wall** with **Θ/Γ** magnet |
+| **Shadow Expected Move** | **`TA.get_shadow_move`**: central **70%** of whale-volume closes vs IV **1σ** band — chart insight when liquidity range diverges from options-implied width |
 | Fractional Differentiation (FFD) | Improve stationarity while preserving memory in time-series dynamics |
 | HMM Regime Detection | Classify latent volatility regimes on **FFD diff + rolling vol** features (subsampled, diagonal covariance, bounded EM iterations); guarded against numerical failures |
 | Continuous Kelly (Merton) | Compute variance-aware continuous-time allocation with optional half-Kelly |

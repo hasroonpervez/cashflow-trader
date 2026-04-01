@@ -24,6 +24,69 @@ _HMM_MAX_ROWS = 200
 _HMM_N_ITER = 18
 _HMM_TOL = 0.15
 
+# (phrase, sentiment +1 bull / -1 bear, tier: forward-looking vs trailing)
+_NEWS_LEXICON = [
+    # Forward — higher Bayesian weight (guidance / outlook dominates mixed prints)
+    ("raises full-year guidance", +1, "forward"),
+    ("raises guidance", +1, "forward"),
+    ("raised guidance", +1, "forward"),
+    ("lifting guidance", +1, "forward"),
+    ("strong guidance", +1, "forward"),
+    ("upbeat guidance", +1, "forward"),
+    ("forecast beat", +1, "forward"),
+    ("forecast beats", +1, "forward"),
+    ("outlook raised", +1, "forward"),
+    ("outlook improves", +1, "forward"),
+    ("positive outlook", +1, "forward"),
+    ("bullish outlook", +1, "forward"),
+    ("revenue forecast", +1, "forward"),
+    ("eps forecast", +1, "forward"),
+    ("forward guidance", +1, "forward"),
+    ("next quarter outlook", +1, "forward"),
+    ("fiscal year outlook", +1, "forward"),
+    ("raises outlook", +1, "forward"),
+    ("raises revenue outlook", +1, "forward"),
+    ("accelerating growth", +1, "forward"),
+    ("pipeline strong", +1, "forward"),
+    ("record backlog", +1, "forward"),
+    ("lowers guidance", -1, "forward"),
+    ("cuts guidance", -1, "forward"),
+    ("weak outlook", -1, "forward"),
+    ("cautious outlook", -1, "forward"),
+    ("disappointing guidance", -1, "forward"),
+    # Trailing — lower weight (backward-looking print)
+    ("missed earnings", -1, "trailing"),
+    ("missed estimates", -1, "trailing"),
+    ("misses estimates", -1, "trailing"),
+    ("earnings miss", -1, "trailing"),
+    ("revenue miss", -1, "trailing"),
+    ("eps miss", -1, "trailing"),
+    ("beat earnings", +1, "trailing"),
+    ("beats estimates", +1, "trailing"),
+    ("earnings beat", +1, "trailing"),
+    ("revenue beat", +1, "trailing"),
+    ("top line beat", +1, "trailing"),
+    ("bottom line beat", +1, "trailing"),
+    ("surprise profit", +1, "trailing"),
+    # Generic (medium tier — trailing-style weight)
+    ("upgrade", +1, "trailing"),
+    ("downgrade", -1, "trailing"),
+    ("bullish", +1, "trailing"),
+    ("bearish", -1, "trailing"),
+    ("surge", +1, "trailing"),
+    ("plunge", -1, "trailing"),
+    ("rally", +1, "trailing"),
+    ("selloff", -1, "trailing"),
+    ("bankrupt", -1, "trailing"),
+    ("investigation", -1, "trailing"),
+    ("lawsuit", -1, "trailing"),
+    ("strong demand", +1, "trailing"),
+    ("weak demand", -1, "trailing"),
+]
+_NEWS_LEXICON.sort(key=lambda x: -len(x[0]))
+
+_FORWARD_W, _TRAIL_W = 1.45, 0.82
+
 
 class QuantSentiment:
     @staticmethod
@@ -83,40 +146,37 @@ class Sentiment:
     @staticmethod
     def analyze_news_bias(headlines):
         """
-        Lightweight keyword NLP on headline titles: aggregate score in [-1, 1].
-        Empty or invalid input returns 0.0 (neutral).
+        Bayesian-style weighted lexicon: neutral prior, **forward** phrases (guidance, outlook,
+        forecast) outweigh **trailing** prints (beat/miss). Mixed headlines resolve toward
+        stronger forward signals. Score in ``[-1, 1]``; empty input → ``0.0``.
         """
         if not headlines:
             return 0.0
-        bullish_kw = (
-            "upgrade", "beat", "growth", "surge", "record", "bullish", "strong", "profit",
-            "raises guidance", "raises outlook", "outperform", "buy", "breakthrough", "expansion",
-            "partnership", "approval", "innovation", "momentum", "soar", "rally", "gain",
-        )
-        bearish_kw = (
-            "downgrade", "miss", "investigation", "lawsuit", "sec", "recall", "layoff",
-            "bankrupt", "warning", "weak", "bearish", "selloff", "plunge", "crash", "cut",
-            "cuts guidance", "lowers guidance", "underperform", "sell", "fraud", "probe",
-            "concern", "decline", "loss", "disappoint", "slump",
-        )
-        total = 0.0
-        n = 0
+        prior = 0.0
+        headline_scores = []
         for h in headlines:
             if isinstance(h, dict):
                 t = str(h.get("title") or "")
             else:
                 t = str(h)
             t_low = t.lower()
-            b = sum(1 for k in bullish_kw if k in t_low)
-            s = sum(1 for k in bearish_kw if k in t_low)
-            raw = float(b - s)
-            if b == 0 and s == 0:
+            if not t_low.strip():
                 continue
-            n += 1
-            total += np.tanh(raw / 2.0)
-        if n == 0:
+            work = t_low
+            log_evidence = 0.0
+            for phrase, direction, tier in _NEWS_LEXICON:
+                if phrase in work:
+                    w = _FORWARD_W if tier == "forward" else _TRAIL_W
+                    log_evidence += float(direction) * w
+                    work = work.replace(phrase, " ", 1)
+            if abs(log_evidence) < 1e-9:
+                continue
+            headline_scores.append(float(np.tanh(log_evidence / 2.8)))
+        if not headline_scores:
             return 0.0
-        return float(np.clip(total / n, -1.0, 1.0))
+        combined = prior + float(np.sum(headline_scores))
+        denom = float(len(headline_scores))
+        return float(np.clip(np.tanh(combined / max(1.0, denom)), -1.0, 1.0))
 
     @staticmethod
     def fear_greed(df, vix_val=None):

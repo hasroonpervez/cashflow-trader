@@ -219,8 +219,23 @@ def build_context(ticker: str, cfg: dict) -> Optional[DashContext]:
                     hvn_prices=_hvn_px or None,
                 )
                 ctx.gamma_flip = Opt.find_gamma_flip(_gex)
+                _tg_pin = None
+                for _leg in (ctx.bluf_cc, ctx.bluf_csp):
+                    if isinstance(_leg, dict) and _leg.get("theta_gamma_ratio") is not None:
+                        try:
+                            _tg_pin = float(_leg["theta_gamma_ratio"])
+                            if np.isfinite(_tg_pin):
+                                break
+                        except (TypeError, ValueError):
+                            pass
+                _pin = Opt.predict_opex_pin(_gex, _tg_pin, spot_price=float(ctx.price))
+                st.session_state["_cf_opex_pin"] = _pin
+                _pmap = dict(st.session_state.get("_cf_opex_pin_map") or {})
+                _pmap[str(ctx.ticker).strip().upper()] = _pin
+                st.session_state["_cf_opex_pin_map"] = _pmap
     except Exception:
         ctx.gamma_flip = None
+        st.session_state["_cf_opex_pin"] = None
 
     ctx.gold_zone_price, ctx.gold_zone_components = calc_gold_zone(
         df, ctx.df_wk, gamma_flip_price=ctx.gamma_flip
@@ -253,6 +268,12 @@ def build_context(ticker: str, cfg: dict) -> Optional[DashContext]:
 
     # Chart mood
     ctx.chart_mood = "bull" if ctx.struct == "BULLISH" else ("bear" if ctx.struct == "BEARISH" else "neutral")
+
+    try:
+        _sh = TA.get_shadow_move(df)
+        st.session_state["_cf_shadow_move"] = _sh
+    except Exception:
+        st.session_state["_cf_shadow_move"] = None
 
     return ctx
 

@@ -1197,6 +1197,58 @@ class Opt:
             return None
 
     @staticmethod
+    def predict_opex_pin(gex_series, theta_gamma_ratio=None, spot_price=None):
+        """Predicted OpEx **pin**: blend spot with the **gamma wall** (strike of max |dealer GEX|).
+
+        Higher **Θ/Γ** (decay vs gamma) increases the magnetic weight on the wall — pins are more
+        attractive when short premium dominates dealer convexity. Returns a single price or ``None``.
+        """
+        try:
+            if gex_series is None or getattr(gex_series, "empty", True):
+                return None
+            s = pd.to_numeric(gex_series, errors="coerce").dropna()
+            if s.empty:
+                return None
+            absv = s.abs()
+            if absv.max() <= 0 or not np.isfinite(float(absv.max())):
+                return None
+            wall = float(absv.idxmax())
+            idx = np.asarray(s.index, dtype=float)
+            idx = idx[np.isfinite(idx)]
+            S = float(spot_price) if spot_price is not None and np.isfinite(float(spot_price)) else float(np.nanmedian(idx))
+            if not np.isfinite(S) or S <= 0:
+                S = wall
+            try:
+                tg = float(theta_gamma_ratio) if theta_gamma_ratio is not None else 1.0
+            except (TypeError, ValueError):
+                tg = 1.0
+            if not np.isfinite(tg):
+                tg = 1.0
+            tg = float(np.clip(tg, 0.12, 12.0))
+            gmax = float(absv.max())
+            if S > 0:
+                near_best = None
+                near_val = -1.0
+                for k in s.index:
+                    try:
+                        fk = float(k)
+                    except (TypeError, ValueError):
+                        continue
+                    if abs(fk - S) / S <= 0.12:
+                        av = float(absv.loc[k])
+                        if av > near_val:
+                            near_val = av
+                            near_best = fk
+                if near_best is not None and near_val >= 0.25 * gmax:
+                    wall = float(near_best)
+            # Magnetic weight: higher Θ/Γ → trust gamma wall more (pin sticks).
+            w = float(np.clip(tg / 2.0, 0.42, 0.97))
+            pin = w * wall + (1.0 - w) * S
+            return float(pin) if np.isfinite(pin) else None
+        except Exception:
+            return None
+
+    @staticmethod
     def calc_expected_move(price, iv, days_to_expiry):
         """Calculates the 1-Standard Deviation Implied Move (scalar or numpy-vectorized)."""
         try:

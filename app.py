@@ -1,6 +1,6 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  CASHFLOW COMMAND CENTER v21.0 FREE EDITION · ADAPTIVE INTELLIGENCE       ║
+║  CASHFLOW COMMAND CENTER v22.0 FREE EDITION · PREDICTIVE ANALYTICS        ║
 ║  Modular architecture: same UI, same logic, clean separation.           ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 """
@@ -16,7 +16,7 @@ if _app_root not in sys.path:
 import streamlit as st
 
 st.set_page_config(
-    page_title="CashFlow Command Center v21.0",
+    page_title="CashFlow Command Center v22.0",
     page_icon="💰",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -105,6 +105,7 @@ for _import_try in range(_IMPORT_KEYERROR_RETRIES):
                 _iv_rank_qualitative_words, _iv_rank_pill_html,
                 render_mode_badge,
                 sentinel_ledger_metrics,
+                sentinel_ledger_table_rows,
                 earnings_runway_spark_series,
                 _explain, _section, _mini_sparkline, _glance_sparkline_svg,
                 _glance_metric_card, _render_html_block, _parse_watchlist_string,
@@ -158,7 +159,7 @@ def main():
 
     # ── Watchlist editor (must run before Mission Control so sb_scanner is committed same run)
     _wl_expanded = bool(st.session_state.pop("_open_watchlist_editor", False))
-    st.caption("Adaptive Risk Oversight, FFD Memory, & Synthetic GEX Architecture.")
+    st.caption("Predictive Pinning, Bayesian News Nuance, & Shadow Liquidity Architecture.")
     def _persist_watchlist_text_callback():
         raw = st.session_state.get("sb_scanner", "")
         w = _parse_watchlist_string(raw)
@@ -537,7 +538,7 @@ def main():
         "<div style='margin:2px 0 10px 0'>"
         "<span style='font-size:0.72rem;color:#c4b5fd;padding:3px 10px;border-radius:6px;"
         "border:1px solid rgba(139,92,246,0.45);background:rgba(76,29,149,0.22);font-weight:600;letter-spacing:0.04em'>"
-        "v21.0 · ADAPTIVE INTELLIGENCE</span></div>",
+        "v22.0 · PREDICTIVE ANALYTICS</span></div>",
         unsafe_allow_html=True,
     )
     qs_color = ctx.qs_color; qs_status = ctx.qs_status
@@ -1785,7 +1786,7 @@ def main():
                                         "MC PoP %": st.column_config.NumberColumn(
                                             "MC PoP %",
                                             format="%.1f%%",
-                                            help="10k antithetic simulations — v21.0 Adaptive Intelligence",
+                                            help="10k antithetic simulations — v22.0 Predictive Analytics",
                                         ),
                                     },
                                 )
@@ -1833,6 +1834,7 @@ def main():
                                         "expiry": str(sel_exp)[:10],
                                         "dte_at_entry": int(dte),
                                         "contracts": int(nc_s),
+                                        "qs_at_entry": float(qs),
                                     }
                                 )
                                 st.rerun()
@@ -1886,6 +1888,7 @@ def main():
                                         "expiry": str(sel_exp)[:10],
                                         "dte_at_entry": int(dte),
                                         "contracts": 1,
+                                        "qs_at_entry": float(qs),
                                     }
                                 )
                                 st.rerun()
@@ -2672,7 +2675,14 @@ def main():
                     "No tracked trades yet. Use **Track Trade** on the optimal Covered Call or Cash Secured Put "
                     "card in **Cashflow & strikes**."
                 )
-            _ldf = pd.DataFrame(_led)
+            _pin_m = st.session_state.get("_cf_opex_pin_map") or {}
+            _rows, _v22 = sentinel_ledger_table_rows(
+                _led,
+                active_ticker=str(ticker),
+                active_qs=float(qs),
+                pin_map=_pin_m,
+            )
+            _ldf = pd.DataFrame(_rows)
             streamlit_show_dataframe(
                 _ldf,
                 use_container_width=True,
@@ -2682,13 +2692,20 @@ def main():
                 selection_mode=[],
             )
             _m = sentinel_ledger_metrics(_led, rfr=float(rfr))
-            m1, m2, m3 = st.columns(3)
+            m1, m2, m3, m4 = st.columns(4)
             with m1:
                 st.metric("Total portfolio Δ (equiv. shares)", f"{_m['total_delta']:,.2f}")
             with m2:
                 st.metric("Total Θ / day (desk income)", f"${_m['total_theta_day']:,.2f}")
             with m3:
                 st.metric("Unrealized P&L (model)", f"${_m['unrealized_pnl']:,.2f}")
+            with m4:
+                _er = _v22.get("avg_edge_realization")
+                st.metric(
+                    "Edge realization (avg, active tickers)",
+                    f"{_er:.1f}%" if _er is not None else "—",
+                    help="Current Quant Edge vs **qs_at_entry** for ledger rows on the active symbol (capped at 150%).",
+                )
             if st.button("Clear Sentinel Ledger", key="cf_ledger_clear"):
                 st.session_state["_cf_ledger"] = []
                 st.rerun()

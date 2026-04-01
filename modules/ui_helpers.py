@@ -171,6 +171,77 @@ def sentinel_ledger_metrics(ledger: list, rfr: float = 0.045) -> dict:
     }
 
 
+def sentinel_ledger_table_rows(
+    ledger: list,
+    *,
+    active_ticker: str,
+    active_qs: float,
+    pin_map: Optional[dict] = None,
+):
+    """v22: enrich ledger rows with **Distance to pin %** and **Edge realization %** (active ticker vs entry QS)."""
+    pin_map = {str(k).strip().upper(): v for k, v in (pin_map or {}).items()}
+    at = str(active_ticker or "").strip().upper()
+    try:
+        aq = float(active_qs)
+    except (TypeError, ValueError):
+        aq = float("nan")
+    cache: dict = {}
+
+    def _spot(sym: str) -> Optional[float]:
+        if sym in cache:
+            return cache[sym]
+        try:
+            df_s = fetch_stock(sym, "3mo", "1d")
+            if df_s is not None and not df_s.empty and "Close" in df_s.columns:
+                v = float(pd.to_numeric(df_s["Close"], errors="coerce").iloc[-1])
+                cache[sym] = v if np.isfinite(v) else None
+            else:
+                cache[sym] = None
+        except Exception:
+            cache[sym] = None
+        return cache[sym]
+
+    rows = []
+    er_vals = []
+    for r in ledger:
+        if not isinstance(r, dict):
+            continue
+        d = dict(r)
+        sym = str(d.get("ticker", "")).strip().upper()
+        px = _spot(sym) if sym else None
+        pin = pin_map.get(sym)
+        if px is not None and pin is not None:
+            try:
+                pf = float(pin)
+                if np.isfinite(pf) and pf > 0:
+                    d["Dist. to pin %"] = round((float(px) / pf - 1.0) * 100.0, 2)
+                else:
+                    d["Dist. to pin %"] = None
+            except (TypeError, ValueError):
+                d["Dist. to pin %"] = None
+        else:
+            d["Dist. to pin %"] = None
+        qe = d.get("qs_at_entry")
+        if sym == at and qe is not None and np.isfinite(aq):
+            try:
+                qef = float(qe)
+                if qef > 1e-6:
+                    er = min(150.0, max(0.0, (aq / qef) * 100.0))
+                    d["Edge realization %"] = round(er, 1)
+                    er_vals.append(er)
+                else:
+                    d["Edge realization %"] = None
+            except (TypeError, ValueError):
+                d["Edge realization %"] = None
+        else:
+            d["Edge realization %"] = None
+        rows.append(d)
+    summary = {
+        "avg_edge_realization": round(float(np.mean(er_vals)), 1) if er_vals else None,
+    }
+    return rows, summary
+
+
 def _theta_gamma_desk_line(theta_gamma_ratio):
     """Θ/Γ line for Diamond / recommended-trade context (desk CC or CSP row)."""
     if theta_gamma_ratio is None:
@@ -842,7 +913,7 @@ def _fragment_technical_zone(
         "Technical Chart",
         f"{ticker} gets four dedicated panels: price, volume, RSI, and MACD. Zoom each one on its own. "
         "Tweak layers below; those toggles refresh the visuals without another Yahoo pull.",
-        tip_plain="Candles show OHLC. EMA and Bollinger frame trend and volatility. Fib, Gann, and S/R are reference rails you can mute. Diamonds flag confluence. Gold line is the Gold Zone. **Gamma Flip:** the price level where market-maker hedging accelerates volatility (neon dashed line when chain GEX resolves). Volume shows participation. RSI shows heat. MACD shows momentum versus its signal.",
+        tip_plain="Candles show OHLC. EMA and Bollinger frame trend and volatility. Fib, Gann, and S/R are reference rails you can mute. Diamonds flag confluence. Gold line is the Gold Zone. **Gamma Flip:** MM hedging inflection (neon dashed). **Shadow move:** purple band from whale-volume close range vs IV Expected Move. **OpEx pin:** pink dotted GEX/ΘΓ magnet. Volume / RSI / MACD as labeled.",
     )
     st.markdown("##### Chart layers")
     o1, o2 = st.columns(2)
@@ -874,6 +945,17 @@ def _fragment_technical_zone(
     except (TypeError, ValueError):
         _gf_chart = None
     _earn_dte = st.session_state.get("_cf_earnings_days")
+    _sh_mv = st.session_state.get("_cf_shadow_move") or {}
+    _sl = _sh_mv.get("low") if isinstance(_sh_mv, dict) else None
+    _su = _sh_mv.get("high") if isinstance(_sh_mv, dict) else None
+    _pin_px = st.session_state.get("_cf_opex_pin")
+    try:
+        if _pin_px is not None:
+            _pin_px = float(_pin_px)
+            if not np.isfinite(_pin_px):
+                _pin_px = None
+    except (TypeError, ValueError):
+        _pin_px = None
     fig_p, fig_v, fig_r, fig_m, _price_overlay_key = build_chart(
         df,
         ticker,
@@ -892,6 +974,9 @@ def _fragment_technical_zone(
         gamma_flip_price=_gf_chart,
         earnings_days_to=_earn_dte,
         iv_overlay_symbol=ticker,
+        shadow_lower=_sl,
+        shadow_upper=_su,
+        opex_pin_price=_pin_px,
     )
     st.plotly_chart(fig_p, use_container_width=True, config=_PLOTLY_UI_CONFIG)
     if _price_overlay_key:
@@ -1214,7 +1299,7 @@ def _options_scan_column_config(*, put_table: bool):
         "MC PoP %": st.column_config.NumberColumn(
             "MC PoP %",
             format="%.1f%%",
-            help="10k antithetic simulations — v21.0 Adaptive Intelligence",
+            help="10k antithetic simulations — v22.0 Predictive Analytics",
         ),
         "Vol": st.column_config.NumberColumn("Volume", format="%.0f"),
         "OI": st.column_config.NumberColumn("OI", format="%.0f"),

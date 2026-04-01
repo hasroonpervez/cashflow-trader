@@ -381,6 +381,60 @@ class TA:
         )
 
     @staticmethod
+    def get_shadow_move(df, volume_z_score=None, lookback=30, whale_mass=0.70):
+        """Whale-volume **shadow band**: central ``whale_mass`` of volume on bars with Z > 2.
+
+        Compare the resulting price width to IV-based Expected Move for a **liquidity vs options**
+        read. Returns ``dict`` with ``low``, ``high``, ``width``, ``n_whale_bars`` or ``None``.
+        """
+        if df is None or df.empty or "Close" not in df.columns or "Volume" not in df.columns:
+            return None
+        tail = df.tail(max(int(lookback), 10)).copy()
+        if tail.empty:
+            return None
+        if volume_z_score is None:
+            dp = TA.get_dark_pool_proxy(df)
+            if dp is None or dp.empty or "volume_z_score" not in dp.columns:
+                return None
+            z = dp["volume_z_score"].reindex(tail.index)
+        else:
+            z = pd.Series(volume_z_score, dtype=float).reindex(tail.index)
+        whale = tail.loc[z > 2.0]
+        if whale.empty or len(whale) < 2:
+            return None
+        vol = pd.to_numeric(whale["Volume"], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+        pr = pd.to_numeric(whale["Close"], errors="coerce").to_numpy(dtype=float)
+        m = np.isfinite(vol) & np.isfinite(pr) & (vol >= 0)
+        vol, pr = vol[m], pr[m]
+        if vol.size < 2 or np.sum(vol) <= 0:
+            return None
+        order = np.argsort(pr)
+        prs = pr[order]
+        v = vol[order]
+        cum = np.cumsum(v)
+        total = float(cum[-1])
+        lo_q = max(0.0, (1.0 - float(whale_mass)) / 2.0) * total
+        hi_q = min(total, (1.0 + float(whale_mass)) / 2.0 * total)
+        i_lo = int(np.searchsorted(cum, lo_q, side="left"))
+        i_hi = int(np.searchsorted(cum, hi_q, side="right")) - 1
+        i_lo = int(np.clip(i_lo, 0, len(prs) - 1))
+        i_hi = int(np.clip(i_hi, 0, len(prs) - 1))
+        if i_lo > i_hi:
+            i_lo, i_hi = i_hi, i_lo
+        lo_px, hi_px = float(prs[i_lo]), float(prs[i_hi])
+        if hi_px < lo_px:
+            lo_px, hi_px = hi_px, lo_px
+        width = hi_px - lo_px
+        if not np.isfinite(width) or width < 0:
+            return None
+        return {
+            "low": lo_px,
+            "high": hi_px,
+            "width": width,
+            "n_whale_bars": int(len(whale)),
+        }
+
+    @staticmethod
     def hurst(series):
         """Hurst exponent via variance ratio (aggregated variance method).
         Uses log returns. Var(q-period returns) scales as q^(2H).
