@@ -1,7 +1,7 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════╗
 ║  CASHFLOW COMMAND CENTER v15.0 · INSTITUTIONAL EDITION                   ║
-║  Modular architecture — same UI, same logic, clean separation.           ║
+║  Modular architecture: same UI, same logic, clean separation.           ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 """
 import os
@@ -144,6 +144,9 @@ def main():
     elif "sb_scanner" not in st.session_state:
         st.session_state["sb_scanner"] = cfg.get("watchlist", DEFAULT_CONFIG["watchlist"])
 
+    # Hydrate HUD + chart overlay keys from config **before** any widget reads them (fixes first-load defaults).
+    _hydrate_sidebar_prefs(cfg)
+
     # ── Watchlist editor (must run before Mission Control so sb_scanner is committed same run)
     _wl_expanded = bool(st.session_state.pop("_open_watchlist_editor", False))
     st.caption("CashFlow Command Center · v15.0")
@@ -168,7 +171,7 @@ def main():
         st.caption(
             "Drop in tickers separated by commas or line breaks. Shuffle the lineup with the controls. "
             "Your list is saved to **config.json** automatically when it changes (survives closing the browser). "
-            "On Streamlit Cloud, if saving fails, add a `watchlist` key in **App settings → Secrets**."
+            "On Streamlit Cloud, if saving fails, add a `watchlist` key in **App settings** under **Secrets**."
         )
         scanner_watchlist_raw = st.text_area(
             "Watchlist symbols",
@@ -284,7 +287,7 @@ def main():
                         "Paste this list into Streamlit **Secrets** as `watchlist = \"...\"` for durable Cloud storage."
                     )
 
-    # Persist watchlist whenever session text differs from disk — survives new browser tabs/sessions on the same deployment.
+    # Persist watchlist whenever session text differs from disk (survives new browser tabs on the same deployment).
     _auto_wl = _parse_watchlist_string(st.session_state.get("sb_scanner", ""))
     if _auto_wl:
         _auto_csv = ",".join(_auto_wl)
@@ -304,16 +307,12 @@ def main():
                     icon="⚠️",
                 )
 
-    # ── GLOBAL COMMAND BAR (HUD — first paint in main column, directly under sticky nav)
+    # GLOBAL COMMAND BAR (HUD: first paint in main column, directly under sticky nav)
     scanner_watchlist_raw = st.session_state.get("sb_scanner", cfg.get("watchlist", ""))
     watch_items = _parse_watchlist_string(scanner_watchlist_raw)
     scanner_watchlist = ",".join(watch_items)
 
-    _scan_idx = (
-        0 if cfg.get("scanner_sort_mode", "Custom watchlist order") == "Custom watchlist order" else 1
-    )
-
-    # Must resolve sb_watch_selected before st.selectbox(..., key="sb_watch_selected") — Streamlit 1.33+
+    # Must resolve sb_watch_selected before st.selectbox(..., key="sb_watch_selected") (Streamlit 1.33+)
     # forbids assigning session_state for a widget key after that widget is instantiated (e.g. tape buttons).
     if watch_items:
         if "_sb_watch_selected_sync" in st.session_state:
@@ -394,7 +393,6 @@ def main():
             _scan_seg = st.radio(
                 "Scanner order",
                 ["Custom order", "Confluence first"],
-                index=_scan_idx,
                 horizontal=True,
                 key="sb_scan_radio",
                 help="Custom follows your lineup. Confluence ranks the strongest tape first.",
@@ -402,15 +400,24 @@ def main():
             scanner_sort_mode = (
                 "Custom watchlist order" if _scan_seg == "Custom order" else "Highest confluence first"
             )
-        use_quant = st.toggle(
+
+        def _persist_use_quant_models():
+            b = load_config()
+            q = bool(st.session_state.get("sb_use_quant", False))
+            if not save_config({**b, "use_quant_models": q}) and not st.session_state.get("_cf_quant_disk_warned"):
+                st.session_state["_cf_quant_disk_warned"] = True
+                st.toast(
+                    "Quant mode not written to disk (read-only host). It stays on for this session; "
+                    "for Streamlit Cloud add `use_quant_models = true` in **Secrets**.",
+                    icon="⚠️",
+                )
+
+        st.toggle(
             "🔬 Enable Quant/Institutional Models",
-            value=bool(cfg.get("use_quant_models", False)),
+            key="sb_use_quant",
             help="Replaces standard Black-Scholes and RSI logic with Corrado-Su pricing, Fractional Differentiation, and HMM Regime Detection.",
+            on_change=_persist_use_quant_models,
         )
-        if use_quant != bool(cfg.get("use_quant_models", False)):
-            cfg = {**cfg, "use_quant_models": bool(use_quant)}
-            save_config(cfg)
-            st.rerun()
 
     # Clickable ticker tape (chunk rows on wide lists so columns stay usable on mobile)
     if watch_items:
@@ -457,14 +464,14 @@ def main():
         save_config(watch_cfg)
         cfg = watch_cfg
 
-    _hydrate_sidebar_prefs(cfg)
-
     prefs_cfg = {
         **cfg,
         "strat_focus": st.session_state.get("sb_strat_radio", DEFAULT_CONFIG["strat_focus"]),
         "strat_horizon": st.session_state.get("sb_horizon_radio", DEFAULT_CONFIG["strat_horizon"]),
         "mini_mode": bool(st.session_state.get("sb_mini_mode", cfg.get("mini_mode", False))),
-        "use_quant_models": bool(cfg.get("use_quant_models", DEFAULT_CONFIG["use_quant_models"])),
+        "use_quant_models": bool(
+            st.session_state.get("sb_use_quant", cfg.get("use_quant_models", DEFAULT_CONFIG["use_quant_models"]))
+        ),
     }
     if prefs_cfg != cfg:
         save_config(prefs_cfg)
@@ -485,7 +492,7 @@ def main():
         )
         st.stop()
 
-    # Unpack context into locals — rendering code below uses these directly.
+    # Unpack context into locals; rendering code below uses these directly.
     # This keeps the entire rendering layer untouched from the original monolith.
     df = ctx.df; df_wk = ctx.df_wk; df_1mo_spark = ctx.df_1mo_spark
     vix_1mo_df = ctx.vix_1mo_df; macro = ctx.macro; news = ctx.news
@@ -519,7 +526,7 @@ def main():
     nc = ctx.nc; action_strat = ctx.action_strat; action_plain = ctx.action_plain
     mini_mode = ctx.mini_mode; mobile_chart_layout = ctx.mobile_chart_layout
 
-    # ── HEADER — Live Pulse ──
+    # HEADER: Live Pulse
     last_update = datetime.now().strftime("%H:%M:%S")
     tk_hdr = _html_mod.escape(ticker)
     st.markdown(
@@ -732,7 +739,7 @@ def main():
             f"{_iv_off}"
             f"<p style='color:#e2e8f0;font-size:1rem;line-height:1.5;margin:0'>"
             f"No option expirations from Yahoo for <span class='mono'>{_html_mod.escape(ticker)}</span> after retries. "
-            f"Use <a href='#strategies' style='color:#22d3ee'>Cash Flow</a> → <strong>Refresh options data</strong>, "
+            f"Use <a href='#strategies' style='color:#22d3ee'>Cash Flow</a>, then <strong>Refresh options data</strong>, "
             f"or pick strikes in your broker. Micro-caps may have no Yahoo chain even if options trade elsewhere."
             f"</p>"
             f"<p style='color:#64748b;font-size:.78rem;margin:10px 0 0 0'>Quant Edge and Confluence above still describe the tape.</p>"
@@ -951,7 +958,7 @@ def main():
                 )
 
     # ══════════════════════════════════════════════════════════════════
-    #  SECTION 1 — TECHNICAL CHART (fragment: overlay toggles without refetching Yahoo)
+    # SECTION 1: TECHNICAL CHART (fragment: overlay toggles without refetching Yahoo)
     # ══════════════════════════════════════════════════════════════════
     st.markdown('<div id="charts" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
     # Fragment reruns must not rely on extra kwargs (Streamlit's @st.fragment can omit them).
@@ -1054,7 +1061,7 @@ def main():
                     "RANGING": "The stock is bouncing between a ceiling and a floor. Think of a business in a steady market. This is actually great for selling options on both sides and collecting cash."}
                 _explain("Why this matters for your trade", struct_explain[struct], chart_mood)
 
-                # Hurst Exponent — market regime filter
+                # Hurst Exponent: market regime filter
                 hurst_val = TA.hurst(df["Close"])
                 if hurst_val > 0.55:
                     h_label, h_color = "TRENDING", "#10b981"
@@ -1123,7 +1130,7 @@ def main():
                             i1.metric("High-vol regime (HMM)", f"{_rp * 100:.1f}%", help="Probability mass in the high-volatility state.")
                             i2.metric("FFD residual", f"{_ffd:.4f}", help="Fractional differentiation signal (stationary momentum memory).")
                             i3.metric("Composite", f"{inst_score:.1f}", help="Capped blend used for the main Quant Edge gauge.")
-                            st.markdown("##### Retail — five pillars (20% each)")
+                            st.markdown("##### Retail: five pillars (20% each)")
                             _pillars = {k: retail_breakdown.get(k) for k in ("trend", "momentum", "volume", "volatility", "structure") if k in retail_breakdown}
                             st.dataframe(
                                 pd.DataFrame([{"Dimension": k.title(), "Score": round(float(v), 1)} for k, v in _pillars.items()]),
@@ -1133,7 +1140,7 @@ def main():
                             )
                         else:
                             st.warning(
-                                "**Quant engine matched Retail** — the FFD/HMM institutional branch did not run "
+                                "**Quant engine matched Retail.** The FFD/HMM institutional branch did not run "
                                 "(missing `hmmlearn`, insufficient history, or an internal error). "
                                 "Both numbers use the same five-factor model below."
                             )
@@ -1464,8 +1471,8 @@ def main():
                 f"Concrete strikes for {ticker} at ${price:.2f}. Lift them straight into your ticket."
                 if opt_exps
                 else (
-                    f"Spot ${price:.2f}. The options feed returned no expirations yet—use Refresh during market hours, "
-                    f"or mirror the desk rules in your broker (≈3–7% OTM, standard monthly cycle)."
+                    f"Spot ${price:.2f}. The options feed returned no expirations yet. Use Refresh during market hours, "
+                    f"or mirror the desk rules in your broker (about 3% to 7% OTM, standard monthly cycle)."
                 )
             )
             _section(
@@ -1710,7 +1717,7 @@ def main():
                 st.markdown(
                     f"<div class='tc'><div style='text-align:center'><span style='color:#f59e0b;font-size:.75rem;font-weight:700;letter-spacing:.12em'>OPTIONS FEED</span><br>"
                     f"<span style='font-size:1.25rem;font-weight:700;color:#e2e8f0'>{_html_mod.escape(ticker)} @ ${price:.2f}</span>"
-                    f"<br><span style='color:#94a3b8;font-size:.82rem'>No expirations returned — not necessarily illiquid; often a data gap</span></div></div>",
+                    f"<br><span style='color:#94a3b8;font-size:.82rem'>No expirations returned. Not necessarily illiquid; often a data gap.</span></div></div>",
                     unsafe_allow_html=True,
                 )
                 st.info(
@@ -1761,10 +1768,9 @@ def main():
                     f"Using an illustrative {RISK_PCT_EXAMPLE:.0f}% risk budget on a ${REF_NOTIONAL:,.0f} reference account (${mrt:,.0f} max loss per trade), "
                     f"you could size up to about {sh_atr} shares or {max(0, sh_atr // 100)} option contracts. Scale to your own account and rules.", "neutral")
 
-                # Kelly Criterion — mathematically optimal allocation
+                # Kelly Criterion: mathematically optimal allocation
                 k_full, k_half = 0.0, 0.0
                 k_source = ""
-                use_quant_models = bool(cfg.get("use_quant_models", False))
                 daily_ret = df["Close"].pct_change().dropna()
                 exp_ret = float(daily_ret.mean() * 252) if len(daily_ret) > 0 else 0.0
                 ret_var = float(daily_ret.var() * 252) if len(daily_ret) > 1 else 0.0
@@ -1940,7 +1946,7 @@ def main():
                 )
 
             # ══════════════════════════════════════════════════════════════════
-            #  SECTION 7 — MARKET SCANNER (multi-ticker diamond & confluence scan)
+            # SECTION 7: MARKET SCANNER (multi-ticker diamond and confluence scan)
             # ══════════════════════════════════════════════════════════════════
             st.markdown('<div id="scanner" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
             _section("🔎 Market Scanner", "One pass across the list for Diamonds, confluence stacks, and Gold Zone distance.",

@@ -1,5 +1,5 @@
 """
-UI helpers — reusable components, sparklines, glance cards, section dividers,
+UI helpers: reusable components, sparklines, glance cards, section dividers,
 DataFrame presentation, and the Technical Zone st.fragment.
 """
 import streamlit as st
@@ -9,6 +9,7 @@ import numpy as np
 import textwrap
 from datetime import datetime
 import plotly.express as px
+import plotly.graph_objects as go
 
 from .ta import TA
 from .data import _PLOTLY_UI_CONFIG
@@ -19,7 +20,7 @@ from .options import (
 )
 from .data import compute_iv_rank_proxy
 from .chart import build_chart
-from .config import save_config, load_config, _overlay_prefs_from_session
+from .config import save_config, load_config, _overlay_prefs_from_session, _persist_overlay_prefs
 
 def render_mode_badge(use_quant: bool):
     """Renders a sleek, non-intrusive badge indicating the active mathematical engine."""
@@ -52,11 +53,11 @@ def _factor_checklist_labels():
 
 
 def _confluence_why_trade_plain(cp_breakdown, *, options_chain_available=True):
-    """One-line copy for Recommended Trade tooltip — same 7 headline rows as Diamond checklist."""
+    """One-line copy for Recommended Trade tooltip (same 7 headline rows as Diamond checklist)."""
     if not options_chain_available:
         return (
-            "No Yahoo expirations yet—this card can’t pin a strike or IV rank. "
-            "Cash Flow → Refresh options data, or use your broker. Tape quality is still in Quant Edge / Confluence above."
+            "No Yahoo expirations yet. This card cannot pin a strike or IV rank. "
+            "Use Cash Flow then Refresh options data, or use your broker. Tape quality is still in Quant Edge and Confluence above."
         )
     head = (
         "7/9 Diamond headline checklist: Supertrend (2), Ichimoku cloud (2), ADX DI (1), OBV (1), "
@@ -65,7 +66,7 @@ def _confluence_why_trade_plain(cp_breakdown, *, options_chain_available=True):
     if not cp_breakdown:
         return (
             head
-            + "Live factor scores are not on this row yet — the strike comes from the options desk path "
+            + "Live factor scores are not on this row yet. The strike comes from the options desk path "
             "and regime text until confluence hydrates."
         )
     flabels = _factor_checklist_labels()
@@ -74,12 +75,12 @@ def _confluence_why_trade_plain(cp_breakdown, *, options_chain_available=True):
     if passed == 0:
         return (
             head
-            + "Right now 0/7 of those headline rows are green — lean smaller; this pick leans on premium "
+            + "Right now 0/7 of those headline rows are green. Lean smaller; this pick leans on premium "
             "selling context rather than a stacked confluence entry."
         )
     tail = ", ".join(greens[:5])
     if len(greens) > 5:
-        tail += ", …"
+        tail += ", plus more"
     return head + f"Currently {passed}/7 green: {tail}."
 
 
@@ -92,7 +93,7 @@ def _iv_rank_qualitative_words(rank):
 
 
 def _iv_rank_pill_html(ticker, price, ref_iv_pct=None, *, stub=None):
-    """Recommended Trade card: always show an IV rank pill — numeric proxy, or a clear stub."""
+    """Recommended Trade card: always show an IV rank pill (numeric proxy, or a clear stub)."""
     pill_open = (
         "<div style='display:inline-flex;align-items:center;flex-wrap:wrap;gap:8px;margin:4px 0 12px 0;"
         "padding:6px 14px;border-radius:999px;border:1px solid rgba(34,211,238,.45);"
@@ -104,12 +105,12 @@ def _iv_rank_pill_html(ticker, price, ref_iv_pct=None, *, stub=None):
             pill_open
             + label
             + "<span style='margin-left:10px;font-size:.8rem;font-weight:700;color:#94a3b8'>No expirations</span>"
-            + "<span style='font-size:.68rem;color:#64748b;margin-left:8px'>IV rank needs a chain · Cash Flow → Refresh</span></div>"
+            + "<span style='font-size:.68rem;color:#64748b;margin-left:8px'>IV rank needs a chain. Cash Flow, then Refresh.</span></div>"
         )
     if stub == "no_strike":
         return (
             pill_open
-            + "<span class='mono' style='font-weight:800;color:#64748b;font-size:1.05rem'>—</span>"
+            + "<span class='mono' style='font-weight:800;color:#64748b;font-size:1.05rem'>n/a</span>"
             + label
             + "<span style='font-size:.68rem;color:#64748b'>fallback mode active</span></div>"
         )
@@ -120,7 +121,7 @@ def _iv_rank_pill_html(ticker, price, ref_iv_pct=None, *, stub=None):
     if ref <= 0 or price is None or float(price) <= 0:
         return (
             pill_open
-            + "<span class='mono' style='font-weight:800;color:#64748b;font-size:1.05rem'>—</span>"
+            + "<span class='mono' style='font-weight:800;color:#64748b;font-size:1.05rem'>n/a</span>"
             + label
             + "<span style='font-size:.68rem;color:#64748b'>no reference IV</span></div>"
         )
@@ -132,13 +133,13 @@ def _iv_rank_pill_html(ticker, price, ref_iv_pct=None, *, stub=None):
         return (
             pill_open
             + f"<span class='mono' style='font-weight:800;color:{rk_color};font-size:1.05rem'>IV Rank: {rnk:.0f}%</span>"
-            + f"<span style='font-size:.78rem;color:#e2e8f0;font-weight:600'> — {qual}</span>"
+            + f"<span style='font-size:.78rem;color:#e2e8f0;font-weight:600'> ({qual})</span>"
             + label
             + "<span style='font-size:.68rem;color:#64748b'>vs listed expiries</span></div>"
         )
     return (
         pill_open
-        + "<span class='mono' style='font-weight:800;color:#64748b;font-size:1.05rem'>—</span>"
+        + "<span class='mono' style='font-weight:800;color:#64748b;font-size:1.05rem'>n/a</span>"
         + label
         + "<span style='font-size:.68rem;color:#64748b'>curve too thin to rank</span></div>"
     )
@@ -270,8 +271,10 @@ def _parse_watchlist_string(s):
 def _fragment_rolling_edge_capture():
     """Full-watchlist quant vs retail edge log + matrix; reruns on a timer without blocking the rest of the app."""
     st.caption(
-        "Live matrix edge market: scans **entire watchlist** in parallel (~90s refresh). "
-        "Sorted by **Quant** score; **Preview** matches the headline desk read for that score."
+        "Full watchlist scan about every **90 seconds**. **Highest Quant** sorts to the top. "
+        "**Edge gap** is Quant score minus Retail score (each 0 to 100). "
+        "This desk targets **premium income** (covered calls, cash secured puts): stronger Quant usually means a better "
+        "environment for that style, **not** a simple buy list. Use confluence, diamonds, and your own rules."
     )
     wl = _parse_watchlist_string(st.session_state.get("sb_scanner", ""))
     use_q = bool(st.session_state.get("_cf_use_quant_models", False))
@@ -302,15 +305,33 @@ def _fragment_rolling_edge_capture():
         df_log = df_log.copy()
         df_log["Preview"] = df_log["Quant"].apply(lambda q: quant_edge_status_line(float(q)))
 
-    # Enforce score ordering (Quant high → low) for table + treemap even if session held stale rows.
+    # Enforce score ordering (Quant high to low) for table + charts even if session held stale rows.
     df_log = df_log.sort_values(by=["Quant", "Delta", "Ticker"], ascending=[False, False, True]).reset_index(drop=True)
+
+    _mean_edge_help = (
+        "Mean edge gap: the average of (Quant minus Retail) across all names in this scan. "
+        "Both scores are 0 to 100. Positive means the Quant engine is usually more favorable toward premium selling "
+        "style conditions than the five pillar retail model. It is not a buy or sell signal for any one stock."
+    )
+    _q_gt_r_help = (
+        "Percentage of tickers where Quant is strictly greater than Retail in this scan. "
+        "When this is high, most symbols look stronger under the Quant read than under the retail composite."
+    )
+    _max_div_help = (
+        "Largest positive edge gap (Quant minus Retail) on your list. The subtitle names that ticker. "
+        "A large value means Quant liked that tape much more than Retail in the same snapshot."
+    )
+    _min_div_help = (
+        "Most negative edge gap: Retail beat Quant by the widest margin. The subtitle names that ticker. "
+        "Use it to see where the two engines disagree most."
+    )
 
     try:
         _n_ok = len(df_log)
         _n_wl = len(wl)
         st.caption(
-            f"Last watchlist scan: **{st.session_state.get('_edge_matrix_updated', '—')}** · "
-            f"**{_n_ok}** / **{_n_wl}** symbols scored · ordered by **Quant** (highest first)"
+            f"Last scan **{st.session_state.get('_edge_matrix_updated', 'n/a')}** | "
+            f"**{_n_ok}** of **{_n_wl}** symbols | sorted **Quant high to low**"
         )
         if failed_syms:
             st.caption("No daily bars: " + ", ".join(f"`{s}`" for s in failed_syms))
@@ -323,55 +344,133 @@ def _fragment_rolling_edge_capture():
         worst_ticker = df_log.loc[worst_idx, "Ticker"]
         worst_delta = int(df_log.loc[worst_idx, "Delta"])
         sc1, sc2, sc3, sc4 = st.columns(4)
-        sc1.metric(
-            "Mean Edge Δ",
-            f"{mean_delta:+.1f}",
-            help="Average point difference between Quant and Retail scores.",
+        sc1.metric("Mean Edge Δ", f"{mean_delta:+.1f}", help=_mean_edge_help)
+        sc2.metric("Quant > Retail", f"{hit_rate:.0f}%", help=_q_gt_r_help)
+        sc3.metric(
+            "Max Divergence",
+            f"{best_delta:+d}",
+            delta=best_ticker,
+            delta_color="off",
+            help=_max_div_help,
         )
-        sc2.metric(
-            "Quant > Retail",
-            f"{hit_rate:.0f}%",
-            help="Share of names where Quant scores higher than Retail.",
+        sc4.metric(
+            "Min Divergence",
+            f"{worst_delta:+d}",
+            delta=worst_ticker,
+            delta_color="off",
+            help=_min_div_help,
         )
-        sc3.metric("Max Divergence", f"{best_delta:+d}", delta=best_ticker, delta_color="off")
-        sc4.metric("Min Divergence", f"{worst_delta:+d}", delta=worst_ticker, delta_color="off")
 
-        st.markdown("<br>", unsafe_allow_html=True)
-        # Treemap: one row per ticker, already sorted by Quant (desc); box size tracks Quant score.
         df_latest = df_log.drop_duplicates(subset=["Ticker"], keep="first").copy()
         df_latest = df_latest.sort_values(by=["Quant", "Delta", "Ticker"], ascending=[False, False, True])
         df_latest["Size_Score"] = df_latest["Quant"].apply(lambda x: max(1, int(x)))
         if "Preview" not in df_latest.columns:
             df_latest["Preview"] = df_latest["Quant"].apply(lambda q: quant_edge_status_line(float(q)))
 
-        fig = px.treemap(
-            df_latest,
-            path=[px.Constant("Session Watchlist"), "Ticker"],
-            values="Size_Score",
-            color="Delta",
-            color_continuous_scale="RdYlGn",
-            color_continuous_midpoint=0,
-            custom_data=["Retail", "Quant", "Delta", "Preview"],
-        )
-        fig.update_traces(
-            hovertemplate=(
-                "<b>%{label}</b><br>Quant: %{customdata[1]} · Retail: %{customdata[0]}<br>"
-                "Δ %{customdata[2]:+d}<br><i>%{customdata[3]}</i><extra></extra>"
-            ),
-            textinfo="label+value",
-            texttemplate="<b>%{label}</b><br>Q %{customdata[1]}<br>Δ %{customdata[2]:+d}",
-        )
-        fig.update_layout(
-            margin=dict(t=30, l=10, r=10, b=10),
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)",
-            font=dict(color="#94a3b8"),
-            title=dict(
-                text="Live Market Edge Matrix — full watchlist, Quant score (high → low)",
-                font=dict(size=14, color="#e2e8f0"),
-            ),
-        )
-        st.plotly_chart(fig, use_container_width=True)
+        with st.container(border=True):
+            st.markdown(
+                "<div style='font-size:0.72rem;font-weight:800;color:#a5b4fc;letter-spacing:.12em;margin:0 0 6px 0'>"
+                "READ THE TAPE</div>"
+                "<div style='font-size:1.05rem;font-weight:700;color:#f1f5f9;margin:0 0 8px 0'>"
+                "Strongest Quant names (bar length = score)</div>"
+                "<div style='font-size:0.82rem;color:#94a3b8;line-height:1.45;margin:0 0 12px 0'>"
+                "Green bars: Quant above Retail. Red bars: Retail above Quant. "
+                "Hover a bar for Retail, edge gap, and the short preview line.</div>",
+                unsafe_allow_html=True,
+            )
+            top_n = min(18, len(df_latest))
+            bar_df = df_latest.head(top_n)
+            cd = np.column_stack(
+                [bar_df["Retail"].values, bar_df["Delta"].values, bar_df["Preview"].values]
+            )
+            fig_bar = go.Figure(
+                go.Bar(
+                    x=bar_df["Quant"].values,
+                    y=bar_df["Ticker"].values,
+                    orientation="h",
+                    customdata=cd,
+                    hovertemplate=(
+                        "<b>%{y}</b><br>Quant: %{x}<br>Retail: %{customdata[0]}<br>"
+                        "Edge gap: %{customdata[1]:+d}<br><i>%{customdata[2]}</i><extra></extra>"
+                    ),
+                    marker=dict(
+                        color=bar_df["Delta"].values,
+                        colorscale=[[0.0, "#dc2626"], [0.5, "#475569"], [1.0, "#059669"]],
+                        cmin=-35,
+                        cmax=35,
+                        line=dict(width=0),
+                    ),
+                )
+            )
+            fig_bar.update_layout(
+                template="plotly_dark",
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(30,41,59,0.45)",
+                margin=dict(l=4, r=8, t=8, b=4),
+                height=max(220, 26 * top_n),
+                xaxis=dict(
+                    title=dict(text="Quant score (0 to 100)", font=dict(size=11, color="#94a3b8")),
+                    range=[0, 105],
+                    gridcolor="rgba(148,163,184,0.12)",
+                    zeroline=False,
+                    tickfont=dict(color="#cbd5e1"),
+                ),
+                yaxis=dict(tickfont=dict(size=12, color="#e2e8f0"), autorange="reversed"),
+                showlegend=False,
+                font=dict(color="#94a3b8", size=11),
+            )
+            st.plotly_chart(fig_bar, use_container_width=True, config={"displayModeBar": False})
+
+            st.markdown(
+                "<div style='font-size:0.72rem;font-weight:800;color:#a5b4fc;letter-spacing:.12em;margin:16px 0 6px 0'>"
+                "RELATIVE SIZE MAP</div>"
+                "<div style='font-size:0.82rem;color:#94a3b8;line-height:1.45;margin:0 0 10px 0'>"
+                "Box size tracks Quant score. Color tracks edge gap (Quant minus Retail). "
+                "Same data as the bars; use whichever view is easier on your eyes.</div>",
+                unsafe_allow_html=True,
+            )
+            fig_tm = px.treemap(
+                df_latest,
+                path=[px.Constant("Watchlist"), "Ticker"],
+                values="Size_Score",
+                color="Delta",
+                color_continuous_scale="RdYlGn",
+                color_continuous_midpoint=0,
+                custom_data=["Retail", "Quant", "Delta", "Preview"],
+            )
+            fig_tm.update_traces(
+                marker=dict(line=dict(width=2, color="rgba(15,23,42,0.92)")),
+                hovertemplate=(
+                    "<b>%{label}</b><br>Quant: %{customdata[1]}<br>Retail: %{customdata[0]}<br>"
+                    "Edge gap: %{customdata[2]:+d}<br><i>%{customdata[3]}</i><extra></extra>"
+                ),
+                textinfo="label+text",
+                texttemplate="<b>%{label}</b><br>Q %{customdata[1]}<br>gap %{customdata[2]:+d}",
+                textfont=dict(size=12, color="#f8fafc"),
+            )
+            fig_tm.update_layout(
+                margin=dict(t=28, l=6, r=6, b=6),
+                height=400,
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="#cbd5e1", size=11),
+                title=dict(
+                    text="Live Market Edge Matrix (Quant high to low, full watchlist)",
+                    font=dict(size=14, color="#f1f5f9"),
+                    x=0.02,
+                    xanchor="left",
+                ),
+                coloraxis_colorbar=dict(
+                    title=dict(
+                        text="Edge gap<br><sub>Quant minus Retail</sub>",
+                        font=dict(size=11, color="#94a3b8"),
+                    ),
+                    thickness=12,
+                    tickfont=dict(color="#94a3b8", size=10),
+                    len=0.7,
+                ),
+            )
+            st.plotly_chart(fig_tm, use_container_width=True)
     except Exception:
         pass
 
@@ -390,6 +489,11 @@ def _fragment_rolling_edge_capture():
     except Exception:
         pass
     st.session_state.edge_log = df_log
+    _edge_gap_help = (
+        "Edge gap is Quant score minus Retail score (each rounded 0 to 100). "
+        "Positive: Quant reads more favorable premium selling conditions than the retail five pillars. "
+        "Negative: Retail reads stronger. Not a standalone buy or sell signal; combine with confluence and your plan."
+    )
     st.dataframe(
         df_log,
         use_container_width=True,
@@ -397,10 +501,22 @@ def _fragment_rolling_edge_capture():
         column_config={
             "Time": st.column_config.TextColumn("Time"),
             "Ticker": st.column_config.TextColumn("Ticker", width="small"),
-            "Retail": st.column_config.NumberColumn("Retail", format="%d"),
-            "Quant": st.column_config.NumberColumn("Quant", format="%d"),
-            "Delta": st.column_config.NumberColumn("Delta", format="%+d"),
-            "Preview": st.column_config.TextColumn("Preview (vs Quant)", width="large"),
+            "Retail": st.column_config.NumberColumn(
+                "Retail",
+                format="%d",
+                help="Five pillar retail composite score (0 to 100) for this snapshot.",
+            ),
+            "Quant": st.column_config.NumberColumn(
+                "Quant",
+                format="%d",
+                help="Quant / institutional style score (0 to 100). With institutional mode on, may blend FFD and regime inputs.",
+            ),
+            "Delta": st.column_config.NumberColumn("Edge gap", format="%+d", help=_edge_gap_help),
+            "Preview": st.column_config.TextColumn(
+                "Preview",
+                width="large",
+                help="Short desk line driven by the Quant score (prime selling context vs stand down).",
+            ),
         },
     )
 
@@ -435,21 +551,21 @@ def _fragment_technical_zone(
                 chg_pct = (float(df["Close"].iloc[-1]) / float(df["Close"].iloc[-2]) - 1.0) * 100.0
             except Exception:
                 chg_pct = 0.0
-        gz_line = "—"
+        gz_line = "n/a"
         gz_pct = 0.0
         try:
             if gold_zone_price:
                 gz_pct = (float(price) / float(gold_zone_price) - 1.0) * 100.0
                 gz_line = f"${float(gold_zone_price):.2f} ({gz_pct:+.1f}% from spot)"
         except Exception:
-            gz_line = "—"
+            gz_line = "n/a"
         spark7 = _glance_sparkline_svg(df["Close"].tail(7), "#00E5FF", w=220, h=56)
         chg_c = "#10b981" if chg_pct >= 0 else "#ef4444"
         tk_e = _html_mod.escape(ticker)
         st.markdown(
             f"<div class='glass-card' style='margin-bottom:12px;padding:14px 16px'>"
             f"<div style='font-size:.68rem;font-weight:800;color:#00e5ff;letter-spacing:.14em;margin-bottom:8px'>"
-            f"TURBO · MOBILE STATUS</div>"
+            f"TURBO MOBILE STATUS</div>"
             f"<div style='display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:12px'>"
             f"<div style='flex:1;min-width:140px'>"
             f"<div class='mono' style='font-size:1.42rem;font-weight:800;color:#e2e8f0'>{tk_e} ${price:.2f}</div>"
@@ -461,7 +577,7 @@ def _fragment_technical_zone(
             f"<div style='font-size:.62rem;color:#64748b;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px'>"
             f"7-DAY CLOSE SPARK</div>{spark7}</div></div>"
             f"<p style='color:#64748b;font-size:.74rem;margin:12px 0 0 0;line-height:1.45'>"
-            f"No Plotly stack in Turbo — flip <strong>Turbo mode</strong> off in Mission Control for full charts.</p>"
+            f"No Plotly stack in Turbo. Turn <strong>Turbo mode</strong> off in Mission Control for full charts.</p>"
             f"</div>",
             unsafe_allow_html=True,
         )
@@ -638,7 +754,7 @@ def _fragment_technical_zone(
 
 
 # ═════════════════════════════════════════════════════════════════════════
-#  DATAFRAME PRESENTATION — column_config, numeric types, row highlights
+#  DATAFRAME PRESENTATION: column_config, numeric types, row highlights
 # ═════════════════════════════════════════════════════════════════════════
 
 _KEY_FIB_LEVEL_NAMES = frozenset({"50.0%", "61.8%"})
@@ -791,15 +907,3 @@ def _style_propdesk_highlight(df: pd.DataFrame):
         return sty.hide(axis="index")
     except (TypeError, ValueError, AttributeError):
         return sty.hide_index()
-
-
-
-def _persist_overlay_prefs():
-    """Persist overlay toggles from session state (used inside chart fragment)."""
-    base = load_config()
-    o = _overlay_prefs_from_session()
-    upd = {**base, **o}
-    if any(upd.get(k) != base.get(k) for k in o):
-        save_config(upd)
-        return upd
-    return base

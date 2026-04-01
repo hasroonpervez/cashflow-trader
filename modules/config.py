@@ -126,7 +126,10 @@ def _persist_overlay_prefs():
 
 
 def _hydrate_sidebar_prefs(cfg):
-    """Load Strategy / Chart overlay widget state from config when session has no value yet."""
+    """Load Strategy / Chart overlay / quant / scanner UI from config when session has no value yet.
+
+    Must run **before** any widget that uses these ``st.session_state`` keys (Mission Control, chart fragment).
+    """
     if "sb_strat_radio" not in st.session_state:
         opts = ("Sell premium", "Hybrid", "Growth")
         v = cfg.get("strat_focus", DEFAULT_CONFIG["strat_focus"])
@@ -137,6 +140,13 @@ def _hydrate_sidebar_prefs(cfg):
         st.session_state["sb_horizon_radio"] = v if v in opts else DEFAULT_CONFIG["strat_horizon"]
     if "sb_mini_mode" not in st.session_state:
         st.session_state["sb_mini_mode"] = bool(cfg.get("mini_mode", DEFAULT_CONFIG["mini_mode"]))
+    if "sb_use_quant" not in st.session_state:
+        st.session_state["sb_use_quant"] = bool(cfg.get("use_quant_models", DEFAULT_CONFIG["use_quant_models"]))
+    if "sb_scan_radio" not in st.session_state:
+        sm = cfg.get("scanner_sort_mode", DEFAULT_CONFIG["scanner_sort_mode"])
+        st.session_state["sb_scan_radio"] = (
+            "Custom order" if sm == "Custom watchlist order" else "Confluence first"
+        )
     for wkey, ckey, default in (
         ("sb_ema", "overlay_ema", True),
         ("sb_fib", "overlay_fib", True),
