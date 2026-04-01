@@ -327,6 +327,139 @@ def fetch_news(ticker):
     except Exception:
         return []
 
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_news_headlines(symbol: str):
+    """Latest 5–8 Yahoo headlines for NLP bias (longer TTL than general news to protect rate limits)."""
+    try:
+        sym = str(symbol).upper().strip()
+        if not sym:
+            return []
+        raw = _yfinance_ticker(sym).news or []
+        out = []
+        for n in raw[:8]:
+            title = (n.get("title") or n.get("content", {}).get("title", "") or "").strip()
+            link = n.get("link") or n.get("content", {}).get("canonicalUrl", {}).get("url", "")
+            pub = n.get("publisher") or n.get("content", {}).get("provider", {}).get("displayName", "")
+            pt = ""
+            try:
+                ts = n.get("providerPublishTime") or n.get("content", {}).get("pubDate", "")
+                if isinstance(ts, (int, float)):
+                    pt = datetime.fromtimestamp(ts).strftime("%b %d, %H:%M")
+                elif isinstance(ts, str) and ts:
+                    pt = ts[:16]
+            except Exception:
+                pass
+            if title:
+                out.append({"title": title, "link": link, "pub": pub, "time": pt})
+        return out[:8] if out else []
+    except Exception:
+        return []
+
+
+def avg_post_earnings_vol_crush_proxy_pct(df: pd.DataFrame, symbol: str, n_cycles: int = 4):
+    """
+    Average % change in short-window realized vol after vs before past earnings (proxy for IV crush).
+    Uses up to ``n_cycles`` prior earnings dates from Yahoo ``earnings_dates``.
+    """
+    try:
+        if df is None or df.empty or "Close" not in df.columns or len(df) < 80:
+            return None
+        sym = str(symbol).upper().strip()
+        if not sym:
+            return None
+        ed = getattr(_yfinance_ticker(sym), "earnings_dates", None)
+        if ed is None or getattr(ed, "empty", True):
+            return None
+        now = pd.Timestamp.now().normalize()
+        past = sorted(
+            [pd.Timestamp(x).normalize() for x in ed.index if pd.Timestamp(x).normalize() < now],
+            reverse=True,
+        )
+        if not past:
+            return None
+        idx = pd.DatetimeIndex(pd.to_datetime(df.index))
+        crushes = []
+        for edate in past:
+            if len(crushes) >= n_cycles:
+                break
+            pos = int(idx.searchsorted(edate))
+            if pos >= len(df):
+                pos = len(df) - 1
+            while pos > 0 and idx[pos] > edate:
+                pos -= 1
+            if pos < 15 or pos + 12 >= len(df):
+                continue
+            pre = df["Close"].iloc[pos - 12 : pos - 1]
+            post = df["Close"].iloc[pos + 1 : pos + 12]
+            if len(pre) < 5 or len(post) < 5:
+                continue
+            r_pre = pre.astype(float).pct_change().dropna()
+            r_post = post.astype(float).pct_change().dropna()
+            if r_pre.empty or r_post.empty:
+                continue
+            v_pre = float(r_pre.std() * np.sqrt(252) * 100.0)
+            v_post = float(r_post.std() * np.sqrt(252) * 100.0)
+            if not np.isfinite(v_pre) or v_pre <= 1e-9:
+                continue
+            crushes.append((v_post - v_pre) / v_pre * 100.0)
+        if not crushes:
+            return None
+        return float(np.mean(crushes))
+    except Exception:
+        return None
+
+
+def compute_iv_earnings_chart_overlay(
+    df: pd.DataFrame,
+    symbol: str,
+    days_to_earnings,
+    current_iv_pct,
+    spot_price: float,
+):
+    """
+    Text overlay for price chart: avg post-earnings vol crush (when earnings in 14d) + vega risk flag.
+    Vega risk: IV rank proxy ≥ 90, else current IV vs 90th pct of 20d realized vol (1y window).
+    """
+    out = {
+        "show_crush": False,
+        "avg_crush_pct": None,
+        "vega_risk": False,
+    }
+    try:
+        dte = int(days_to_earnings) if days_to_earnings is not None else None
+    except (TypeError, ValueError):
+        dte = None
+    if dte is not None and 0 <= dte <= 14:
+        crush = avg_post_earnings_vol_crush_proxy_pct(df, symbol, n_cycles=4)
+        if crush is not None and np.isfinite(crush):
+            out["show_crush"] = True
+            out["avg_crush_pct"] = float(crush)
+    try:
+        iv = float(current_iv_pct) if current_iv_pct is not None else 0.0
+    except (TypeError, ValueError):
+        iv = 0.0
+    if iv > 0 and df is not None and not df.empty and "Close" in df.columns:
+        try:
+            rk = compute_iv_rank_proxy(str(symbol).upper().strip(), float(spot_price), iv)
+            if rk is not None and float(rk.get("rank", 0)) >= 90.0:
+                out["vega_risk"] = True
+        except Exception:
+            pass
+        if not out["vega_risk"]:
+            try:
+                rv20 = (
+                    df["Close"].astype(float).pct_change().rolling(20).std() * np.sqrt(252) * 100.0
+                )
+                win = rv20.dropna().tail(252)
+                if len(win) >= 40:
+                    p90 = float(win.quantile(0.9))
+                    if p90 > 0 and iv > p90:
+                        out["vega_risk"] = True
+            except Exception:
+                pass
+    return out
+
 def _earnings_date_from_quote_info(info: dict):
     """Next earnings as YYYY-MM-DD from yfinance ``.info``-style flat dict (unix ms/s or nested)."""
     if not info:

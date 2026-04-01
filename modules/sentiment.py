@@ -81,6 +81,44 @@ class QuantSentiment:
 
 class Sentiment:
     @staticmethod
+    def analyze_news_bias(headlines):
+        """
+        Lightweight keyword NLP on headline titles: aggregate score in [-1, 1].
+        Empty or invalid input returns 0.0 (neutral).
+        """
+        if not headlines:
+            return 0.0
+        bullish_kw = (
+            "upgrade", "beat", "growth", "surge", "record", "bullish", "strong", "profit",
+            "raises guidance", "raises outlook", "outperform", "buy", "breakthrough", "expansion",
+            "partnership", "approval", "innovation", "momentum", "soar", "rally", "gain",
+        )
+        bearish_kw = (
+            "downgrade", "miss", "investigation", "lawsuit", "sec", "recall", "layoff",
+            "bankrupt", "warning", "weak", "bearish", "selloff", "plunge", "crash", "cut",
+            "cuts guidance", "lowers guidance", "underperform", "sell", "fraud", "probe",
+            "concern", "decline", "loss", "disappoint", "slump",
+        )
+        total = 0.0
+        n = 0
+        for h in headlines:
+            if isinstance(h, dict):
+                t = str(h.get("title") or "")
+            else:
+                t = str(h)
+            t_low = t.lower()
+            b = sum(1 for k in bullish_kw if k in t_low)
+            s = sum(1 for k in bearish_kw if k in t_low)
+            raw = float(b - s)
+            if b == 0 and s == 0:
+                continue
+            n += 1
+            total += np.tanh(raw / 2.0)
+        if n == 0:
+            return 0.0
+        return float(np.clip(total / n, -1.0, 1.0))
+
+    @staticmethod
     def fear_greed(df, vix_val=None):
         sc = [min(100, max(0, TA.rsi(df["Close"]).iloc[-1]))]
         sma200 = df["Close"].rolling(200).mean().iloc[-1] if len(df) >= 200 else df["Close"].mean()

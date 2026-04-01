@@ -1,6 +1,6 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  CASHFLOW COMMAND CENTER v18.0 FREE EDITION · LIQUIDITY & GEX          ║
+║  CASHFLOW COMMAND CENTER v19.0 FREE EDITION · DARK POOL & NEWS BIAS     ║
 ║  Modular architecture: same UI, same logic, clean separation.           ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 """
@@ -16,7 +16,7 @@ if _app_root not in sys.path:
 import streamlit as st
 
 st.set_page_config(
-    page_title="CashFlow Command Center v18.0 Free Edition",
+    page_title="CashFlow Command Center v19.0 Free Edition",
     page_icon="💰",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -85,7 +85,7 @@ for _import_try in range(_IMPORT_KEYERROR_RETRIES):
             from modules.data import (
                 retry_fetch, _yfinance_ticker, _client_suggests_mobile_chart,
                 fetch_stock, _ticker_pct_change_1d, fetch_intraday_series,
-                fetch_info, fetch_options, list_option_expiration_dates, compute_iv_rank_proxy, fetch_news,
+                fetch_info, fetch_options, list_option_expiration_dates, compute_iv_rank_proxy, fetch_news_headlines,
                 fetch_earnings_date, fetch_earnings_calendar_display, fetch_macro,
                 _PLOTLY_UI_CONFIG, _PLOTLY_PAPER_BG, _PLOTLY_PLOT_BG,
                 _PLOTLY_CASH_UP, _PLOTLY_CASH_DOWN, _PLOTLY_GRID, _PLOTLY_FONT_MAIN, _PLOTLY_BLUE, _PLOTLY_AXIS_TITLE,
@@ -155,7 +155,7 @@ def main():
 
     # ── Watchlist editor (must run before Mission Control so sb_scanner is committed same run)
     _wl_expanded = bool(st.session_state.pop("_open_watchlist_editor", False))
-    st.caption("Institutional Risk Oversight & Gamma Exposure Architecture.")
+    st.caption("Institutional Flow Tracking & NLP Sentiment Architecture.")
     def _persist_watchlist_text_callback():
         raw = st.session_state.get("sb_scanner", "")
         w = _parse_watchlist_string(raw)
@@ -509,6 +509,7 @@ def main():
     use_quant_models = bool(cfg.get("use_quant_models", DEFAULT_CONFIG["use_quant_models"]))
     earnings_near = ctx.earnings_near; earnings_dt = ctx.earnings_dt
     days_to_earnings = ctx.days_to_earnings; earnings_parse_failed = ctx.earnings_parse_failed
+    st.session_state["_cf_earnings_days"] = days_to_earnings
     earn_glance = ctx.earn_glance
     wk_label = ctx.wk_label; wk_color = ctx.wk_color
     struct = ctx.struct; fg = ctx.fg; fg_label = ctx.fg_label
@@ -528,7 +529,7 @@ def main():
         "<div style='margin:2px 0 10px 0'>"
         "<span style='font-size:0.72rem;color:#c4b5fd;padding:3px 10px;border-radius:6px;"
         "border:1px solid rgba(139,92,246,0.45);background:rgba(76,29,149,0.22);font-weight:600;letter-spacing:0.04em'>"
-        "v18.0 · LIQUIDITY & GEX</span></div>",
+        "v19.0 · DARK POOL & NEWS BIAS</span></div>",
         unsafe_allow_html=True,
     )
     qs_color = ctx.qs_color; qs_status = ctx.qs_status
@@ -694,6 +695,55 @@ def main():
         f"<span class='cf-tiptext'>{why_trade_tip}</span></span>"
         "<span style='font-size:.62rem;color:#94a3b8'>Why this trade?</span></div>"
     )
+    _headlines_v19 = []
+    _news_bias_v19 = None
+    try:
+        _headlines_v19 = fetch_news_headlines(ticker)
+        _news_bias_v19 = (
+            float(Sentiment.analyze_news_bias(_headlines_v19)) if _headlines_v19 else 0.0
+        )
+    except Exception:
+        _headlines_v19 = []
+        _news_bias_v19 = None
+    _inst_flow_lbl = "—"
+    try:
+        _dp_tr = TA.get_dark_pool_proxy(df)
+        if _dp_tr is not None and len(_dp_tr) and "dark_pool_alert" in _dp_tr.columns:
+            _inst_flow_lbl = (
+                "High Accumulation" if bool(_dp_tr["dark_pool_alert"].iloc[-1]) else "Normal"
+            )
+    except Exception:
+        pass
+    _news_sent_lbl = "—"
+    if _news_bias_v19 is not None and _headlines_v19:
+        if _news_bias_v19 > 0.15:
+            _news_sent_lbl = "Positive"
+        elif _news_bias_v19 < -0.15:
+            _news_sent_lbl = "Negative"
+        else:
+            _news_sent_lbl = "Neutral"
+    _score_disp = f"{_news_bias_v19:+.2f}" if _news_bias_v19 is not None else "—"
+    _lines_v19 = []
+    for _it in (_headlines_v19[:3] if _headlines_v19 else []):
+        _tit = (_it.get("title") or "")[:200]
+        _lines_v19.append(f"• {_html_mod.escape(_tit)}")
+    _news_why_block = (
+        f"<div style='margin:0 0 10px 0;padding:10px 12px;border-radius:8px;border:1px solid rgba(56,189,248,.35);background:rgba(8,47,73,.22)'>"
+        f"<div style='font-size:.62rem;font-weight:800;color:#38bdf8;letter-spacing:.12em;margin-bottom:6px'>NEWS BIAS (NLP)</div>"
+        f"<div style='font-size:.85rem;font-weight:700;color:#e2e8f0;margin-bottom:6px'>Aggregate score: <span class='mono'>{_score_disp}</span> "
+        f"<span style='color:#64748b;font-weight:500'>(−1 bearish … +1 bullish)</span></div>"
+        + (
+            "<div style='font-size:.74rem;color:#94a3b8;line-height:1.45'>" + "<br>".join(_lines_v19) + "</div>"
+            if _lines_v19
+            else "<div style='font-size:.72rem;color:#64748b'>No headlines available.</div>"
+        )
+        + "</div>"
+    )
+    _trade_hdr_stack = f"{trade_hdr_html}{_news_why_block}<div style='margin:0 0 10px 0;padding:8px 12px;border-radius:8px;border:1px solid rgba(148,163,184,.28);font-size:.78rem;color:#cbd5e1;line-height:1.5'>"
+    _trade_hdr_stack += (
+        f"<strong style='color:#93c5fd'>Institutional Flow:</strong> {_html_mod.escape(str(_inst_flow_lbl))}<br>"
+        f"<strong style='color:#93c5fd'>News Sentiment:</strong> {_html_mod.escape(str(_news_sent_lbl))}</div>"
+    )
 
     # ── RECOMMENDED TRADE (optimal strike from options engine) ──
     _cf_em_safety = {"price": float(price), "strike": None, "iv_pct": None, "dte": None}
@@ -802,7 +852,7 @@ def main():
             )
         master_html = (
             f"<div class='trade-master'>"
-            f"{trade_hdr_html}"
+            f"{_trade_hdr_stack}"
             f"{iv_badge_html}"
             f"{_prob_subhdr}"
             f"{_safe_trade_html}"
@@ -819,7 +869,7 @@ def main():
         _iv_off = _iv_rank_pill_html(ticker, price, None, stub="offline")
         master_html = (
             f"<div class='trade-master'>"
-            f"{trade_hdr_html}"
+            f"{_trade_hdr_stack}"
             f"{_iv_off}"
             f"<p style='color:#e2e8f0;font-size:1rem;line-height:1.5;margin:0'>"
             f"No option expirations from Yahoo for <span class='mono'>{_html_mod.escape(ticker)}</span> after retries. "
@@ -916,7 +966,7 @@ def main():
                 _f_note = "Strict desk liquidity filters blocked every strike; this is the nearest 3-7% OTM put line."
             master_html = (
                 f"<div class='trade-master'>"
-                f"{trade_hdr_html}"
+                f"{_trade_hdr_stack}"
                 f"{_iv_fb}"
                 f"{_safe_fb_html}"
                 f"<p style='color:#e2e8f0;font-size:1rem;line-height:1.5;margin:0 0 10px 0;font-weight:600'>{_f_headline}</p>"
@@ -930,7 +980,7 @@ def main():
             _fallback_action = _html_mod.escape(action_strat.title())
             master_html = (
                 f"<div class='trade-master'>"
-                f"{trade_hdr_html}"
+                f"{_trade_hdr_stack}"
                 f"{_iv_ns}"
                 f"<p style='color:#e2e8f0;font-size:1rem;line-height:1.5;margin:0 0 8px 0'>"
                 f"Desk filters are too strict for this snapshot. Use a manual {_fallback_action} line around 3-7% OTM on the nearest monthly expiry."
@@ -1684,7 +1734,7 @@ def main():
                                         "MC PoP %": st.column_config.NumberColumn(
                                             "MC PoP %",
                                             format="%.1f%%",
-                                            help="10k antithetic simulations — v18.0 Liquidity & GEX Mode",
+                                            help="10k antithetic simulations — v19.0 Dark Pool & News Bias Mode",
                                         ),
                                     },
                                 )
@@ -2264,6 +2314,10 @@ def main():
                                         <div style='font-size:.65rem;color:#64748b;text-transform:uppercase'>GEX Regime</div>
                                         <div class='mono' style='font-size:.72rem;color:#e2e8f0;font-weight:700;line-height:1.25'>{_html_mod.escape(str(r.get("GEX Regime") or "—"))}</div>
                                     </div>
+                                    <div style='text-align:center;min-width:120px'>
+                                        <div style='font-size:.65rem;color:#64748b;text-transform:uppercase'>Flow / Bias</div>
+                                        <div class='mono' style='font-size:.7rem;color:#e2e8f0;font-weight:700;line-height:1.25'>{_html_mod.escape(str(r.get("Flow / Bias") or "—"))}</div>
+                                    </div>
                                     <div style='text-align:center;min-width:72px'>
                                         <div style='font-size:.65rem;color:#64748b;text-transform:uppercase'>PoP</div>
                                         <div class='mono' style='font-size:.82rem;color:#c4b5fd;font-weight:700'>{(f"{float(r.get('diamond_pop', 0)):.0f}%" if int(r.get("diamond_n") or 0) > 0 else "—")}</div>
@@ -2302,6 +2356,7 @@ def main():
                                     ),
                                     "EM Safety": r.get("EM Safety", "—"),
                                     "GEX Regime": r.get("GEX Regime", "—"),
+                                    "Flow / Bias": r.get("Flow / Bias", "—"),
                                     "Gold Zone Dist %": float(r["dist_gz"]),
                                     "Daily": r["struct"],
                                     "Summary": r["summary"],
@@ -2340,6 +2395,10 @@ def main():
                                     "GEX Regime": st.column_config.TextColumn(
                                         "GEX Regime",
                                         help="Gamma Flip: the price level where market maker hedging accelerates volatility. 🛡️ STABLE = spot above flip; ⚠️ TURBULENT = spot below flip.",
+                                    ),
+                                    "Flow / Bias": st.column_config.TextColumn(
+                                        "Flow / Bias",
+                                        help="🐋 WHALE when last session volume exceeds 2σ above 30-day mean; 📈/📉 news bias from cached Yahoo headlines (NLP keywords).",
                                     ),
                                     "Gold Zone Dist %": st.column_config.NumberColumn("Gold Zone Dist", format="%+.1f%%"),
                                     "Daily": st.column_config.TextColumn("Daily"),

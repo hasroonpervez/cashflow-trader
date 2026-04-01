@@ -15,14 +15,14 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 from .ta import TA
-from .data import _PLOTLY_UI_CONFIG
+from .data import _PLOTLY_UI_CONFIG, compute_iv_rank_proxy, fetch_news_headlines
+from .sentiment import Sentiment
 from .options import (
     Opt,
     calc_gold_zone, calc_confluence_points, detect_diamonds,
     latest_diamond_status, diamond_win_rate,
     scan_watchlist_edge_rows, quant_edge_status_line,
 )
-from .data import compute_iv_rank_proxy
 from .chart import build_chart
 from .config import save_config, load_config, _overlay_prefs_from_session, _persist_overlay_prefs
 
@@ -760,6 +760,7 @@ def _fragment_technical_zone(
             _gf_chart = None
     except (TypeError, ValueError):
         _gf_chart = None
+    _earn_dte = st.session_state.get("_cf_earnings_days")
     fig_p, fig_v, fig_r, fig_m = build_chart(
         df,
         ticker,
@@ -776,6 +777,8 @@ def _fragment_technical_zone(
         em_days_to_expiry=_dte_em if _dte_em and int(_dte_em) > 0 else None,
         em_expiry=_exp_em,
         gamma_flip_price=_gf_chart,
+        earnings_days_to=_earn_dte,
+        iv_overlay_symbol=ticker,
     )
     st.plotly_chart(fig_p, use_container_width=True, config=_PLOTLY_UI_CONFIG)
     st.divider()
@@ -874,6 +877,27 @@ def _fragment_technical_zone(
                     if isinstance(_bluf_desk, dict)
                     else ""
                 )
+                _d_inst = "—"
+                _d_news = "—"
+                try:
+                    _dpd = TA.get_dark_pool_proxy(df)
+                    if _dpd is not None and len(_dpd) and "dark_pool_alert" in _dpd.columns:
+                        _d_inst = "High Accumulation" if bool(_dpd["dark_pool_alert"].iloc[-1]) else "Normal"
+                except Exception:
+                    pass
+                try:
+                    _dhd = fetch_news_headlines(ticker)
+                    _bsd = float(Sentiment.analyze_news_bias(_dhd)) if _dhd else 0.0
+                    if _dhd:
+                        _d_news = "Positive" if _bsd > 0.15 else ("Negative" if _bsd < -0.15 else "Neutral")
+                except Exception:
+                    pass
+                _flow_diamond_html = (
+                    f"<div style='margin:10px 0;padding:8px 12px;border-radius:8px;border:1px solid rgba(148,163,184,.22);"
+                    f"font-size:.82rem;color:#cbd5e1;line-height:1.5'>"
+                    f"<strong style='color:#93c5fd'>Institutional Flow:</strong> {_html_mod.escape(str(_d_inst))}<br>"
+                    f"<strong style='color:#93c5fd'>News Sentiment:</strong> {_html_mod.escape(str(_d_news))}</div>"
+                )
                 st.markdown(
                     f"<div style='background:rgba(15,23,42,.95);border:1px solid {why_color};border-radius:12px;padding:18px 20px;margin:12px 0'>"
                     f"<div style='font-size:.8rem;color:{why_color};text-transform:uppercase;letter-spacing:.1em;font-weight:700;margin-bottom:6px'>"
@@ -883,6 +907,7 @@ def _fragment_technical_zone(
                     f"<div style='color:#94a3b8;font-size:.88rem;margin-bottom:12px;line-height:1.5'>{why_action}</div>"
                     f"{_diamond_em_html}"
                     f"{quant_overlay}"
+                    f"{_flow_diamond_html}"
                     f"{_tgr_desk}"
                     f"{win_badge}"
                     f"<div style='font-size:.72rem;color:#64748b;text-transform:uppercase;margin-bottom:6px'>Diamond checklist</div>"
@@ -1068,7 +1093,7 @@ def _options_scan_column_config(*, put_table: bool):
         "MC PoP %": st.column_config.NumberColumn(
             "MC PoP %",
             format="%.1f%%",
-            help="10k antithetic simulations — v18.0 Liquidity & GEX Mode",
+            help="10k antithetic simulations — v19.0 Dark Pool & News Bias Mode",
         ),
         "Vol": st.column_config.NumberColumn("Volume", format="%.0f"),
         "OI": st.column_config.NumberColumn("OI", format="%.0f"),

@@ -13,7 +13,7 @@ from datetime import datetime
 from .ta import TA
 from .data import (
     fetch_stock, _ticker_pct_change_1d, fetch_options, fetch_macro,
-    fetch_news, fetch_earnings_date, fetch_earnings_calendar_display,
+    fetch_news_headlines, fetch_earnings_date, fetch_earnings_calendar_display,
     _PLOTLY_UI_CONFIG, _PLOTLY_GRID, _PLOTLY_FONT_MAIN,
     _PLOTLY_PAPER_BG, _PLOTLY_PLOT_BG, _PLOTLY_CASH_UP, _PLOTLY_CASH_DOWN,
     _client_suggests_mobile_chart,
@@ -144,7 +144,7 @@ def build_context(ticker: str, cfg: dict) -> Optional[DashContext]:
             f_1mo = submit_with_script_ctx(pool, fetch_stock, ticker, "1mo", "1d")
             f_vix = submit_with_script_ctx(pool, fetch_stock, "^VIX", "1mo", "1d")
             f_macro = submit_with_script_ctx(pool, fetch_macro)
-            f_news = submit_with_script_ctx(pool, fetch_news, ticker)
+            f_news = submit_with_script_ctx(pool, fetch_news_headlines, ticker)
             f_earn = submit_with_script_ctx(pool, fetch_earnings_date, ticker)
 
             ctx.df = f_df.result()

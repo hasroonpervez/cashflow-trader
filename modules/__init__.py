@@ -1,1 +1,1 @@
-# CashFlow Command Center v18.0 Free Edition — modular package
+# CashFlow Command Center v19.0 Free Edition — modular package

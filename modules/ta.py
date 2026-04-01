@@ -275,6 +275,20 @@ class TA:
         return "RANGING", sh, sl
 
     @staticmethod
+    def get_dark_pool_proxy(df):
+        """30-day rolling volume mean/std; flag days > 2σ above mean as Dark Pool Alert (volume anomaly proxy)."""
+        if df is None or df.empty or "Volume" not in df.columns:
+            return pd.DataFrame()
+        vol = pd.to_numeric(df["Volume"], errors="coerce")
+        mu = vol.rolling(30, min_periods=20).mean()
+        sd = vol.rolling(30, min_periods=20).std(ddof=0)
+        alert = (vol > (mu + 2.0 * sd)) & sd.notna() & (sd > 0)
+        return pd.DataFrame(
+            {"vol_mean_30": mu, "vol_std_30": sd, "dark_pool_alert": alert},
+            index=df.index,
+        )
+
+    @staticmethod
     def hurst(series):
         """Hurst exponent via variance ratio (aggregated variance method).
         Uses log returns. Var(q-period returns) scales as q^(2H).

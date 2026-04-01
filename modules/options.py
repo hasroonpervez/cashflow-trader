@@ -16,7 +16,8 @@ except ImportError:  # keep app usable if scipy is unavailable
     norm = None
 
 from .ta import TA
-from .data import fetch_stock, fetch_options
+from .data import fetch_stock, fetch_options, fetch_news_headlines
+from .sentiment import Sentiment
 from .streamlit_threading import make_script_ctx_pool, submit_with_script_ctx
 
 try:
@@ -724,6 +725,18 @@ def detect_diamonds(
                 quant_exit_price = 0.0
 
         if is_blue_diamond:
+            whale_bonus = 0
+            try:
+                _dp = TA.get_dark_pool_proxy(sub)
+                if (
+                    _dp is not None
+                    and not _dp.empty
+                    and "dark_pool_alert" in _dp.columns
+                    and bool(_dp["dark_pool_alert"].iloc[-1])
+                ):
+                    whale_bonus = 2
+            except Exception:
+                whale_bonus = 0
             magnet = 0
             try:
                 vp_sub = TA.volume_profile(sub)
@@ -759,7 +772,7 @@ def detect_diamonds(
                 "date": df.index[i],
                 "price": pi,
                 "type": "blue",
-                "score": sc + magnet + gex_adj,
+                "score": sc + magnet + gex_adj + whale_bonus,
                 "rsi": rsi_i,
                 "weekly": wk_bias,
                 "suggested_shares": size_suggestion,
@@ -946,6 +959,36 @@ def scan_single_ticker(tkr, correlation_haircut=1.0):
         except Exception:
             em_safety = "—"
 
+        flow_bias = "—"
+        news_bias_score = None
+        try:
+            _dp_s = TA.get_dark_pool_proxy(df)
+            whale_ok = (
+                _dp_s is not None
+                and not _dp_s.empty
+                and bool(_dp_s["dark_pool_alert"].iloc[-1])
+            )
+        except Exception:
+            whale_ok = False
+        try:
+            _hl = fetch_news_headlines(tkr)
+            news_bias_score = float(Sentiment.analyze_news_bias(_hl)) if _hl else 0.0
+        except Exception:
+            _hl = []
+            news_bias_score = None
+        parts = []
+        if whale_ok:
+            parts.append("🐋 WHALE")
+        if news_bias_score is not None:
+            if news_bias_score > 0.15:
+                parts.append("📈 BULLISH NEWS")
+            elif news_bias_score < -0.15:
+                parts.append("📉 BEARISH NEWS")
+        if parts:
+            flow_bias = " · ".join(parts)
+        elif news_bias_score is not None:
+            flow_bias = "—"
+
         return {
             "ticker": tkr,
             "price": price,
@@ -970,6 +1013,8 @@ def scan_single_ticker(tkr, correlation_haircut=1.0):
             "gz_hvn": gz_comp.get("HVN"),
             "EM Safety": em_safety,
             "GEX Regime": gex_regime,
+            "Flow / Bias": flow_bias,
+            "news_bias_score": news_bias_score,
         }
     except Exception:
         return None

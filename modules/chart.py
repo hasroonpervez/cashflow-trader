@@ -23,6 +23,7 @@ from .data import (
     _PLOTLY_UI_CONFIG, _PLOTLY_PAPER_BG, _PLOTLY_PLOT_BG, _PLOTLY_GRID,
     _PLOTLY_FONT_MAIN, _PLOTLY_AXIS_TITLE, _PLOTLY_CASH_UP, _PLOTLY_CASH_DOWN,
     _PLOTLY_BLUE, _PLOTLY_BLUE_DEEP, _PLOTLY_BLUE_DEEPER, _PLOTLY_SLATE,
+    compute_iv_earnings_chart_overlay,
 )
 
 def _levels_nearest(levels, price, n):
@@ -44,7 +45,8 @@ def _chart_hoverlabel():
 def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_sr=True,
                 show_ichi=False, show_super=False, diamonds=None, gold_zone=None,
                 mobile_layout=False, em_lower=None, em_upper=None, em_expiry=None,
-                em_iv_pct=None, em_days_to_expiry=None, gamma_flip_price=None):
+                em_iv_pct=None, em_days_to_expiry=None, gamma_flip_price=None,
+                earnings_days_to=None, iv_overlay_symbol=None):
     """Build four separate figures: price (+ overlays), volume, RSI, MACD — easier to read than one stacked chart.
 
     When ``mobile_layout`` is True (narrow UA / phone), the price panel drops the legend, tightens margins,
@@ -390,6 +392,46 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
     _p_height = 450 if mobile_layout else 540
     _p_margin = dict(l=5, r=5, t=52, b=40) if mobile_layout else dict(l=56, r=88, t=56, b=44)
     _p_show_legend = not mobile_layout
+    _iv_lines = []
+    try:
+        _sym_ov = iv_overlay_symbol if iv_overlay_symbol else ticker
+        _ivp = None
+        try:
+            if em_iv_pct is not None and float(em_iv_pct) > 0:
+                _ivp = float(em_iv_pct)
+        except (TypeError, ValueError):
+            _ivp = None
+        _ov = compute_iv_earnings_chart_overlay(
+            df, str(_sym_ov).upper().strip(), earnings_days_to, _ivp, float(last_px)
+        )
+        if _ov.get("show_crush") and _ov.get("avg_crush_pct") is not None:
+            _cr = float(_ov["avg_crush_pct"])
+            _iv_lines.append(f"Avg. Post-Earnings IV Crush: {_cr:+.1f}%")
+        if _ov.get("vega_risk"):
+            _iv_lines.append("⚠️ VEGA RISK: IV Crush likely")
+    except Exception:
+        pass
+    _iv_ann_text = "<br>".join(_iv_lines) if _iv_lines else ""
+    _iv_annotations = []
+    if _iv_ann_text:
+        _iv_annotations.append(
+            dict(
+                xref="paper",
+                yref="paper",
+                x=0.99,
+                y=0.99,
+                xanchor="right",
+                yanchor="top",
+                text=_iv_ann_text,
+                showarrow=False,
+                align="right",
+                font=dict(size=10, color="#a5b4fc", family="Inter, system-ui, sans-serif"),
+                bgcolor="rgba(15,23,42,0.72)",
+                bordercolor="rgba(99,102,241,0.35)",
+                borderwidth=1,
+                borderpad=4,
+            )
+        )
     fig_p.update_layout(
         template="plotly_dark",
         paper_bgcolor=_PLOTLY_PAPER_BG,
@@ -423,6 +465,7 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
             title_font=_legend_title_font,
         ),
         hoverlabel=_chart_hoverlabel(),
+        annotations=_iv_annotations,
     )
     fig_p.update_xaxes(
         showgrid=True,
