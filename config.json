@@ -12,5 +12,5 @@
   "overlay_super": false,
   "overlay_diamonds": true,
   "overlay_gold": true,
-  "use_quant_models": false
+  "use_quant_models": true
 }

@@ -165,7 +165,7 @@ def build_context(ticker: str, cfg: dict) -> Optional[DashContext]:
     ctx.hi52 = float(df["High"].max())
     ctx.lo52 = float(df["Low"].min())
     ctx.vix_v = ctx.macro.get("VIX", {}).get("price", 0)
-    use_quant = bool(ctx.cfg.get("use_quant_models", False))
+    use_quant = bool(ctx.cfg.get("use_quant_models", DEFAULT_CONFIG["use_quant_models"]))
     ctx.qs, ctx.qb = quant_edge_score(df, ctx.vix_v, use_quant=use_quant)
 
     # Earnings
@@ -193,7 +193,7 @@ def build_context(ticker: str, cfg: dict) -> Optional[DashContext]:
     ctx.diamonds = detect_diamonds(
         df,
         ctx.df_wk,
-        use_quant=bool(ctx.cfg.get("use_quant_models", False)),
+        use_quant=bool(ctx.cfg.get("use_quant_models", DEFAULT_CONFIG["use_quant_models"])),
     )
     ctx.latest_d = latest_diamond_status(ctx.diamonds)
     ctx.d_wr, ctx.d_avg, ctx.d_n = diamond_win_rate(df, ctx.diamonds, forward_bars=10)

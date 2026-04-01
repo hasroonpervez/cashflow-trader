@@ -27,7 +27,7 @@ DEFAULT_CONFIG = {
     "overlay_super": False,
     "overlay_diamonds": True,
     "overlay_gold": True,
-    "use_quant_models": False,
+    "use_quant_models": True,
 }
 
 _LEGACY_CONFIG_KEYS = frozenset({

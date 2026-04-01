@@ -2,7 +2,6 @@
 Options analytics — Black-Scholes, Greeks, EV, Kelly, Volatility Skew,
 Quant Edge Score, Gold Zone, Confluence Points, Diamond Signals, Opt scanner.
 """
-import hashlib
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -743,11 +742,28 @@ def scan_single_ticker(tkr, correlation_haircut=1.0):
         else:
             summary = "Bearish pressure. Defensive posture advised."
 
-        return {"ticker": tkr, "price": price, "chg_pct": chg_pct, "qs": qs,
-                "cp_score": cp_score, "cp_max": cp_max, "d_status": d_status,
-                "d_class": d_class, "gold_zone": gold_zone, "dist_gz": dist_gz,
-                "struct": struct, "wk_trend": wk_lbl, "summary": summary,
-                "kelly_full": k_full, "kelly_half": k_half, "Adj. Kelly %": k_half}
+        d_wr, _d_avg, d_n = diamond_win_rate(df, diamonds, forward_bars=10)
+
+        return {
+            "ticker": tkr,
+            "price": price,
+            "chg_pct": chg_pct,
+            "qs": qs,
+            "cp_score": cp_score,
+            "cp_max": cp_max,
+            "d_status": d_status,
+            "d_class": d_class,
+            "gold_zone": gold_zone,
+            "dist_gz": dist_gz,
+            "struct": struct,
+            "wk_trend": wk_lbl,
+            "summary": summary,
+            "kelly_full": k_full,
+            "kelly_half": k_half,
+            "Adj. Kelly %": k_half,
+            "diamond_pop": float(d_wr),
+            "diamond_n": int(d_n),
+        }
     except Exception:
         return None
 
@@ -761,6 +777,13 @@ class Opt:
     DELTA_LOW, DELTA_HIGH = 0.15, 0.20
     MIN_OI, MIN_VOL = 100, 10
     RELAXED_MIN_OI, RELAXED_MIN_VOL = 10, 1
+
+    @staticmethod
+    def _safe_mc_pop(**kwargs):
+        try:
+            return float(MonteCarloEngine.calc_pop(**kwargs))
+        except Exception:
+            return 50.0
 
     @staticmethod
     def _sc(otm, py, ann, vol, delta=None):
@@ -787,7 +810,7 @@ class Opt:
             iv_dec = iv if iv > 0 else 0.5
             greeks = bs_greeks(price, s, T_y, rfr, iv_dec, "call")
             delta = greeks["delta"]
-            mc_pop = MonteCarloEngine.calc_pop(
+            mc_pop = Opt._safe_mc_pop(
                 S=price,
                 K=s,
                 T=T_y,
@@ -814,7 +837,7 @@ class Opt:
                 iv_dec = iv if iv > 0 else 0.5
                 greeks = bs_greeks(price, s, T_y, rfr, iv_dec, "call")
                 delta = greeks["delta"]
-                mc_pop = MonteCarloEngine.calc_pop(
+                mc_pop = Opt._safe_mc_pop(
                     S=price,
                     K=s,
                     T=T_y,
@@ -849,7 +872,7 @@ class Opt:
             iv_dec = iv if iv > 0 else 0.5
             greeks = bs_greeks(price, s, T_y, rfr, iv_dec, "put")
             delta = greeks["delta"]
-            mc_pop = MonteCarloEngine.calc_pop(
+            mc_pop = Opt._safe_mc_pop(
                 S=price,
                 K=s,
                 T=T_y,
@@ -875,7 +898,7 @@ class Opt:
                 iv_dec = iv if iv > 0 else 0.5
                 greeks = bs_greeks(price, s, T_y, rfr, iv_dec, "put")
                 delta = greeks["delta"]
-                mc_pop = MonteCarloEngine.calc_pop(
+                mc_pop = Opt._safe_mc_pop(
                     S=price,
                     K=s,
                     T=T_y,
@@ -1007,59 +1030,99 @@ class PortfolioRisk:
         return 1.0
 
 
-def _mc_rng_seed(S, K, T, r, sigma, premium, option_type, strat, simulations):
-    """Stable seed so PoP does not flicker on Streamlit reruns for the same contract."""
-    payload = (
-        f"{float(S):.8g}|{float(K):.8g}|{float(T):.12g}|{float(r):.8g}|{float(sigma):.8g}|"
-        f"{float(premium):.8g}|{option_type}|{strat}|{int(simulations)}"
-    )
-    h = hashlib.sha256(payload.encode()).digest()
-    return int.from_bytes(h[:8], "big", signed=False) % (2**31 - 1)
-
-
 class MonteCarloEngine:
     @staticmethod
-    def calc_pop(S, K, T, r, sigma, premium, option_type="put", strat="short", simulations=10000):
+    def calc_pop(
+        S,
+        K,
+        T,
+        r,
+        sigma,
+        premium,
+        option_type="put",
+        strat="short",
+        simulations=10000,
+        dividend_yield=0.0,
+        skew=0.0,
+    ):
         """
-        Runs a vectorized Monte Carlo simulation using Geometric Brownian Motion
-        to calculate the Probability of Profit (PoP).
-
-        S: Spot Price
-        K: Strike Price
-        T: Time to Expiration (in years)
-        r: Risk-free rate
-        sigma: Implied Volatility
-        premium: Option premium collected/paid
+        Vectorized GBM Monte Carlo Probability of Profit (PoP).
+        Antithetic standard normals + fixed seed (42) for stable Streamlit reruns.
+        Optional dividend yield in the drift; optional skew tilts shocks (Edgeworth-style,
+        complementary to Corrado–Su closed-form pricing elsewhere in this module).
         """
         if T <= 0 or sigma <= 0 or S <= 0:
-            return 0.0
+            return 50.0
 
         sims = int(max(100, simulations))
-        half = sims // 2
-        if half < 1:
-            half = 1
-        rng = np.random.default_rng(
-            _mc_rng_seed(S, K, T, r, sigma, premium, option_type, strat, sims)
-        )
+        half = max(1, sims // 2)
+        rng = np.random.default_rng(seed=42)
         Z_half = rng.standard_normal(half)
         Z = np.concatenate([Z_half, -Z_half])
-        S_T = S * np.exp((r - 0.5 * sigma**2) * T + sigma * np.sqrt(T) * Z)
+        if abs(float(skew)) > 1e-12:
+            Z = Z + (float(skew) / 6.0) * (Z**2 - 1.0)
+
+        drift = r - float(dividend_yield) - 0.5 * sigma**2
+        S_T = S * np.exp(drift * T + sigma * np.sqrt(T) * Z)
 
         if option_type == "put":
-            breakeven = K - premium
+            be = (K - premium)
             if strat == "short":
-                winning_paths = np.sum(S_T >= breakeven)
+                success = np.sum(S_T >= be)
             else:
-                winning_paths = np.sum(S_T < breakeven)
+                success = np.sum(S_T < be)
         elif option_type == "call":
-            breakeven = K + premium
+            be = (K + premium)
             if strat == "short":
-                winning_paths = np.sum(S_T <= breakeven)
+                success = np.sum(S_T <= be)
             else:
-                winning_paths = np.sum(S_T > breakeven)
+                success = np.sum(S_T > be)
         else:
-            return 0.0
+            return 50.0
 
         n_paths = int(Z.shape[0])
-        return float((winning_paths / n_paths) * 100.0) if n_paths > 0 else 0.0
+        return float((success / n_paths) * 100.0) if n_paths > 0 else 50.0
+
+
+def build_chain_mc_dataframe(price, calls_df, puts_df, dte, rfr=0.045):
+    """Every strike in the Yahoo chain with vectorized MC PoP % (short premium)."""
+    T_y = max(int(dte), 1) / 365.0
+    rows = []
+    for label, sub, otype in (("Call", calls_df, "call"), ("Put", puts_df, "put")):
+        if sub is None or sub.empty:
+            continue
+        for _, r in sub.iterrows():
+            try:
+                strike = float(pd.to_numeric(r.get("strike"), errors="coerce") or 0.0)
+                b = float(pd.to_numeric(r.get("bid"), errors="coerce") or 0.0)
+                a = float(pd.to_numeric(r.get("ask"), errors="coerce") or 0.0)
+                mid = (b + a) / 2.0 if b > 0 and a > 0 else 0.0
+                if mid <= 0.01 or strike <= 0:
+                    continue
+                iv = float(pd.to_numeric(r.get("impliedVolatility"), errors="coerce") or 0.0)
+                iv_dec = iv if iv > 0 else 0.5
+                mc = MonteCarloEngine.calc_pop(
+                    price,
+                    strike,
+                    T_y,
+                    rfr,
+                    iv_dec,
+                    mid,
+                    option_type=otype,
+                    strat="short",
+                )
+                rows.append(
+                    {
+                        "Type": label,
+                        "Strike": strike,
+                        "Bid": b,
+                        "Ask": a,
+                        "Mid": round(mid, 4),
+                        "IV %": round(iv * 100.0, 2) if iv else round(iv_dec * 100.0, 2),
+                        "MC PoP %": round(float(mc), 1),
+                    }
+                )
+            except Exception:
+                continue
+    return pd.DataFrame(rows)
 

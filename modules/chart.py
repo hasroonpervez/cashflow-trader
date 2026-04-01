@@ -177,6 +177,22 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
             annotation_font=dict(color="#fde047", size=11, family="JetBrains Mono"),
         )
 
+    try:
+        hvn_levels = TA.get_volume_nodes(df)
+        for y in sorted(hvn_levels, key=lambda x: abs(float(x) - last_px))[:10]:
+            fig_p.add_hline(
+                y=float(y),
+                line_dash="dash",
+                line_color="rgba(167,139,250,0.42)",
+                line_width=1.15,
+                opacity=0.5,
+                annotation_text="HVN",
+                annotation_position=ann_side,
+                annotation_font=dict(size=9, color="rgba(196,181,253,0.88)"),
+            )
+    except Exception:
+        pass
+
     if diamonds is not None:
         blue_d = [d for d in diamonds if d["type"] == "blue"]
         pink_d = [d for d in diamonds if d["type"] == "pink"]

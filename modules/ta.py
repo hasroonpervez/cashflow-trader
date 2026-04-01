@@ -146,6 +146,43 @@ class TA:
         return pd.DataFrame(rows)
 
     @staticmethod
+    def get_volume_nodes(df, bins=60, lookback_days=90):
+        """High-volume nodes (HVN) from volume-at-price over the recent window."""
+        if df.empty or len(df) < 10:
+            return []
+        if "Close" not in df.columns or "Volume" not in df.columns:
+            return []
+        recent = df.tail(lookback_days).copy()
+        cmin = float(recent["Close"].min())
+        cmax = float(recent["Close"].max())
+        price_range = cmax - cmin
+        if not np.isfinite(price_range) or price_range <= 0:
+            return []
+        bin_width = price_range / bins
+        edges = np.arange(cmin, cmax + bin_width, bin_width)
+        if len(edges) < 2:
+            return []
+        recent = recent.copy()
+        recent["price_bin"] = pd.cut(recent["Close"], bins=edges, include_lowest=True)
+        vprofile = recent.groupby("price_bin", observed=True)["Volume"].sum()
+        if vprofile.empty:
+            return []
+        mu = float(vprofile.mean())
+        sig = float(vprofile.std())
+        if not np.isfinite(sig) or sig <= 0:
+            hvn_threshold = mu
+        else:
+            hvn_threshold = mu + 1.5 * sig
+        hvn = vprofile[vprofile > hvn_threshold]
+        out = []
+        for ivl in hvn.index:
+            try:
+                out.append(float(ivl.mid))
+            except (AttributeError, TypeError, ValueError):
+                continue
+        return sorted(out)
+
+    @staticmethod
     def detect_divergences(price_series, indicator_series, lookback=30):
         divs = []
         p = price_series.iloc[-lookback:]

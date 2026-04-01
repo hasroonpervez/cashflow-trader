@@ -1,6 +1,6 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  CASHFLOW COMMAND CENTER v15.0 · INSTITUTIONAL EDITION                   ║
+║  CASHFLOW COMMAND CENTER v16.0 FREE EDITION · PROBABILITY MODE          ║
 ║  Modular architecture: same UI, same logic, clean separation.           ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 """
@@ -16,7 +16,7 @@ if _app_root not in sys.path:
 import streamlit as st
 
 st.set_page_config(
-    page_title="CashFlow Command Center v15.0",
+    page_title="CashFlow Command Center v16.0 Free Edition",
     page_icon="💰",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -95,7 +95,8 @@ for _import_try in range(_IMPORT_KEYERROR_RETRIES):
                 bs_price, bs_greeks, calc_ev, kelly_criterion, calc_vol_skew,
                 quant_edge_score, weekly_trend_label, calc_gold_zone,
                 calc_confluence_points, detect_diamonds, latest_diamond_status,
-                diamond_win_rate, scan_single_ticker, Opt, calc_skew_regime, PortfolioRisk, MonteCarloEngine,
+                diamond_win_rate, scan_single_ticker, Opt, calc_skew_regime, PortfolioRisk,
+                build_chain_mc_dataframe,
             )
             from modules.sentiment import Sentiment, Backtest, Alerts, run_cc_sim_cached, QuantBacktest
             from modules.chart import build_chart, _chart_hoverlabel, build_skew_chart, build_correlation_heatmap
@@ -150,7 +151,7 @@ def main():
 
     # ── Watchlist editor (must run before Mission Control so sb_scanner is committed same run)
     _wl_expanded = bool(st.session_state.pop("_open_watchlist_editor", False))
-    st.caption("CashFlow Command Center · v15.0")
+    st.caption("CashFlow Command Center · v16.0 Free Edition")
     def _persist_watchlist_text_callback():
         raw = st.session_state.get("sb_scanner", "")
         w = _parse_watchlist_string(raw)
@@ -501,7 +502,7 @@ def main():
     price = ctx.price; prev = ctx.prev; chg = ctx.chg; chg_pct = ctx.chg_pct
     hi52 = ctx.hi52; lo52 = ctx.lo52; vix_v = ctx.vix_v
     qs = ctx.qs; qb = ctx.qb
-    use_quant_models = bool(cfg.get("use_quant_models", False))
+    use_quant_models = bool(cfg.get("use_quant_models", DEFAULT_CONFIG["use_quant_models"]))
     earnings_near = ctx.earnings_near; earnings_dt = ctx.earnings_dt
     days_to_earnings = ctx.days_to_earnings; earnings_parse_failed = ctx.earnings_parse_failed
     earn_glance = ctx.earn_glance
@@ -519,6 +520,13 @@ def main():
     daily_struct = ctx.daily_struct; weekly_struct = ctx.weekly_struct
 
     render_mode_badge(use_quant_models)
+    st.markdown(
+        "<div style='margin:2px 0 10px 0'>"
+        "<span style='font-size:0.72rem;color:#c4b5fd;padding:3px 10px;border-radius:6px;"
+        "border:1px solid rgba(139,92,246,0.45);background:rgba(76,29,149,0.22);font-weight:600;letter-spacing:0.04em'>"
+        "v16.0 Free Edition · Probability Mode</span></div>",
+        unsafe_allow_html=True,
+    )
     qs_color = ctx.qs_color; qs_status = ctx.qs_status
     rfr = ctx.rfr; bluf_cc = ctx.bluf_cc; bluf_csp = ctx.bluf_csp
     bluf_exp = ctx.bluf_exp; bluf_dte = ctx.bluf_dte
@@ -1533,6 +1541,32 @@ def main():
                 except Exception:
                     opts_df = pd.DataFrame()
                 if not calls.empty or not puts.empty:
+                    with st.expander("Full option chain — MC PoP % (every strike)", expanded=False):
+                        try:
+                            _chain_mc = build_chain_mc_dataframe(price, calls, puts, dte, rfr)
+                            if _chain_mc is not None and not _chain_mc.empty:
+                                st.dataframe(
+                                    _chain_mc,
+                                    use_container_width=True,
+                                    hide_index=True,
+                                    column_config={
+                                        "Type": st.column_config.TextColumn("Type", width="small"),
+                                        "Strike": st.column_config.NumberColumn("Strike", format="$%.2f"),
+                                        "Bid": st.column_config.NumberColumn("Bid", format="$%.2f"),
+                                        "Ask": st.column_config.NumberColumn("Ask", format="$%.2f"),
+                                        "Mid": st.column_config.NumberColumn("Mid", format="$%.4f"),
+                                        "IV %": st.column_config.NumberColumn("IV", format="%.2f%%"),
+                                        "MC PoP %": st.column_config.NumberColumn(
+                                            "MC PoP %",
+                                            format="%.1f%%",
+                                            help="Short-premium Monte Carlo PoP (seeded GBM, antithetic normals).",
+                                        ),
+                                    },
+                                )
+                            else:
+                                st.caption("No strikes with usable bid/ask for MC PoP in this snapshot.")
+                        except Exception:
+                            st.caption("MC PoP chain table unavailable for this expiration.")
                     s1, s2 = st.columns(2)
                     with s1:
                         st.markdown("#### Covered Calls")
@@ -2079,6 +2113,11 @@ def main():
                                         <div style='font-size:.65rem;color:#64748b;text-transform:uppercase'>Diamond</div>
                                         <span class='diamond-badge {r["d_class"]}'>{r['d_status']}</span>
                                     </div>
+                                    <div style='text-align:center;min-width:72px'>
+                                        <div style='font-size:.65rem;color:#64748b;text-transform:uppercase'>PoP</div>
+                                        <div class='mono' style='font-size:.82rem;color:#c4b5fd;font-weight:700'>{(f"{float(r.get('diamond_pop', 0)):.0f}%" if int(r.get("diamond_n") or 0) > 0 else "—")}</div>
+                                        <div style='font-size:.62rem;color:#64748b;margin-top:2px'>Diamond win</div>
+                                    </div>
                                     <div style='text-align:center;min-width:90px'>
                                         <div style='font-size:.65rem;color:#64748b;text-transform:uppercase'>Gold Zone</div>
                                         <div class='mono' style='font-size:.8rem;color:#fbbf24'>${r['gold_zone']:.2f}</div>
@@ -2105,6 +2144,11 @@ def main():
                                     "Adj. Kelly %": float(r.get("Adj. Kelly %", 0.0)),
                                     "Confluence": int(r["cp_score"]),
                                     "Diamond": r["d_status"],
+                                    "PoP": (
+                                        f"{float(r.get('diamond_pop', 0)):.0f}%"
+                                        if int(r.get("diamond_n") or 0) > 0
+                                        else "—"
+                                    ),
                                     "Gold Zone Dist %": float(r["dist_gz"]),
                                     "Daily": r["struct"],
                                     "Summary": r["summary"],
@@ -2129,6 +2173,10 @@ def main():
                                     ),
                                     "Confluence": st.column_config.NumberColumn("Confluence", format="%d"),
                                     "Diamond": st.column_config.TextColumn("Diamond"),
+                                    "PoP": st.column_config.TextColumn(
+                                        "PoP",
+                                        help="Historical win rate for Diamond signals (same methodology as the main dashboard backtest).",
+                                    ),
                                     "Gold Zone Dist %": st.column_config.NumberColumn("Gold Zone Dist", format="%+.1f%%"),
                                     "Daily": st.column_config.TextColumn("Daily"),
                                     "Summary": st.column_config.TextColumn("Summary", width="large"),
