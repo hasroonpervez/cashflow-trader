@@ -272,8 +272,27 @@ def build_context(ticker: str, cfg: dict) -> Optional[DashContext]:
     try:
         _sh = TA.get_shadow_move(df)
         st.session_state["_cf_shadow_move"] = _sh
+        st.session_state["_cf_regime_shadow_breakout"] = None
+        if isinstance(_sh, dict) and ctx.price and float(ctx.price) > 0:
+            _ivb = getattr(ctx, "ref_iv_bluf", None)
+            _dte_b = int(getattr(ctx, "bluf_dte", None) or 0)
+            if _ivb is not None and float(_ivb) > 0 and _dte_b > 0:
+                px = float(ctx.price)
+                _em = float(Opt.calc_expected_move(px, float(_ivb), _dte_b))
+                if np.isfinite(_em) and _em > 0:
+                    lo_s, hi_s = float(_sh["low"]), float(_sh["high"])
+                    if np.isfinite(lo_s) and np.isfinite(hi_s) and hi_s > lo_s:
+                        el, eu = px - _em, px + _em
+                        outside_shadow = px < lo_s or px > hi_s
+                        inside_em = el <= px <= eu
+                        if outside_shadow and inside_em:
+                            st.session_state["_cf_regime_shadow_breakout"] = {
+                                "active": True,
+                                "ticker": str(ctx.ticker).strip().upper(),
+                            }
     except Exception:
         st.session_state["_cf_shadow_move"] = None
+        st.session_state["_cf_regime_shadow_breakout"] = None
 
     return ctx
 

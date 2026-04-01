@@ -98,6 +98,18 @@ def render_mode_badge(use_quant: bool):
     st.markdown(badge_html, unsafe_allow_html=True)
 
 
+def ledger_theta_desk_day(spot, strike, dte_days, rfr, iv_pct, opt_type, contracts):
+    """Positive $Θ/day for a **short** leg (desk convention: decay collected), per full position size."""
+    iv = max(float(iv_pct or 0) / 100.0, 0.001)
+    T = max(int(dte_days), 1) / 365.0
+    ot = str(opt_type).lower().strip()
+    if ot not in ("call", "put"):
+        ot = "put"
+    g = bs_greeks(float(spot), float(strike), T, float(rfr), iv, ot)
+    mult = 100 * max(1, int(contracts or 1))
+    return float(-float(g.get("theta", 0)) * mult)
+
+
 def sentinel_ledger_metrics(ledger: list, rfr: float = 0.045) -> dict:
     """Aggregate Δ, daily Θ income, and mark-to-model unrealized P&L for tracked short-premium legs."""
     empty = {"total_delta": 0.0, "total_theta_day": 0.0, "unrealized_pnl": 0.0}
@@ -177,8 +189,9 @@ def sentinel_ledger_table_rows(
     active_ticker: str,
     active_qs: float,
     pin_map: Optional[dict] = None,
+    rfr: float = 0.045,
 ):
-    """v22: enrich ledger rows with **Distance to pin %** and **Edge realization %** (active ticker vs entry QS)."""
+    """v22+: **Distance to pin %**, **Edge realization %**, **Pin maturity** (Golden zone calibration)."""
     pin_map = {str(k).strip().upper(): v for k, v in (pin_map or {}).items()}
     at = str(active_ticker or "").strip().upper()
     try:
@@ -201,6 +214,7 @@ def sentinel_ledger_table_rows(
             cache[sym] = None
         return cache[sym]
 
+    today = datetime.now().date()
     rows = []
     er_vals = []
     for r in ledger:
@@ -235,6 +249,41 @@ def sentinel_ledger_table_rows(
                 d["Edge realization %"] = None
         else:
             d["Edge realization %"] = None
+
+        d["Pin maturity"] = "—"
+        try:
+            strike = float(d.get("strike", 0) or 0)
+            iv_pct = float(d.get("iv", 30) or 30)
+            opt_type = str(d.get("option_type", "put")).lower().strip()
+            if opt_type not in ("call", "put"):
+                opt_type = "put"
+            contracts = int(d.get("contracts", 1) or 1)
+            exp_s = d.get("expiry")
+            dte_now = 0
+            if exp_s:
+                exp_d = datetime.strptime(str(exp_s)[:10], "%Y-%m-%d").date()
+                dte_now = max(0, (exp_d - today).days)
+            dist_now = d.get("Dist. to pin %")
+            dist_e = d.get("dist_pin_pct_at_entry")
+            th_e = d.get("theta_desk_day_entry")
+            th_now = None
+            if px is not None and strike > 0 and dte_now >= 0:
+                th_now = ledger_theta_desk_day(px, strike, dte_now, rfr, iv_pct, opt_type, contracts)
+            if (
+                dist_e is not None
+                and dist_now is not None
+                and th_e is not None
+                and th_now is not None
+                and dte_now <= 14
+            ):
+                ade, adn = abs(float(dist_e)), abs(float(dist_now))
+                shrinking = adn < ade - 0.2
+                theta_up = float(th_now) >= float(th_e) * 1.02 and float(th_e) > 0
+                if shrinking and theta_up:
+                    d["Pin maturity"] = "✨ Golden zone"
+        except (TypeError, ValueError, KeyError):
+            pass
+
         rows.append(d)
     summary = {
         "avg_edge_realization": round(float(np.mean(er_vals)), 1) if er_vals else None,
@@ -945,6 +994,20 @@ def _fragment_technical_zone(
     except (TypeError, ValueError):
         _gf_chart = None
     _earn_dte = st.session_state.get("_cf_earnings_days")
+    _sbx = st.session_state.get("_cf_regime_shadow_breakout")
+    if isinstance(_sbx, dict) and _sbx.get("active") and str(_sbx.get("ticker", "")).strip().upper() == str(
+        ticker
+    ).strip().upper():
+        st.markdown(
+            "<div style='margin:0 0 12px 0;padding:12px 14px;border-radius:10px;border:1px solid rgba(168,85,247,0.45);"
+            "background:rgba(88,28,135,0.18);font-size:0.88rem;line-height:1.5;color:#e9d5ff'>"
+            "<strong style='color:#d8b4fe'>⚡ Regime calibration — Shadow breakout</strong><br>"
+            "<span style='color:#c4b5fd'>Spot is <strong>outside</strong> the whale-volume <strong>Shadow</strong> band (purple) "
+            "but still <strong>inside</strong> the IV <strong>1σ Expected Move</strong>. "
+            "Large prints led the range; options-implied vol has not fully caught up — watch for institutional-led "
+            "trend continuation or reversal before retail reprices risk.</span></div>",
+            unsafe_allow_html=True,
+        )
     _sh_mv = st.session_state.get("_cf_shadow_move") or {}
     _sl = _sh_mv.get("low") if isinstance(_sh_mv, dict) else None
     _su = _sh_mv.get("high") if isinstance(_sh_mv, dict) else None

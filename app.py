@@ -106,6 +106,7 @@ for _import_try in range(_IMPORT_KEYERROR_RETRIES):
                 render_mode_badge,
                 sentinel_ledger_metrics,
                 sentinel_ledger_table_rows,
+                ledger_theta_desk_day,
                 earnings_runway_spark_series,
                 _explain, _section, _mini_sparkline, _glance_sparkline_svg,
                 _glance_metric_card, _render_html_block, _parse_watchlist_string,
@@ -1822,6 +1823,31 @@ def main():
                                 f"cf_track_cc_{ticker}_{sel_exp}_{b['strike']}",
                             )[:110]
                             if st.button("Track Trade", key=_cc_track_key, help="Append this optimal covered-call line to the Sentinel Ledger (session only)."):
+                                _pin_e = st.session_state.get("_cf_opex_pin")
+                                _dist_pin_e = None
+                                try:
+                                    if _pin_e is not None:
+                                        _pf = float(_pin_e)
+                                        if np.isfinite(_pf) and _pf > 0:
+                                            _dist_pin_e = round((float(price) / _pf - 1.0) * 100.0, 2)
+                                except (TypeError, ValueError):
+                                    pass
+                                _th_day_e = None
+                                try:
+                                    _th_day_e = round(
+                                        ledger_theta_desk_day(
+                                            float(price),
+                                            float(b["strike"]),
+                                            int(dte),
+                                            float(rfr),
+                                            float(b.get("iv") or 30),
+                                            "call",
+                                            int(nc_s),
+                                        ),
+                                        4,
+                                    )
+                                except Exception:
+                                    pass
                                 st.session_state.setdefault("_cf_ledger", []).append(
                                     {
                                         "ticker": str(ticker).upper(),
@@ -1835,6 +1861,8 @@ def main():
                                         "dte_at_entry": int(dte),
                                         "contracts": int(nc_s),
                                         "qs_at_entry": float(qs),
+                                        "dist_pin_pct_at_entry": _dist_pin_e,
+                                        "theta_desk_day_entry": _th_day_e,
                                     }
                                 )
                                 st.rerun()
@@ -1876,6 +1904,31 @@ def main():
                                 f"cf_track_csp_{ticker}_{sel_exp}_{b['strike']}",
                             )[:110]
                             if st.button("Track Trade", key=_csp_track_key, help="Append this optimal cash-secured put to the Sentinel Ledger (session only)."):
+                                _pin_e2 = st.session_state.get("_cf_opex_pin")
+                                _dist_pin_e2 = None
+                                try:
+                                    if _pin_e2 is not None:
+                                        _pf2 = float(_pin_e2)
+                                        if np.isfinite(_pf2) and _pf2 > 0:
+                                            _dist_pin_e2 = round((float(price) / _pf2 - 1.0) * 100.0, 2)
+                                except (TypeError, ValueError):
+                                    pass
+                                _th_day_e2 = None
+                                try:
+                                    _th_day_e2 = round(
+                                        ledger_theta_desk_day(
+                                            float(price),
+                                            float(b["strike"]),
+                                            int(dte),
+                                            float(rfr),
+                                            float(b.get("iv") or 30),
+                                            "put",
+                                            1,
+                                        ),
+                                        4,
+                                    )
+                                except Exception:
+                                    pass
                                 st.session_state.setdefault("_cf_ledger", []).append(
                                     {
                                         "ticker": str(ticker).upper(),
@@ -1889,6 +1942,8 @@ def main():
                                         "dte_at_entry": int(dte),
                                         "contracts": 1,
                                         "qs_at_entry": float(qs),
+                                        "dist_pin_pct_at_entry": _dist_pin_e2,
+                                        "theta_desk_day_entry": _th_day_e2,
                                     }
                                 )
                                 st.rerun()
@@ -2667,7 +2722,8 @@ def main():
             _section(
                 "📊 Sentinel Ledger",
                 "Session-based simulated trade log: track desk strikes, then read portfolio-level Greeks and mark-to-model P&L.",
-                tip_plain="This is not a broker blotter. Rows are what you explicitly track from Cash Flow Strategies; metrics use Black–Scholes marks vs entry premium.",
+                tip_plain="**Pin maturity ✨ Golden zone** (≤14 DTE): |Dist. to pin %| shrinking vs entry while desk Θ/day rises vs entry — pin magnet strengthens into expiry. "
+                "New **Track Trade** rows snapshot dist-to-pin and Θ/day at entry. On the chart tab, **Shadow breakout** flags spot outside the purple whale band but inside IV 1σ — early regime read.",
             )
             _led = st.session_state.get("_cf_ledger") or []
             if not _led:
@@ -2681,8 +2737,12 @@ def main():
                 active_ticker=str(ticker),
                 active_qs=float(qs),
                 pin_map=_pin_m,
+                rfr=float(rfr),
             )
-            _ldf = pd.DataFrame(_rows)
+            _hide_ledger_internal = ("dist_pin_pct_at_entry", "theta_desk_day_entry")
+            _ldf = pd.DataFrame(
+                [{k: v for k, v in row.items() if k not in _hide_ledger_internal} for row in _rows]
+            )
             streamlit_show_dataframe(
                 _ldf,
                 use_container_width=True,
