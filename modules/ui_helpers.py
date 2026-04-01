@@ -873,7 +873,7 @@ def _fragment_technical_zone(
     except (TypeError, ValueError):
         _gf_chart = None
     _earn_dte = st.session_state.get("_cf_earnings_days")
-    fig_p, fig_v, fig_r, fig_m = build_chart(
+    fig_p, fig_v, fig_r, fig_m, _price_overlay_key = build_chart(
         df,
         ticker,
         show_ind,
@@ -893,6 +893,8 @@ def _fragment_technical_zone(
         iv_overlay_symbol=ticker,
     )
     st.plotly_chart(fig_p, use_container_width=True, config=_PLOTLY_UI_CONFIG)
+    if _price_overlay_key:
+        st.markdown(_price_overlay_key, unsafe_allow_html=True)
     st.divider()
     st.markdown("#### Volume")
     st.plotly_chart(fig_v, use_container_width=True, config=_PLOTLY_UI_CONFIG)

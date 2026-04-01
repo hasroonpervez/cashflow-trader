@@ -42,6 +42,34 @@ def _chart_hoverlabel():
     )
 
 
+def _price_overlay_key_html(rows, mobile_layout):
+    """Readable legend under the price chart: full names wrap; avoids Plotly right-edge clipping."""
+    if not rows:
+        return ""
+    fs = "0.7rem" if mobile_layout else "0.78rem"
+    pad = "8px 10px" if mobile_layout else "10px 14px"
+    parts = [
+        "<div style='font-size:",
+        fs,
+        ";line-height:1.5;color:#cbd5e1;margin:4px 0 12px 0;padding:",
+        pad,
+        ";background:rgba(15,23,42,0.72);border-radius:8px;border:1px solid rgba(100,116,139,0.3);"
+        "max-width:100%;overflow-wrap:anywhere;word-break:break-word'>",
+        "<div style='font-size:0.62rem;text-transform:uppercase;letter-spacing:0.07em;color:#64748b;"
+        "margin-bottom:8px'>Chart overlay key</div><ul style='margin:0;padding-left:0;list-style:none'>",
+    ]
+    for swatch, short, full in rows:
+        parts.append(
+            "<li style='margin-bottom:6px;position:relative;padding-left:14px'>"
+            f"<span style='position:absolute;left:0;top:0.35em;width:4px;height:0.85em;border-radius:2px;"
+            f"background:{_html_mod.escape(swatch)};display:inline-block'></span>"
+            f"<strong style='color:#e2e8f0'>{_html_mod.escape(short)}</strong>"
+            f"<span style='color:#94a3b8'> — {_html_mod.escape(full)}</span></li>"
+        )
+    parts.append("</ul></div>")
+    return "".join(parts)
+
+
 def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_sr=True,
                 show_ichi=False, show_super=False, diamonds=None, gold_zone=None,
                 mobile_layout=False, em_lower=None, em_upper=None, em_expiry=None,
@@ -50,7 +78,10 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
     """Build four separate figures: price (+ overlays), volume, RSI, MACD — easier to read than one stacked chart.
 
     When ``mobile_layout`` is True (narrow UA / phone), the price panel drops the legend, tightens margins,
-    fixes height, and pins Fib / Gann / Gold annotations to the left so labels do not sit on the candles."""
+    fixes height, and pins Fib / Gann / Gold annotations to the left so labels do not sit on the candles.
+
+    Returns ``(fig_price, fig_volume, fig_rsi, fig_macd, overlay_key_html)``. ``overlay_key_html`` is a
+    compact HTML block with full overlay names (wrap-safe) for under the price chart."""
     last_px = float(df["Close"].iloc[-1])
     try:
         if (
@@ -73,6 +104,9 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
     # can use the right margin without ten strings stacking on the same anchor.
     _level_label_side = "left" if not mobile_layout else ann_side
     _struct_label_side = ann_side
+    # Right-edge hline labels clip in Streamlit; nudge left and widen margin; full text lives in overlay key.
+    _struct_nudge = dict(annotation_xshift=-56) if _struct_label_side == "right" else {}
+    _overlay_rows = []
     _legend_font = dict(size=11, color="#f1f5f9", family="Inter, system-ui, sans-serif")
     _legend_title_font = dict(size=12, color="#e2e8f0", family="Inter, system-ui, sans-serif")
     uirev = f"{ticker}_tech"
@@ -215,6 +249,14 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
             y=gold_zone, line_dash="solid", line_color="#eab308", line_width=3, opacity=0.9,
             annotation_text=f"Gold ${gold_zone:.0f}", annotation_position=_struct_label_side,
             annotation_font=dict(color="#fde047", size=10, family="JetBrains Mono"),
+            **_struct_nudge,
+        )
+        _overlay_rows.append(
+            (
+                "#eab308",
+                "Gold Zone",
+                f"Fused anchor near ${gold_zone:,.0f} (POC / Fib / 200-SMA / Gann / HVN blend). Solid gold rail.",
+            )
         )
 
     _gf = None
@@ -230,10 +272,18 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
             line_color="#39FF14",
             line_width=2,
             opacity=0.95,
-            annotation_text="Gamma flip",
+            annotation_text=f"Γ ${_gf:.0f}",
             annotation_position=_struct_label_side,
             annotation_font=dict(size=9, color="#39FF14", family="JetBrains Mono"),
             annotation_yshift=-14,
+            **_struct_nudge,
+        )
+        _overlay_rows.append(
+            (
+                "#39FF14",
+                "Gamma flip",
+                f"Volatility trigger near ${_gf:,.0f}: dealer gamma exposure crosses zero; MM hedging can speed up moves. Neon dashed line.",
+            )
         )
         if float(last_px) < _gf:
             try:
@@ -264,10 +314,11 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
                 line_color="#eab308",
                 line_width=1.5,
                 opacity=0.95,
-                annotation_text="EM +1σ",
+                annotation_text="EM+",
                 annotation_position=_struct_label_side,
                 annotation_font=dict(size=9, color="#eab308"),
                 annotation_yshift=-28,
+                **_struct_nudge,
             )
             fig_p.add_hline(
                 y=el,
@@ -275,10 +326,15 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
                 line_color="#eab308",
                 line_width=1.5,
                 opacity=0.95,
-                annotation_text="EM −1σ",
+                annotation_text="EM−",
                 annotation_position=_level_label_side,
                 annotation_font=dict(size=9, color="#eab308"),
+                **(dict(annotation_xshift=+18) if _level_label_side == "left" else {}),
             )
+            _em_full = (
+                f"Upper rail ${eu:,.0f}, lower ${el:,.0f} (1σ from IV×√T). Yellow dashed lines on the chart."
+            )
+            _cone_done = False
             if em_expiry is not None:
                 try:
                     t0 = df.index[-1]
@@ -297,13 +353,21 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
                                 fillcolor="rgba(234,179,8,0.1)",
                                 line=dict(color="rgba(234,179,8,0.35)", width=1),
                                 mode="lines",
-                                name="Probability cone (1-σ)",
+                                name="EM cone",
                                 showlegend=True,
-                                hoverinfo="skip",
+                                hovertemplate=(
+                                    "<b>Expected move cone (1σ)</b><br>"
+                                    "Shaded path from last bar to option expiry using the same EM rails."
+                                    "<extra></extra>"
+                                ),
                             )
                         )
+                        _cone_done = True
                 except Exception:
                     pass
+            if _cone_done:
+                _em_full += " Filled yellow cone extends to the active expiry."
+            _overlay_rows.append(("#eab308", "Expected move (1σ)", _em_full))
     except Exception:
         pass
 
@@ -331,6 +395,7 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
                     else np.zeros(prices.shape[0], dtype=bool)
                 )
                 order = np.argsort(np.abs(prices - last_px))[:6]
+                _hvn_lbl_prices = []
                 for rank, idx in enumerate(order):
                     y = float(prices[idx])
                     base_w = 1.0 + 2.2 * float(wn[idx])
@@ -350,15 +415,27 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
                     # Repeat "HVN (Institutional Liquidity)" on every rail caused unreadable stacking.
                     # Show price on the two nodes nearest spot only; other rails stay visual-only.
                     if rank < 2:
+                        _hvn_lbl_prices.append(y)
                         hline_kw["annotation_text"] = f"HVN ${y:.0f}"
                         hline_kw["annotation_position"] = _struct_label_side
                         hline_kw["annotation_font"] = dict(
                             size=9,
                             color=f"rgba({min(255, r0 + 40)},{min(255, g0 + 40)},{min(255, b0 + 30)},0.92)",
                         )
+                        hline_kw.update(_struct_nudge)
                         if rank == 1:
                             hline_kw["annotation_yshift"] = -16
                     fig_p.add_hline(**hline_kw)
+                if _hvn_lbl_prices:
+                    _px = ", ".join(f"${p:,.0f}" for p in _hvn_lbl_prices)
+                    _overlay_rows.append(
+                        (
+                            "#a78bfa",
+                            "HVN (institutional liquidity)",
+                            f"High-volume nodes from volume-at-price. Chart labels: {_px}. "
+                            "Thicker / deeper purple = more size traded near that level.",
+                        )
+                    )
     except Exception:
         pass
 
@@ -424,7 +501,7 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
             )
 
     _p_height = 450 if mobile_layout else 540
-    _p_margin = dict(l=5, r=5, t=52, b=40) if mobile_layout else dict(l=64, r=108, t=56, b=44)
+    _p_margin = dict(l=5, r=5, t=52, b=40) if mobile_layout else dict(l=64, r=220, t=56, b=52)
     _p_show_legend = not mobile_layout
     _iv_lines = []
     try:
@@ -728,7 +805,8 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
         **_PLOTLY_AXIS_TITLE,
     )
 
-    return fig_p, fig_v, fig_r, fig_m
+    _key_html = _price_overlay_key_html(_overlay_rows, mobile_layout)
+    return fig_p, fig_v, fig_r, fig_m, _key_html
 
 
 def build_skew_chart(opts_df, spot_price):
