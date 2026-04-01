@@ -728,13 +728,13 @@ def detect_diamonds(
             whale_bonus = 0
             try:
                 _dp = TA.get_dark_pool_proxy(sub)
-                if (
-                    _dp is not None
-                    and not _dp.empty
-                    and "dark_pool_alert" in _dp.columns
-                    and bool(_dp["dark_pool_alert"].iloc[-1])
-                ):
-                    whale_bonus = 2
+                if _dp is not None and not _dp.empty and "volume_z_score" in _dp.columns:
+                    zlv = float(_dp["volume_z_score"].iloc[-1])
+                    if np.isfinite(zlv):
+                        if zlv > 3.0:
+                            whale_bonus = 2
+                        elif zlv > 2.0:
+                            whale_bonus = 1
             except Exception:
                 whale_bonus = 0
             magnet = 0

@@ -1,6 +1,6 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  CASHFLOW COMMAND CENTER v19.0 FREE EDITION · DARK POOL & NEWS BIAS     ║
+║  CASHFLOW COMMAND CENTER v19 FREE EDITION · Z-SCORE & NLP SIGNALS         ║
 ║  Modular architecture: same UI, same logic, clean separation.           ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 """
@@ -16,7 +16,7 @@ if _app_root not in sys.path:
 import streamlit as st
 
 st.set_page_config(
-    page_title="CashFlow Command Center v19.0 Free Edition",
+    page_title="CashFlow Command Center v19",
     page_icon="💰",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -116,6 +116,7 @@ for _import_try in range(_IMPORT_KEYERROR_RETRIES):
                 streamlit_df_widget_key,
                 streamlit_show_dataframe,
                 _theta_gamma_desk_line,
+                SCANNER_WHALE_FLOW_BIAS_HELP,
             )
 
             from modules.css import _CSS, _MINI_MODE_DENSITY_CSS, inject_css_and_navbar
@@ -529,7 +530,7 @@ def main():
         "<div style='margin:2px 0 10px 0'>"
         "<span style='font-size:0.72rem;color:#c4b5fd;padding:3px 10px;border-radius:6px;"
         "border:1px solid rgba(139,92,246,0.45);background:rgba(76,29,149,0.22);font-weight:600;letter-spacing:0.04em'>"
-        "v19.0 · DARK POOL & NEWS BIAS</span></div>",
+        "v19</span></div>",
         unsafe_allow_html=True,
     )
     qs_color = ctx.qs_color; qs_status = ctx.qs_status
@@ -723,6 +724,14 @@ def main():
         else:
             _news_sent_lbl = "Neutral"
     _score_disp = f"{_news_bias_v19:+.2f}" if _news_bias_v19 is not None else "—"
+    _nb_col = "#94a3b8"
+    if _news_bias_v19 is not None:
+        if _news_bias_v19 > 0.3:
+            _nb_col = "#10b981"
+        elif _news_bias_v19 < -0.3:
+            _nb_col = "#ef4444"
+        else:
+            _nb_col = "#94a3b8"
     _lines_v19 = []
     for _it in (_headlines_v19[:3] if _headlines_v19 else []):
         _tit = (_it.get("title") or "")[:200]
@@ -730,7 +739,8 @@ def main():
     _news_why_block = (
         f"<div style='margin:0 0 10px 0;padding:10px 12px;border-radius:8px;border:1px solid rgba(56,189,248,.35);background:rgba(8,47,73,.22)'>"
         f"<div style='font-size:.62rem;font-weight:800;color:#38bdf8;letter-spacing:.12em;margin-bottom:6px'>NEWS BIAS (NLP)</div>"
-        f"<div style='font-size:.85rem;font-weight:700;color:#e2e8f0;margin-bottom:6px'>Aggregate score: <span class='mono'>{_score_disp}</span> "
+        f"<div style='font-size:.85rem;font-weight:700;color:#e2e8f0;margin-bottom:6px'>Aggregate score: "
+        f"<span class='mono' style='color:{_nb_col};font-weight:800'>{_html_mod.escape(str(_score_disp))}</span> "
         f"<span style='color:#64748b;font-weight:500'>(−1 bearish … +1 bullish)</span></div>"
         + (
             "<div style='font-size:.74rem;color:#94a3b8;line-height:1.45'>" + "<br>".join(_lines_v19) + "</div>"
@@ -742,7 +752,8 @@ def main():
     _trade_hdr_stack = f"{trade_hdr_html}{_news_why_block}<div style='margin:0 0 10px 0;padding:8px 12px;border-radius:8px;border:1px solid rgba(148,163,184,.28);font-size:.78rem;color:#cbd5e1;line-height:1.5'>"
     _trade_hdr_stack += (
         f"<strong style='color:#93c5fd'>Institutional Flow:</strong> {_html_mod.escape(str(_inst_flow_lbl))}<br>"
-        f"<strong style='color:#93c5fd'>News Sentiment:</strong> {_html_mod.escape(str(_news_sent_lbl))}</div>"
+        f"<strong style='color:#93c5fd'>News Sentiment:</strong> "
+        f"<span style='color:{_nb_col};font-weight:700'>{_html_mod.escape(str(_news_sent_lbl))}</span></div>"
     )
 
     # ── RECOMMENDED TRADE (optimal strike from options engine) ──
@@ -1734,7 +1745,7 @@ def main():
                                         "MC PoP %": st.column_config.NumberColumn(
                                             "MC PoP %",
                                             format="%.1f%%",
-                                            help="10k antithetic simulations — v19.0 Dark Pool & News Bias Mode",
+                                            help="10k antithetic simulations — v19 Dark Pool & News Bias Mode",
                                         ),
                                     },
                                 )
@@ -2398,7 +2409,7 @@ def main():
                                     ),
                                     "Flow / Bias": st.column_config.TextColumn(
                                         "Flow / Bias",
-                                        help="🐋 WHALE when last session volume exceeds 2σ above 30-day mean; 📈/📉 news bias from cached Yahoo headlines (NLP keywords).",
+                                        help=SCANNER_WHALE_FLOW_BIAS_HELP,
                                     ),
                                     "Gold Zone Dist %": st.column_config.NumberColumn("Gold Zone Dist", format="%+.1f%%"),
                                     "Daily": st.column_config.TextColumn("Daily"),

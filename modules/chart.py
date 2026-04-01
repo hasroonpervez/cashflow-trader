@@ -496,6 +496,34 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
             )
         ]
     )
+    try:
+        _dp_v = TA.get_dark_pool_proxy(df)
+        if (
+            _dp_v is not None
+            and not _dp_v.empty
+            and "volume_z_score" in _dp_v.columns
+        ):
+            zs = pd.to_numeric(_dp_v["volume_z_score"], errors="coerce").reindex(df.index)
+            vol_s = pd.to_numeric(df["Volume"], errors="coerce")
+            whale_m = (zs > 2.0) & zs.notna() & vol_s.notna()
+            if bool(whale_m.any()):
+                xv = df.index[whale_m]
+                yv = vol_s.loc[whale_m].astype(float)
+                zz = zs.loc[whale_m].astype(float).values
+                fig_v.add_trace(
+                    go.Scatter(
+                        x=xv,
+                        y=yv,
+                        mode="markers",
+                        marker=dict(color="#00FFFF", size=11, symbol="circle", line=dict(width=1, color="rgba(15,23,42,0.85)")),
+                        name="Institutional flow",
+                        showlegend=False,
+                        hovertemplate="Institutional Flow (Z-Score: %{customdata:.2f})<extra></extra>",
+                        customdata=zz,
+                    )
+                )
+    except Exception:
+        pass
     _vm = dict(l=5, r=5, t=24, b=36) if mobile_layout else dict(l=56, r=28, t=28, b=44)
     fig_v.update_layout(
         template="plotly_dark",

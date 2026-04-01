@@ -276,15 +276,25 @@ class TA:
 
     @staticmethod
     def get_dark_pool_proxy(df):
-        """30-day rolling volume mean/std; flag days > 2σ above mean as Dark Pool Alert (volume anomaly proxy)."""
+        """30-day rolling volume Z-score: Z = (V − μ) / σ; whale alert when Z > 2.0 (institutional strength proxy)."""
         if df is None or df.empty or "Volume" not in df.columns:
             return pd.DataFrame()
         vol = pd.to_numeric(df["Volume"], errors="coerce")
-        mu = vol.rolling(30, min_periods=20).mean()
-        sd = vol.rolling(30, min_periods=20).std(ddof=0)
-        alert = (vol > (mu + 2.0 * sd)) & sd.notna() & (sd > 0)
+        w = 30
+        mu = vol.rolling(w, min_periods=w).mean()
+        sd = vol.rolling(w, min_periods=w).std(ddof=0)
+        denom = sd.where((sd.notna()) & (sd > 0), np.nan)
+        z = (vol - mu) / denom
+        z = z.fillna(0.0).replace([np.inf, -np.inf], 0.0)
+        is_whale = z > 2.0
         return pd.DataFrame(
-            {"vol_mean_30": mu, "vol_std_30": sd, "dark_pool_alert": alert},
+            {
+                "vol_mean_30": mu,
+                "vol_std_30": sd,
+                "volume_z_score": z,
+                "is_whale_alert": is_whale,
+                "dark_pool_alert": is_whale,
+            },
             index=df.index,
         )
 

@@ -26,6 +26,13 @@ from .options import (
 from .chart import build_chart
 from .config import save_config, load_config, _overlay_prefs_from_session, _persist_overlay_prefs
 
+# Watchlist scanner: "Flow / Bias" column (whale Z-score + NLP headline flags).
+SCANNER_WHALE_FLOW_BIAS_HELP = (
+    "Whale Alert (Z-Score): Measures volume deviation from the 30-day mean. "
+    "Z > 2.0 indicates 97.7th percentile institutional activity. "
+    "Flags also include bullish/bearish news bias from cached Yahoo headlines (NLP)."
+)
+
 
 def streamlit_df_widget_key(prefix: str, data) -> str:
     """Element key for ``st.dataframe`` that tracks content shape + checksum.
@@ -1093,7 +1100,7 @@ def _options_scan_column_config(*, put_table: bool):
         "MC PoP %": st.column_config.NumberColumn(
             "MC PoP %",
             format="%.1f%%",
-            help="10k antithetic simulations — v19.0 Dark Pool & News Bias Mode",
+            help="10k antithetic simulations — v19 Dark Pool & News Bias Mode",
         ),
         "Vol": st.column_config.NumberColumn("Volume", format="%.0f"),
         "OI": st.column_config.NumberColumn("OI", format="%.0f"),

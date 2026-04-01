@@ -1,4 +1,4 @@
-# CashFlow Command Center v19.0 — *Free Edition · Dark Pool & News Bias*
+# CashFlow Command Center v19 — *Free Edition · Dark Pool Z-Score & NLP*
 
 **Single-screen options income desk and multi-ticker watchlists.**
 
@@ -6,16 +6,17 @@ Glanceable execution guidance, Diamond buy/sell signals, Gold Zone confluence, *
 
 ---
 
-## What’s new in v19.0 (Dark Pool & News Bias Edition)
+## What’s new in v19 (Dark Pool Z-Score & NLP Signal Edition)
 
-- **Dark pool proxy** — `TA.get_dark_pool_proxy(df)` uses a **30-day rolling mean and standard deviation of daily volume** and flags **Dark Pool Alert** days when volume is **more than 2σ above** the rolling mean (institutional “whale” participation proxy).
-- **Whale bonus (Blue Diamond)** — When the signal bar is a Dark Pool Alert, **+2** is added to the Blue Diamond **composite** score (same stack as GEX and liquidity magnet adjustments). Missing volume data skips the bonus without affecting the rest of the scan.
-- **News headlines (cached)** — `fetch_news_headlines(symbol)` pulls **up to eight** items from `yf.Ticker(symbol).news` with **`@st.cache_data(ttl=3600)`** to limit Yahoo traffic; used by the scanner, trade stack, diamond card, and NLP bias.
+- **Volume Z-Score engine** — `TA.get_dark_pool_proxy(df)` computes **institutional strength** as a continuous **volume Z-score** over a **30-day** rolling mean and standard deviation: **Z = (V − μ) / σ** (vectorized `pandas` rolling). **Std = 0** or invalid division yields **Z = 0**. Columns include **`volume_z_score`**, **`is_whale_alert`** (and **`dark_pool_alert`**, same flag) when **Z > 2.0** (~97.7th percentile under normality).
+- **Whale bonus (Blue Diamond)** — Blue **composite** score adds **+1** when **Z > 2.0** and **+2** when **Z > 3.0** on the signal bar (stacked with GEX and liquidity magnet). Missing or short volume history skips the bonus safely.
+- **Chart: institutional footprints** — On the **volume** panel, bars with **Z > 2.0** get **cyan (#00FFFF)** markers with hover **Institutional Flow (Z-Score: X.XX)**.
+- **News headlines (cached)** — `fetch_news_headlines(symbol)` stays at **`@st.cache_data(ttl=3600)`** (one hour) for Yahoo rate limits; used by the scanner, trade stack, diamond card, and NLP bias.
 - **NLP news bias** — `Sentiment.analyze_news_bias(headlines)` scores titles with a **keyword lexicon** into **−1.0 … +1.0** (bearish to bullish). Empty or unclassified headlines return **0.0** (neutral).
-- **UI: “Why” + trade stack** — **Recommended Trade** shows **News Bias (NLP)** with the **top three headlines** and **aggregate score**, plus **Institutional Flow** (Normal / High Accumulation) and **News Sentiment** (Positive / Negative / Neutral). The **Why This Diamond?** card repeats flow and sentiment for the active signal.
-- **Scanner: Flow / Bias** — Rows show **🐋 WHALE** when the latest bar is a volume alert and **📈 BULLISH NEWS** / **📉 BEARISH NEWS** when bias crosses **±0.15**; otherwise **—** when data is missing.
+- **UI: trade stack** — **News Bias (NLP)** colors the **aggregate score** and **News Sentiment** line: **emerald (#10b981)** if score **> 0.3**, **rose (#ef4444)** if **< −0.3**, else **slate (#94a3b8)**. **Institutional Flow** remains Normal / High Accumulation from the whale flag. **Why This Diamond?** repeats flow and sentiment when a signal is active.
+- **Scanner: Flow / Bias** — Column help documents the **Whale Alert (Z-Score)** definition. Rows show **🐋 WHALE** when the latest bar has **Z > 2.0** and **📈 BULLISH NEWS** / **📉 BEARISH NEWS** when bias crosses **±0.15**; otherwise **—** when data is missing.
 - **Chart: IV impact** — When **next earnings** is within **14 days**, the price panel annotates **Avg. Post-Earnings IV Crush** using a **realized-volatility proxy** averaged over up to **four prior** earnings cycles from Yahoo `earnings_dates`. If **IV rank proxy ≥ 90** or spot **IV** exceeds the **90th percentile** of **20-day realized vol** over the last year, the chart adds **⚠️ VEGA RISK: IV Crush likely**.
-- **Branding** — Page caption **Institutional Flow Tracking & NLP Sentiment Architecture.**; header badge **v19.0 · DARK POOL & NEWS BIAS**.
+- **Branding** — Page caption **Institutional Flow Tracking & NLP Sentiment Architecture.**; header badge **v19** (strict).
 
 ---
 
@@ -28,7 +29,7 @@ Glanceable execution guidance, Diamond buy/sell signals, Gold Zone confluence, *
 - **Diamond score (Blue)** — **+2** when **price > flip** and **Gold Zone < flip** (institutional support under the zero-gamma wall); **−3** when **price < flip** (turbulent / short-gamma regime). Pink diamonds unchanged. Display copy uses **composite score** where bonuses apply.
 - **Scanner: GEX Regime** — **🛡️ STABLE** if spot **>** gamma flip, **⚠️ TURBULENT** if spot **<** flip (or **—** if GEX cannot be built). Scanner path reuses the same **GEX → Gold → confluence → diamonds** ordering as the main context when options load.
 - **Desk & Diamond card: Θ/Γ efficiency** — Recommended CC/CSP rows show **Θ/Γ** with **✅ High Decay Efficiency** if ratio **> 2.0**, **⚠️ Gamma Risk (Squeeze Likely)** if **< 0.5** (from existing desk `theta_gamma_ratio`).
-- **UI copy (v18)** — Prior caption **Institutional Risk Oversight & Gamma Exposure Architecture.** and badge **v18.0 · LIQUIDITY & GEX**; chart tip documents **Gamma Flip** (MM hedging accelerates volatility). **v19** updates caption and badge (see above).
+- **UI copy (v18)** — Prior caption **Institutional Risk Oversight & Gamma Exposure Architecture.** and badge **v18.0 · LIQUIDITY & GEX**; chart tip documents **Gamma Flip** (MM hedging accelerates volatility). **v19** uses caption **Institutional Flow Tracking & NLP Sentiment Architecture.** and badge **v19**.
 
 ---
 
@@ -54,12 +55,12 @@ Glanceable execution guidance, Diamond buy/sell signals, Gold Zone confluence, *
 
 ---
 
-## Quant & desk history (v15.x → v16.0 → v17.0 → v18.0 → v19.0)
+## Quant & desk history (v15.x → v16.0 → v17.0 → v18.0 → v19)
 
 - **HMM regimes (FFD)** — Gaussian HMM trains on **fractionally differenced** daily closes for stationarity while preserving memory; `fit` / `predict_proba` stay inside `try/except` so singular covariance cases do not crash the app.
 - **Scanner threading** — Market Scanner uses a **bounded** pool (`min(8, watchlist length)`) and queues one future per ticker so workers drain the queue instead of spawning one thread per symbol on small Cloud CPUs.
 - **Data layer** — `fetch_stock` is wrapped with `@st.cache_data(ttl=300)`; an **empty** Yahoo history prints a **stderr** warning (visible in Streamlit Cloud logs) instead of failing silently.
-- **Diamond detection** — **Hurst exponent** on `Close` adapts **RSI** length (8 if `H < 0.45`, 21 if `H > 0.55`, else 14) and **MACD** fast/slow/signal by the same scale; when `H > 0.55`, **Blue** diamonds also require **MACD line > signal** (when both are defined). **v18** layers **GEX regime** bonuses/penalties on Blue scores when a gamma flip resolves. **v19** adds a **+2 Whale bonus** on Blue when the signal bar has a **Dark Pool Alert** (2σ volume spike).
+- **Diamond detection** — **Hurst exponent** on `Close` adapts **RSI** length (8 if `H < 0.45`, 21 if `H > 0.55`, else 14) and **MACD** fast/slow/signal by the same scale; when `H > 0.55`, **Blue** diamonds also require **MACD line > signal** (when both are defined). **v18** layers **GEX regime** bonuses/penalties on Blue scores when a gamma flip resolves. **v19** adds a **scaled Whale bonus** on Blue from **volume Z-score**: **+1** if **Z > 2.0**, **+2** if **Z > 3.0**.
 - **Skew-aware BLUF** — If **OTM put IV ≥ 120% of OTM call IV** (when call IV is positive) and daily structure is **not BEARISH**, routing prioritizes **SELL CASH SECURED PUTS** even when the tape is only neutral (after covered-call and fear-score rules).
 - **Walk-up limit** — The **Recommended Trade** card shows **(bid + mid) / 2** per share for **short premium** as a passive fill anchor (e.g. Robinhood-style limit sells), including the strict-filter **fallback** strike path when present.
 
@@ -71,7 +72,7 @@ The dashboard answers one question: **"What should I do right now?"**
 
 - **BLUF Action Card** — plain-English trade recommendation with a specific strike, expiry, broker checklist, optional **walk-up limit** for short premium, **MC PoP %**, **HVN floor**, **correlation risk multiplier**, **Expected Move safety**, and **Θ/Γ efficiency** hints on the headline CC/CSP lines when data exists
 - **Traffic Light Indicators** — green/amber/red across Quant Edge Score, Confluence, Market Structure
-- **Diamond Signals** — Blue (buy zone) and Pink (take profit) triggered by 7+/9 confluence crossover; diamond scan uses **Hurst-adaptive RSI/MACD** and a MACD confirmation in strong trending regimes; **v18** may adjust Blue **composite** score with **GEX regime** logic; **v19** may add **Whale** and headline context on the desk
+- **Diamond Signals** — Blue (buy zone) and Pink (take profit) triggered by 7+/9 confluence crossover; diamond scan uses **Hurst-adaptive RSI/MACD** and a MACD confirmation in strong trending regimes; **v18** may adjust Blue **composite** score with **GEX regime** logic; **v19** adds **Z-score Whale** scaling and **headline / NLP** context on the desk and scanner
 - **Gold Zone** — dynamic institutional anchor fusing Volume Profile POC, Fib 61.8%, 200-SMA, Gann Sq9, **nearest HVN (within 2% of spot)** when volume nodes resolve, and optionally **Gamma Flip** when within 5% of spot
 - **Gamma flip & GEX** — chain-derived **zero-gamma** level on the chart, **GEX Regime** on the scanner, and soft-fail behavior when OI/gamma inputs are missing
 - **Feature-Flagged Institutional Mode** — one-click toggle between retail and quant engines (default **on** in v16+)
@@ -85,7 +86,7 @@ The dashboard answers one question: **"What should I do right now?"**
 - **Time-Machine Backtester** — vectorized 3y historical proxy with win rate, expectancy, Sharpe, max drawdown, and equity curve
 - **One-Click Backtest Presets** — Conservative, Balanced, and Aggressive slider snaps for instant scenario switching
 - **Options Math Stack** — Black-Scholes Greeks, Corrado-Su skew/kurtosis expansion, Expected Value, discrete/continuous Kelly sizing, Volatility Skew, **Expected Move (1-σ)**, **Θ/Γ**, **GEX / gamma flip**
-- **Multi-Ticker Scanner** — ranks your full watchlist by confluence and diamond status using a **capped** parallel pool and queued work per ticker; **PoP** = historical Diamond win rate; **EM Safety** = short-put strike vs 1-σ band; **GEX Regime** = spot vs gamma flip; **Flow / Bias** = **🐋 WHALE** plus **📈/📉** NLP bias when data resolves (**—** if not)
+- **Multi-Ticker Scanner** — ranks your full watchlist by confluence and diamond status using a **capped** parallel pool and queued work per ticker; **PoP** = historical Diamond win rate; **EM Safety** = short-put strike vs 1-σ band; **GEX Regime** = spot vs gamma flip; **Flow / Bias** = **🐋 WHALE** when **volume Z > 2.0** plus **📈/📉** NLP bias when data resolves (**—** if not)
 - **Premium Simulator** — covered call backtest with honest disclaimers
 
 ---
@@ -102,10 +103,10 @@ cashflow-trader/
     ├── __init__.py
     ├── config.py             # Config persistence, defaults, st.secrets overlay
     ├── data.py               # yfinance fetchers, retry/backoff, fetch_stock cache (300s), macro
-    ├── ta.py                 # TA class — indicators, FFD, volume profile, **get_volume_nodes (HVN)**
-    ├── options.py            # Black-Scholes, Corrado-Su, EV, Kelly, Quant Edge, Hurst-adaptive Diamonds, **GEX / gamma flip**, **MC PoP**, **Opt.calc_expected_move**, **build_chain_mc_dataframe**
+    ├── ta.py                 # TA class — indicators, FFD, volume profile, **get_volume_nodes (HVN)**, **get_dark_pool_proxy (30d volume Z-score)**
+    ├── options.py            # Black-Scholes, Corrado-Su, EV, Kelly, Quant Edge, Hurst-adaptive Diamonds, **GEX / gamma flip**, **Z-score Whale bonus**, **MC PoP**, **Opt.calc_expected_move**, **build_chain_mc_dataframe**
     ├── sentiment.py          # Sentiment + HMM (FFD features), CC sim, Alerts, QuantBacktest engine
-    ├── chart.py              # Four-panel Plotly chart builder + skew surface + **HVN hlines** + **EM cone** + **gamma flip line / short-gamma tint**
+    ├── chart.py              # Four-panel Plotly chart builder + skew surface + **HVN hlines** + **cyan volume Z-score markers** + **EM cone** + **gamma flip line / short-gamma tint**
     ├── ui_helpers.py         # Sparklines, glance cards, fragments, mode badge, DataFrame styling, **expected_move_safety_html**, **Θ/Γ desk line**
     ├── pages.py              # Optional page shell + parallel context build (uses threading helper); **options → GEX → fused Gold → confluence → diamonds**
     ├── streamlit_threading.py # Thread pools with ScriptRunContext re-attach per task
@@ -189,7 +190,7 @@ If the earnings calendar endpoint returns no rows, the app falls back to the pri
 |---|---|
 | Trend | EMA 20/50/200, Ichimoku Cloud, Supertrend |
 | Momentum | RSI (14), RSI (2), MACD (12,26,9), Stochastic, CCI |
-| Volume | OBV, Volume Profile, VWAP, **HVN nodes (volume-at-price)** |
+| Volume | OBV, Volume Profile, VWAP, **HVN nodes (volume-at-price)**, **30-day volume Z-score (dark pool proxy)** |
 | Volatility | Bollinger Bands, ATR (14), Hurst Exponent, **1-σ Expected Move (IV × √T)** |
 | Structure | Market Structure (BOS/CHOCH), Support/Resistance, Fair Value Gaps |
 | Gann | Square of 9 levels, Angles, Time Cycles |
