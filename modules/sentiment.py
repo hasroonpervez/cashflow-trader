@@ -1,6 +1,9 @@
 """
 Sentiment, Backtest simulator, and Alerts scanner.
 """
+import contextlib
+import io
+import logging
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -16,6 +19,11 @@ try:
 except ImportError:
     HMM_AVAILABLE = False
 
+# hmmlearn/sklearn can spam stderr with "Model is not converging" and stall on tiny / wild series.
+_HMM_MAX_ROWS = 200
+_HMM_N_ITER = 18
+_HMM_TOL = 0.15
+
 
 class QuantSentiment:
     @staticmethod
@@ -30,23 +38,39 @@ class QuantSentiment:
         returns = np.log(df["Close"] / df["Close"].shift(1)).dropna()
         volatility = returns.rolling(window=10).std().dropna()
         data = pd.concat([returns, volatility], axis=1).dropna()
-        if data.empty:
+        if data.empty or len(data) < 40:
             return {0: 0.5, 1: 0.5}
 
-        X = data.values
+        X = np.asarray(data.values, dtype=np.float64)
+        X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
+        # Tail only: faster fit, stable for Cloud; last row stays the "current" bar.
+        if len(X) > _HMM_MAX_ROWS:
+            X = X[-_HMM_MAX_ROWS:]
+        # Light scale — helps full-cov numerical stability; we use diag below anyway.
+        std = X.std(axis=0)
+        std = np.where(std < 1e-8, 1.0, std)
+        X = X / std
+
         model = hmm.GaussianHMM(
             n_components=n_regimes,
-            covariance_type="full",
-            n_iter=100,
+            covariance_type="diag",
+            n_iter=_HMM_N_ITER,
+            tol=_HMM_TOL,
             random_state=42,
         )
+        hmm_log = logging.getLogger("hmmlearn")
+        prev_lvl = hmm_log.level
         try:
-            model.fit(X)
+            hmm_log.setLevel(logging.CRITICAL)
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                model.fit(X)
             probabilities = model.predict_proba(X)
             current_probs = probabilities[-1]
-            return {i: prob for i, prob in enumerate(current_probs)}
+            return {i: float(prob) for i, prob in enumerate(current_probs)}
         except Exception:
             return {0: 0.5, 1: 0.5}
+        finally:
+            hmm_log.setLevel(prev_lvl)
 
 
 class Sentiment:
