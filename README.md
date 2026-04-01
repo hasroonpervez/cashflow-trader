@@ -1,8 +1,8 @@
-# CashFlow Command Center v14.1
+# CashFlow Command Center v15.0
 
 **Single-screen options income desk and multi-ticker watchlists.**
 
-Glanceable execution guidance, Diamond buy/sell signals, Gold Zone confluence, Black-Scholes + Corrado-Su options math, and a full technical chart stack — all in a Streamlit dashboard built for mobile-first traders who sell covered calls and cash-secured puts for weekly income.
+Glanceable execution guidance, Diamond buy/sell signals, Gold Zone confluence, Black-Scholes + Corrado-Su options math, a live Market Edge Matrix, a volatility skew surface with regime tagging, and a vectorized Time-Machine backtester — all in a Streamlit dashboard built for mobile-first traders who sell covered calls and cash-secured puts for weekly income.
 
 ---
 
@@ -17,8 +17,13 @@ The dashboard answers one question: **"What should I do right now?"**
 - **Feature-Flagged Institutional Mode** — one-click toggle between retail and quant engines
 - **A/B Quant Diagnostics** — institutional vs retail Quant Edge delta shown live
 - **Rolling Edge Capture Log** — session ledger of ticker-level deltas with summary strip and CSV export
+- **Market Edge Matrix** — real-time treemap of latest ticker scans, sized by Quant score and colored by Quant-Retail delta
 - **De-correlated Quant Edge Score** — retail path uses five orthogonal dimensions (Trend, Momentum, Volume, Volatility, Structure)
 - **Institutional Quant Edge Path** — HMM regime detection + Fractional Differentiation synthesis
+- **Volatility Skew Surface** — put vs call IV smile chart with spot marker for fast tail-risk context
+- **Skew Regime Tag** — OTM put-IV/call-IV ratio classified as Crash Hedging, Bearish Skew, Balanced Smile, or Upside Mania
+- **Time-Machine Backtester** — vectorized 3y historical proxy with win rate, expectancy, Sharpe, max drawdown, and equity curve
+- **One-Click Backtest Presets** — Conservative, Balanced, and Aggressive slider snaps for instant scenario switching
 - **Options Math Stack** — Black-Scholes Greeks, Corrado-Su skew/kurtosis expansion, Expected Value, discrete/continuous Kelly sizing, Volatility Skew
 - **Multi-Ticker Scanner** — ranks your full watchlist by confluence and diamond status
 - **Premium Simulator** — covered call backtest with honest disclaimers
@@ -39,8 +44,8 @@ cashflow-trader/
     ├── data.py               # yfinance fetchers, retry/backoff, caching, macro
     ├── ta.py                 # TA class — indicators + fractional differentiation (FFD)
     ├── options.py            # Black-Scholes, Corrado-Su, EV, Kelly, Quant Edge, Diamonds
-    ├── sentiment.py          # Sentiment + HMM regime detection, Backtest simulator, Alerts
-    ├── chart.py              # Four-panel Plotly chart builder
+    ├── sentiment.py          # Sentiment + HMM regime detection, CC sim, Alerts, QuantBacktest engine
+    ├── chart.py              # Four-panel Plotly chart builder + volatility skew surface
     ├── ui_helpers.py         # Sparklines, glance cards, sections, DataFrame styling
     └── css.py                # Full CSS theme + Mini Mode + sidebar toggle JS
 ```
@@ -128,6 +133,8 @@ If the earnings calendar endpoint returns no rows, the app falls back to the pri
 | Fractional Differentiation (FFD) | Improve stationarity while preserving memory in time-series dynamics |
 | HMM Regime Detection | Classify latent volatility regimes probabilistically from returns + rolling volatility |
 | Continuous Kelly (Merton) | Compute variance-aware continuous-time allocation with optional half-Kelly |
+| OTM IV Skew Regime Ratio | Classify market-maker fear/greed posture from put-vs-call OTM implied volatility |
+| Vectorized Historical Edge Proxy | Backtest threshold/hold edge signals over daily history without UI lockups |
 
 `hmmlearn` and `scipy` are handled with safe fallbacks so the app remains usable if those packages are unavailable.
 

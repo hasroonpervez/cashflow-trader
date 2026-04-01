@@ -1,6 +1,6 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  CASHFLOW COMMAND CENTER v14.1 · INSTITUTIONAL EDITION                   ║
+║  CASHFLOW COMMAND CENTER v15.0 · INSTITUTIONAL EDITION                   ║
 ║  Modular architecture — same UI, same logic, clean separation.           ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 """
@@ -8,7 +8,7 @@
 import streamlit as st
 
 st.set_page_config(
-    page_title="CashFlow Command Center v14.1",
+    page_title="CashFlow Command Center v15.0",
     page_icon="💰",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -48,6 +48,7 @@ import numpy as np
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 import plotly.graph_objects as go
+import plotly.express as px
 import math, warnings, json, time, os
 import textwrap
 from pathlib import Path
@@ -55,6 +56,10 @@ warnings.filterwarnings("ignore")
 
 if "edge_log" not in st.session_state:
     st.session_state.edge_log = pd.DataFrame(columns=["Time", "Ticker", "Retail", "Quant", "Delta"])
+if "bt_thresh" not in st.session_state:
+    st.session_state.bt_thresh = 70
+if "bt_hold" not in st.session_state:
+    st.session_state.bt_hold = 5
 
 # ── Module imports ──
 from modules.config import (
@@ -76,10 +81,10 @@ from modules.options import (
     bs_price, bs_greeks, calc_ev, kelly_criterion, calc_vol_skew,
     quant_edge_score, weekly_trend_label, calc_gold_zone,
     calc_confluence_points, detect_diamonds, latest_diamond_status,
-    diamond_win_rate, scan_single_ticker, Opt,
+    diamond_win_rate, scan_single_ticker, Opt, calc_skew_regime,
 )
-from modules.sentiment import Sentiment, Backtest, Alerts, run_cc_sim_cached
-from modules.chart import build_chart, _chart_hoverlabel
+from modules.sentiment import Sentiment, Backtest, Alerts, run_cc_sim_cached, QuantBacktest
+from modules.chart import build_chart, _chart_hoverlabel, build_skew_chart
 from modules.ui_helpers import (
     _factor_checklist_labels, _confluence_why_trade_plain,
     _iv_rank_qualitative_words, _iv_rank_pill_html,
@@ -114,7 +119,7 @@ def main():
 
     # ── Watchlist editor (must run before Mission Control so sb_scanner is committed same run)
     _wl_expanded = bool(st.session_state.pop("_open_watchlist_editor", False))
-    st.caption("CashFlow Command Center · v14.1")
+    st.caption("CashFlow Command Center · v15.0")
     with st.expander("Edit watchlist symbols", expanded=_wl_expanded):
         st.caption(
             "Drop in tickers separated by commas or line breaks. Shuffle the lineup with the controls. "
@@ -1046,6 +1051,44 @@ def main():
                                 )
                                 sc3.metric("Max Divergence", f"{best_delta:+d}", delta=best_ticker, delta_color="off")
                                 sc4.metric("Min Divergence", f"{worst_delta:+d}", delta=worst_ticker, delta_color="off")
+
+                                # --- INJECT EDGE MATRIX HEATMAP ---
+                                try:
+                                    st.markdown("<br>", unsafe_allow_html=True)
+
+                                    # Keep only the latest scan per ticker to avoid duplicate blocks.
+                                    df_latest = df_log.drop_duplicates(subset=["Ticker"], keep="first").copy()
+                                    df_latest["Size_Score"] = df_latest["Quant"].apply(lambda x: max(1, x))
+
+                                    fig = px.treemap(
+                                        df_latest,
+                                        path=[px.Constant("Session Watchlist"), "Ticker"],
+                                        values="Size_Score",
+                                        color="Delta",
+                                        color_continuous_scale="RdYlGn",
+                                        color_continuous_midpoint=0,
+                                        custom_data=["Retail", "Quant", "Delta"],
+                                    )
+
+                                    fig.update_traces(
+                                        hovertemplate="<b>%{label}</b><br>Quant Score: %{customdata[1]}<br>Retail Score: %{customdata[0]}<br>Edge Delta: %{customdata[2]:+d}<extra></extra>",
+                                        textinfo="label+value",
+                                        texttemplate="<b>%{label}</b><br>Score: %{value}<br>Δ %{color:+.1f}",
+                                    )
+
+                                    fig.update_layout(
+                                        margin=dict(t=30, l=10, r=10, b=10),
+                                        paper_bgcolor="rgba(0,0,0,0)",
+                                        plot_bgcolor="rgba(0,0,0,0)",
+                                        font=dict(color="#94a3b8"),
+                                        title=dict(text="Live Market Edge Matrix", font=dict(size=14, color="#e2e8f0")),
+                                    )
+
+                                    st.plotly_chart(fig, use_container_width=True)
+                                except Exception:
+                                    pass  # Fail silently if the map cannot render
+                                # ----------------------------------
+
                                 st.divider()
                                 try:
                                     csv_data = df_log.to_csv(index=False).encode("utf-8")
@@ -1076,6 +1119,70 @@ def main():
                             )
                         else:
                             st.info("Log is empty. Scan a ticker to record edge data.")
+
+                    with st.expander("⏳ Time-Machine Backtester (Historical Edge)", expanded=False):
+                        st.caption("Simulates buying this asset every time the Quant Edge flashes, holding for N days.")
+
+                        p1, p2, p3 = st.columns(3)
+                        if p1.button("🛡️ Conservative (80 / 5d)", use_container_width=True, help="High conviction entry, quick exit. Optimizes for Win Rate."):
+                            st.session_state.bt_thresh = 80
+                            st.session_state.bt_hold = 5
+                        if p2.button("⚖️ Balanced (70 / 10d)", use_container_width=True, help="Standard swing trade parameters."):
+                            st.session_state.bt_thresh = 70
+                            st.session_state.bt_hold = 10
+                        if p3.button("🔥 Aggressive (60 / 20d)", use_container_width=True, help="Lower conviction entry, longer trend capture. Optimizes for Max Profit."):
+                            st.session_state.bt_thresh = 60
+                            st.session_state.bt_hold = 20
+
+                        st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
+
+                        bt_col1, bt_col2 = st.columns([1, 1])
+                        with bt_col1:
+                            bt_thresh = st.slider("Entry Edge Score Threshold", min_value=50, max_value=90, key="bt_thresh", step=5)
+                        with bt_col2:
+                            bt_hold = st.slider("Holding Period (Days)", min_value=1, max_value=30, key="bt_hold", step=1)
+
+                        try:
+                            bt_results = QuantBacktest.run_edge_backtest(df, threshold=bt_thresh, hold_days=bt_hold)
+
+                            if bt_results and bt_results["Total_Trades"] > 0:
+                                st.markdown("<br>", unsafe_allow_html=True)
+                                m1, m2, m3, m4, m5 = st.columns(5)
+                                m1.metric("Total Trades", f"{bt_results['Total_Trades']}")
+                                m2.metric("Win Rate", f"{bt_results['Win_Rate']:.1f}%")
+                                m3.metric("Expectancy per Trade", f"{bt_results['Expectancy']:+.2f}%")
+                                m4.metric("Sharpe Ratio", f"{bt_results['Sharpe']:.2f}")
+                                m5.metric("Max Drawdown", f"{bt_results['Max_DD']:.1f}%")
+
+                                st.markdown("<br>", unsafe_allow_html=True)
+                                eq_df = bt_results["Equity_Curve"]
+                                fig_eq = go.Figure()
+                                fig_eq.add_trace(
+                                    go.Scatter(
+                                        x=eq_df.index,
+                                        y=eq_df["Equity_Curve"],
+                                        mode="lines",
+                                        name="Strategy Equity",
+                                        line=dict(color="#3b82f6", width=2),
+                                        fill="tozeroy",
+                                        fillcolor="rgba(59, 130, 246, 0.1)",
+                                    )
+                                )
+                                fig_eq.update_layout(
+                                    title=dict(text="Strategy Equity Curve ($10k Start)", font=dict(color="#e2e8f0", size=14)),
+                                    template="plotly_dark",
+                                    paper_bgcolor="rgba(0,0,0,0)",
+                                    plot_bgcolor="rgba(0,0,0,0)",
+                                    margin=dict(l=10, r=10, t=40, b=10),
+                                    height=250,
+                                    xaxis_title="Date",
+                                    yaxis_title="Account Value ($)",
+                                )
+                                st.plotly_chart(fig_eq, use_container_width=True)
+                            else:
+                                st.warning("Not enough historical data or no trades triggered at this threshold.")
+                        except Exception:
+                            st.error("Backtest simulation failed. Adjust parameters.")
                     if isinstance(retail_breakdown, dict):
                         for k, v in retail_breakdown.items():
                             if not isinstance(v, (int, float, np.integer, np.floating)):
@@ -1328,6 +1435,17 @@ def main():
                 calls, puts = result_sel if isinstance(result_sel, (tuple, list)) and len(result_sel) == 2 else (pd.DataFrame(), pd.DataFrame())
                 calls = calls if isinstance(calls, pd.DataFrame) else pd.DataFrame()
                 puts = puts if isinstance(puts, pd.DataFrame) else pd.DataFrame()
+                opts_df = pd.DataFrame()
+                try:
+                    _calls_t = calls.copy()
+                    _puts_t = puts.copy()
+                    if not _calls_t.empty:
+                        _calls_t["type"] = "call"
+                    if not _puts_t.empty:
+                        _puts_t["type"] = "put"
+                    opts_df = pd.concat([_calls_t, _puts_t], ignore_index=True)
+                except Exception:
+                    opts_df = pd.DataFrame()
                 if not calls.empty or not puts.empty:
                     s1, s2 = st.columns(2)
                     with s1:
@@ -1375,6 +1493,29 @@ def main():
                         "<strong>Delta is your win probability.</strong> A Delta of 0.16 means you have an 84 percent chance to keep all the cash and keep your shares. Lower Delta means safer. "
                         "<strong>Theta is your daily paycheck.</strong> Every day that passes, the option loses value. That lost value goes straight into your pocket. Time is literally paying you. "
                         "<strong>OI is how busy the market is.</strong> Higher OI means more traders are active. That means you get better prices when you sell. We filter out anything below 100 OI to protect you.", "neutral")
+
+                    with st.expander("📈 Volatility Skew Surface (Tail Risk)", expanded=False):
+                        st.caption("Visualizing the 'Smile': Higher IV on puts indicates the market is pricing in heavy downside fear.")
+                        try:
+                            regime_label, regime_color, regime_desc = calc_skew_regime(opts_df, price)
+                            st.markdown(
+                                f"""
+                                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 15px; padding: 10px; background: rgba(15, 23, 42, 0.6); border: 1px solid #334155; border-radius: 8px;">
+                                    <span style="background: {regime_color}; color: #ffffff; padding: 4px 10px; border-radius: 4px; font-size: 0.8rem; font-weight: 700; letter-spacing: 0.05em;">
+                                        {regime_label}
+                                    </span>
+                                    <span style="color: #cbd5e1; font-size: 0.85rem;">{regime_desc}</span>
+                                </div>
+                                """,
+                                unsafe_allow_html=True,
+                            )
+                            skew_fig = build_skew_chart(opts_df, price)
+                            if skew_fig:
+                                st.plotly_chart(skew_fig, use_container_width=True, config=_PLOTLY_UI_CONFIG)
+                            else:
+                                st.warning("Insufficient liquidity to plot the volatility skew.")
+                        except Exception:
+                            pass
 
                     st.divider()
                     sp1, sp2 = st.columns(2)

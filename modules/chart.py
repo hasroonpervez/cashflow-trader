@@ -475,3 +475,72 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
     )
 
     return fig_p, fig_v, fig_r, fig_m
+
+
+def build_skew_chart(opts_df, spot_price):
+    """
+    Builds a Volatility Smile/Skew chart using Plotly.
+    Visualizes the Implied Volatility across strikes for puts and calls.
+    """
+    if opts_df is None or opts_df.empty or "impliedVolatility" not in opts_df.columns:
+        return None
+
+    # Filter obvious anomalies / illiquid tails for a cleaner curve.
+    df = opts_df[(opts_df["impliedVolatility"] > 0.05) & (opts_df["impliedVolatility"] < 3.0)].copy()
+    if df.empty:
+        return None
+
+    calls = df[df["type"] == "call"].sort_values("strike")
+    puts = df[df["type"] == "put"].sort_values("strike")
+
+    fig = go.Figure()
+
+    if not puts.empty:
+        fig.add_trace(
+            go.Scatter(
+                x=puts["strike"],
+                y=puts["impliedVolatility"],
+                mode="lines+markers",
+                name="Puts (Fear/Downside)",
+                line=dict(color="#ef4444", width=2, shape="spline"),
+                marker=dict(size=6, color="#ef4444"),
+            )
+        )
+
+    if not calls.empty:
+        fig.add_trace(
+            go.Scatter(
+                x=calls["strike"],
+                y=calls["impliedVolatility"],
+                mode="lines+markers",
+                name="Calls (Greed/Upside)",
+                line=dict(color="#22c55e", width=2, shape="spline"),
+                marker=dict(size=6, color="#22c55e"),
+            )
+        )
+
+    fig.add_vline(
+        x=spot_price,
+        line_dash="dash",
+        line_color="#94a3b8",
+        annotation_text="Spot Price",
+        annotation_position="top left",
+    )
+
+    fig.update_layout(
+        title=dict(text="Implied Volatility Skew (The Smile)", font=dict(size=14, color="#e2e8f0")),
+        xaxis_title="Strike Price",
+        yaxis_title="Implied Volatility",
+        template="plotly_dark",
+        paper_bgcolor=_PLOTLY_PAPER_BG,
+        plot_bgcolor=_PLOTLY_PLOT_BG,
+        font=_PLOTLY_FONT_MAIN,
+        margin=dict(l=40, r=20, t=50, b=40),
+        height=320,
+        hovermode="x unified",
+        legend=dict(orientation="h", yanchor="bottom", y=1.05, xanchor="right", x=1),
+        hoverlabel=_chart_hoverlabel(),
+    )
+    fig.update_yaxes(tickformat=".1%")
+
+    return fig

@@ -130,4 +130,65 @@ class Alerts:
         return alerts
 
 
+class QuantBacktest:
+    @staticmethod
+    def run_edge_backtest(df, threshold=70, hold_days=5):
+        """
+        Runs a fast, vectorized historical backtest using a momentum/volatility proxy
+        to simulate historical edge scores without locking up the UI.
+        """
+        if df is None or len(df) < hold_days + 50:
+            return None
+
+        df_bt = df.copy()
+        if "Close" not in df_bt.columns:
+            return None
+
+        sma50 = df_bt["Close"].rolling(50).mean()
+        trend_score = np.where(df_bt["Close"] > sma50, 60, 40)
+
+        delta = df_bt["Close"].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+        rs = gain / loss.replace(0, 0.001)
+        rsi = 100 - (100 / (1 + rs))
+
+        volatility = df_bt["Close"].pct_change().rolling(20).std() * np.sqrt(252) * 100
+        vol_penalty = np.where(volatility > 30, -20, 0)
+
+        df_bt["Hist_Edge"] = np.clip((trend_score * 0.4) + (rsi * 0.6) + vol_penalty, 0, 100)
+        df_bt["Signal"] = np.where(df_bt["Hist_Edge"] >= threshold, 1, 0)
+        df_bt["Forward_Return"] = df_bt["Close"].shift(-hold_days) / df_bt["Close"] - 1.0
+
+        trades = df_bt[df_bt["Signal"] == 1].dropna(subset=["Forward_Return"]).copy()
+        if trades.empty:
+            return None
+
+        win_rate = (trades["Forward_Return"] > 0).mean() * 100
+        avg_win = trades[trades["Forward_Return"] > 0]["Forward_Return"].mean() * 100
+        avg_loss = trades[trades["Forward_Return"] <= 0]["Forward_Return"].mean() * 100
+        if np.isnan(avg_win):
+            avg_win = 0.0
+        if np.isnan(avg_loss):
+            avg_loss = 0.0
+
+        expectancy = (win_rate / 100 * avg_win) + ((1 - win_rate / 100) * avg_loss)
+
+        trades["Equity_Curve"] = (1 + trades["Forward_Return"]).cumprod() * 10000
+        trade_returns = trades["Forward_Return"]
+        tr_std = trade_returns.std()
+        sharpe = (trade_returns.mean() / tr_std) * np.sqrt(252 / hold_days) if tr_std and tr_std > 0 else 0.0
+
+        cum_max = trades["Equity_Curve"].cummax()
+        drawdown = (trades["Equity_Curve"] - cum_max) / cum_max
+        max_dd = drawdown.min() * 100
+
+        return {
+            "Total_Trades": int(len(trades)),
+            "Win_Rate": float(win_rate),
+            "Expectancy": float(expectancy),
+            "Sharpe": float(sharpe),
+            "Max_DD": float(max_dd),
+            "Equity_Curve": trades[["Equity_Curve"]],
+        }
 

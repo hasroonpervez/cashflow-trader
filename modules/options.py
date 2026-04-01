@@ -760,3 +760,35 @@ class Opt:
         rows.sort(key=lambda x: x["rr"] * x["pop"], reverse=True)
         return rows[:8]
 
+
+def calc_skew_regime(opts_df, spot_price):
+    """
+    Calculates the volatility skew regime by comparing OTM put IV to OTM call IV.
+    Returns a tuple: (Regime Label, Hex Color, Description)
+    """
+    if opts_df is None or opts_df.empty or "impliedVolatility" not in opts_df.columns:
+        return "Unknown", "#94a3b8", "Insufficient data."
+
+    df = opts_df[(opts_df["impliedVolatility"] > 0.05) & (opts_df["impliedVolatility"] < 3.0)].copy()
+    if df.empty or "type" not in df.columns or "strike" not in df.columns:
+        return "Unknown", "#94a3b8", "Insufficient data."
+
+    otm_puts = df[(df["type"] == "put") & (df["strike"] < spot_price)]
+    otm_calls = df[(df["type"] == "call") & (df["strike"] > spot_price)]
+    if otm_puts.empty or otm_calls.empty:
+        return "Neutral / Illiquid", "#94a3b8", "Not enough OTM options to determine regime."
+
+    avg_put_iv = float(pd.to_numeric(otm_puts["impliedVolatility"], errors="coerce").median())
+    avg_call_iv = float(pd.to_numeric(otm_calls["impliedVolatility"], errors="coerce").median())
+    if not np.isfinite(avg_put_iv) or not np.isfinite(avg_call_iv) or avg_call_iv <= 0:
+        return "Unknown", "#94a3b8", "Insufficient data."
+
+    skew_ratio = avg_put_iv / avg_call_iv
+    if skew_ratio > 1.25:
+        return "CRASH HEDGING", "#ef4444", f"Severe downside fear. Put IV is {skew_ratio:.2f}x higher than Call IV."
+    if skew_ratio > 1.08:
+        return "BEARISH SKEW", "#f97316", f"Downside protection. Put IV is {skew_ratio:.2f}x higher than Call IV."
+    if skew_ratio < 0.85:
+        return "UPSIDE MANIA", "#22c55e", f"Call frenzy. Call IV is {(1 / skew_ratio):.2f}x higher than Put IV."
+    return "BALANCED SMILE", "#3b82f6", f"Neutral skew. Put and Call IV are relatively balanced (Ratio: {skew_ratio:.2f})."
+
