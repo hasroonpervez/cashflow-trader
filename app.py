@@ -1,6 +1,6 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  CASHFLOW COMMAND CENTER v16.0 FREE EDITION · PROBABILITY MODE          ║
+║  CASHFLOW COMMAND CENTER v17.0 FREE EDITION · LIQUIDITY & GREEKS       ║
 ║  Modular architecture: same UI, same logic, clean separation.           ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 """
@@ -16,7 +16,7 @@ if _app_root not in sys.path:
 import streamlit as st
 
 st.set_page_config(
-    page_title="CashFlow Command Center v16.0 Free Edition",
+    page_title="CashFlow Command Center v17.0 Free Edition",
     page_icon="💰",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -108,6 +108,7 @@ for _import_try in range(_IMPORT_KEYERROR_RETRIES):
                 _glance_metric_card, _render_html_block, _parse_watchlist_string,
                 walk_up_limit_sell_per_share,
                 _fragment_technical_zone, _fragment_rolling_edge_capture, _df_price_levels,
+                expected_move_safety_html,
                 _earnings_calendar_column_config,
                 _PRICE_LEVEL_COLUMN_CONFIG, _options_scan_dataframe,
                 _options_scan_column_config,
@@ -153,7 +154,7 @@ def main():
 
     # ── Watchlist editor (must run before Mission Control so sb_scanner is committed same run)
     _wl_expanded = bool(st.session_state.pop("_open_watchlist_editor", False))
-    st.caption("CashFlow Command Center · v16.0 Free Edition")
+    st.caption("CashFlow Command Center · v17.0 Free Edition")
     def _persist_watchlist_text_callback():
         raw = st.session_state.get("sb_scanner", "")
         w = _parse_watchlist_string(raw)
@@ -526,7 +527,7 @@ def main():
         "<div style='margin:2px 0 10px 0'>"
         "<span style='font-size:0.72rem;color:#c4b5fd;padding:3px 10px;border-radius:6px;"
         "border:1px solid rgba(139,92,246,0.45);background:rgba(76,29,149,0.22);font-weight:600;letter-spacing:0.04em'>"
-        "v16.0 Free Edition · Probability Mode</span></div>",
+        "v17.0 · Liquidity & Greeks Mode</span></div>",
         unsafe_allow_html=True,
     )
     qs_color = ctx.qs_color; qs_status = ctx.qs_status
@@ -685,6 +686,7 @@ def main():
     )
 
     # ── RECOMMENDED TRADE (optimal strike from options engine) ──
+    _cf_em_safety = {"price": float(price), "strike": None, "iv_pct": None, "dte": None}
     master_kind, master_b = None, None
     if opt_exps and bluf_exp:
         br = struct in ("BULLISH", "RANGING")
@@ -732,6 +734,14 @@ def main():
             f"<div style='font-size:.78rem;color:#c4b5fd;font-weight:600;margin:0 0 10px 0;letter-spacing:.02em'>"
             f"MC PoP: {_mc_hdr} | HVN Floor: {_hvn_hdr} | Risk Multiplier: {_simple_corr_mult:.2f}x</div>"
         )
+        _iv_for_safe = float(_miv) if _miv > 0 else float(ref_iv_bluf or 0)
+        _safe_trade_html = expected_move_safety_html(price, _mstrike, _iv_for_safe, dte_m)
+        _cf_em_safety = {
+            "price": float(price),
+            "strike": float(_mstrike),
+            "iv_pct": _iv_for_safe,
+            "dte": int(dte_m),
+        }
         if master_kind == "cc":
             n_c = nc
             prem_tot = _mprem * n_c
@@ -785,6 +795,7 @@ def main():
             f"{trade_hdr_html}"
             f"{iv_badge_html}"
             f"{_prob_subhdr}"
+            f"{_safe_trade_html}"
             f"<p style='color:#e2e8f0;font-size:1.05rem;line-height:1.55;margin:0 0 14px 0;font-weight:600'>{headline}</p>"
             f"<div class='strike-big' style='margin:8px 0 6px 0'>${_html_mod.escape(strike_s)}</div>"
             f"{_walk_seg}"
@@ -853,6 +864,10 @@ def main():
 
         if fallback_row is not None and bluf_exp:
             _f_strike = float(fallback_row["strike"])
+            try:
+                _f_dte_safe = max(1, (datetime.strptime(str(bluf_exp)[:10], "%Y-%m-%d") - datetime.now()).days)
+            except Exception:
+                _f_dte_safe = max(1, int(bluf_dte or 30))
             _f_px = float(pd.to_numeric(fallback_row.get("est_px"), errors="coerce") or 0.0)
             _f_prem = _f_px * 100.0
             _f_bid = float(pd.to_numeric(fallback_row.get("bid"), errors="coerce") or 0.0)
@@ -870,6 +885,13 @@ def main():
             _f_iv_raw = float(pd.to_numeric(fallback_row.get("impliedVolatility"), errors="coerce") or 0.0)
             _f_iv_pct = _f_iv_raw * 100.0 if _f_iv_raw > 0 else ref_iv_bluf
             _iv_fb = _iv_rank_pill_html(ticker, price, _f_iv_pct, stub=None if _f_iv_pct else "no_strike")
+            _safe_fb_html = expected_move_safety_html(price, _f_strike, float(_f_iv_pct or 0), _f_dte_safe)
+            _cf_em_safety = {
+                "price": float(price),
+                "strike": float(_f_strike),
+                "iv_pct": float(_f_iv_pct or 0),
+                "dte": int(_f_dte_safe),
+            }
             if fallback_kind == "cc":
                 _f_headline = (
                     f"FALLBACK LINE: SELL {nc}x {_html_mod.escape(ticker)} ${_f_strike:.0f} CALLS EXP {bluf_exp}. "
@@ -886,6 +908,7 @@ def main():
                 f"<div class='trade-master'>"
                 f"{trade_hdr_html}"
                 f"{_iv_fb}"
+                f"{_safe_fb_html}"
                 f"<p style='color:#e2e8f0;font-size:1rem;line-height:1.5;margin:0 0 10px 0;font-weight:600'>{_f_headline}</p>"
                 f"<div class='strike-big' style='margin:6px 0 4px 0'>${_f_strike:.0f}</div>"
                 f"{_f_walk_html}"
@@ -907,6 +930,8 @@ def main():
                 f"</p>"
                 f"</div>"
             )
+
+    st.session_state["_cf_em_safety"] = _cf_em_safety
 
     ema_dist_pct = None
     if len(df) >= 20:
@@ -1040,6 +1065,29 @@ def main():
     # Fragment reruns must not rely on extra kwargs (Streamlit's @st.fragment can omit them).
     st.session_state["_cf_use_quant_models"] = use_quant_models
     st.session_state["_cf_vix_snapshot"] = float(vix_v or 0.0)
+    try:
+        _iv_ch = float(ref_iv_bluf or 0)
+        for _cx in (bluf_cc, bluf_csp):
+            if _cx:
+                try:
+                    _vx = float(_cx.get("iv") or 0)
+                    if _vx > _iv_ch:
+                        _iv_ch = _vx
+                except (TypeError, ValueError):
+                    pass
+        _dte_ch = int(bluf_dte) if bluf_dte else 0
+        _exp_ch = None
+        if bluf_exp:
+            try:
+                _exp_ch = datetime.strptime(str(bluf_exp)[:10], "%Y-%m-%d")
+            except Exception:
+                _exp_ch = None
+        if _dte_ch > 0 and _iv_ch > 0:
+            st.session_state["_cf_chart_em"] = {"iv_pct": _iv_ch, "dte": _dte_ch, "expiry": _exp_ch}
+        else:
+            st.session_state["_cf_chart_em"] = {}
+    except Exception:
+        st.session_state["_cf_chart_em"] = {}
     _fragment_technical_zone(
         df,
         df_wk,
@@ -1618,10 +1666,15 @@ def main():
                                         "Ask": st.column_config.NumberColumn("Ask", format="$%.2f"),
                                         "Mid": st.column_config.NumberColumn("Mid", format="$%.4f"),
                                         "IV %": st.column_config.NumberColumn("IV", format="%.2f%%"),
+                                        "\u0398/\u0393": st.column_config.NumberColumn(
+                                            "\u0398/\u0393",
+                                            format="%.4f",
+                                            help="Theta / Gamma (vectorized chain greeks).",
+                                        ),
                                         "MC PoP %": st.column_config.NumberColumn(
                                             "MC PoP %",
                                             format="%.1f%%",
-                                            help="10k antithetic simulations - v16.0 Probability Mode",
+                                            help="10k antithetic simulations — v17.0 Liquidity & Greeks Mode",
                                         ),
                                     },
                                 )
@@ -2233,6 +2286,7 @@ def main():
                                         if int(r.get("diamond_n") or 0) > 0
                                         else "—"
                                     ),
+                                    "EM Safety": r.get("EM Safety", "—"),
                                     "Gold Zone Dist %": float(r["dist_gz"]),
                                     "Daily": r["struct"],
                                     "Summary": r["summary"],
@@ -2263,6 +2317,10 @@ def main():
                                     "PoP": st.column_config.TextColumn(
                                         "PoP",
                                         help="Historical win rate for Diamond signals (same methodology as the main dashboard backtest).",
+                                    ),
+                                    "EM Safety": st.column_config.TextColumn(
+                                        "EM Safety",
+                                        help="1-σ implied move vs scanner short-put strike: SAFE if strike < spot − EM (else MONITOR).",
                                     ),
                                     "Gold Zone Dist %": st.column_config.NumberColumn("Gold Zone Dist", format="%+.1f%%"),
                                     "Daily": st.column_config.TextColumn("Daily"),

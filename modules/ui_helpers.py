@@ -17,6 +17,7 @@ import plotly.graph_objects as go
 from .ta import TA
 from .data import _PLOTLY_UI_CONFIG
 from .options import (
+    Opt,
     calc_gold_zone, calc_confluence_points, detect_diamonds,
     latest_diamond_status, diamond_win_rate,
     scan_watchlist_edge_rows, quant_edge_status_line,
@@ -155,6 +156,34 @@ def walk_up_limit_sell_per_share(bid, mid):
     b = max(0.0, b)
     w = (b + m) / 2.0
     return float(w) if np.isfinite(w) and w > 0 else None
+
+
+def expected_move_safety_html(price, strike, iv_pct, dte):
+    """Safety line + EM range for Recommended Trade / Diamond context (1-σ implied move)."""
+    if strike is None or price is None:
+        return ""
+    try:
+        px_ = float(price)
+        k = float(strike)
+        ivp = float(iv_pct or 0)
+        dte_i = int(dte or 0)
+        if dte_i <= 0 or ivp <= 0 or px_ <= 0:
+            return ""
+        em = float(Opt.calc_expected_move(px_, ivp, dte_i))
+        lo, hi = px_ - em, px_ + em
+        inside = lo <= k <= hi
+        safety = (
+            "⚠️ INSIDE EXPECTED MOVE (Monitor Gamma)"
+            if inside
+            else "✅ OUTSIDE EXPECTED MOVE (High Safety)"
+        )
+        return (
+            f"<div style='margin:10px 0;font-size:.88rem;line-height:1.55;color:#e2e8f0'>"
+            f"<strong>Safety Status:</strong> {safety}<br>"
+            f"<span style='color:#94a3b8'>Expected Move Range: ${lo:.2f} - ${hi:.2f}</span></div>"
+        )
+    except Exception:
+        return ""
 
 
 def _iv_rank_pill_html(ticker, price, ref_iv_pct=None, *, stub=None):
@@ -687,6 +716,12 @@ def _fragment_technical_zone(
         show_super = st.toggle("Supertrend", key="sb_super", on_change=_persist_overlay_prefs)
         show_gold_zone = st.toggle("Gold zone", key="sb_gold_zone", on_change=_persist_overlay_prefs)
 
+    _em_ctx = st.session_state.get("_cf_chart_em")
+    _iv_em = _dte_em = _exp_em = None
+    if isinstance(_em_ctx, dict):
+        _iv_em = _em_ctx.get("iv_pct")
+        _dte_em = _em_ctx.get("dte")
+        _exp_em = _em_ctx.get("expiry")
     fig_p, fig_v, fig_r, fig_m = build_chart(
         df,
         ticker,
@@ -699,6 +734,9 @@ def _fragment_technical_zone(
         diamonds=diamonds if show_diamonds else None,
         gold_zone=gold_zone_price if show_gold_zone else None,
         mobile_layout=bool(mobile_chart_layout),
+        em_iv_pct=_iv_em,
+        em_days_to_expiry=_dte_em if _dte_em and int(_dte_em) > 0 else None,
+        em_expiry=_exp_em,
     )
     st.plotly_chart(fig_p, use_container_width=True, config=_PLOTLY_UI_CONFIG)
     st.divider()
@@ -778,6 +816,15 @@ def _fragment_technical_zone(
                             f"💎 Blue Diamond Active: Accumulate {suggested_shares} Shares (Target Vol: 15%)<br>"
                             f"🛑 Trailing Exit (Pink Diamond) dynamically set at ${trailing_exit:.2f}</div>"
                         )
+                _em_safe_d = st.session_state.get("_cf_em_safety")
+                _diamond_em_html = ""
+                if isinstance(_em_safe_d, dict) and _em_safe_d.get("strike") is not None:
+                    _diamond_em_html = expected_move_safety_html(
+                        _em_safe_d.get("price"),
+                        _em_safe_d.get("strike"),
+                        _em_safe_d.get("iv_pct"),
+                        _em_safe_d.get("dte"),
+                    )
                 st.markdown(
                     f"<div style='background:rgba(15,23,42,.95);border:1px solid {why_color};border-radius:12px;padding:18px 20px;margin:12px 0'>"
                     f"<div style='font-size:.8rem;color:{why_color};text-transform:uppercase;letter-spacing:.1em;font-weight:700;margin-bottom:6px'>"
@@ -785,6 +832,7 @@ def _fragment_technical_zone(
                     f"<div style='color:#e2e8f0;font-size:.95rem;margin-bottom:6px'>Signal fired at <strong>{latest_d['score']}/9</strong> confluence. "
                     f"Live checklist now shows <strong>{passed}/7</strong> headline factors green.</div>"
                     f"<div style='color:#94a3b8;font-size:.88rem;margin-bottom:12px;line-height:1.5'>{why_action}</div>"
+                    f"{_diamond_em_html}"
                     f"{quant_overlay}"
                     f"{win_badge}"
                     f"<div style='font-size:.72rem;color:#64748b;text-transform:uppercase;margin-bottom:6px'>Diamond checklist</div>"
@@ -925,16 +973,20 @@ _PRICE_LEVEL_COLUMN_CONFIG = {
 
 def _options_scan_dataframe(rows: list, *, put_table: bool) -> pd.DataFrame:
     """Normalize CC / CSP rows for display with stable column order."""
-    cols = ["strike", "mid", "delta", "otm_pct", "prem_100", "ann_yield", "iv", "mc_pop", "volume", "oi"]
+    cols = ["strike", "mid", "delta", "theta_gamma_ratio", "otm_pct", "prem_100", "ann_yield", "iv", "mc_pop", "volume", "oi"]
     if put_table:
         cols.append("eff_buy")
     cols.append("optimal")
-    dfp = pd.DataFrame(rows)[cols].copy()
+    dfp = pd.DataFrame(rows)
+    if "theta_gamma_ratio" not in dfp.columns:
+        dfp["theta_gamma_ratio"] = None
+    dfp = dfp[cols].copy()
     dfp["optimal"] = dfp["optimal"].astype(bool)
     rename = {
         "strike": "K",
         "mid": "Mid",
         "delta": "\u0394",
+        "theta_gamma_ratio": "\u0398/\u0393",
         "otm_pct": "OTM %",
         "prem_100": "$/100 sh",
         "ann_yield": "Ann %",
@@ -954,6 +1006,11 @@ def _options_scan_column_config(*, put_table: bool):
         "K": st.column_config.NumberColumn("Strike", format="$%.2f"),
         "Mid": st.column_config.NumberColumn("Mid", format="$%.2f"),
         "\u0394": st.column_config.NumberColumn("Delta", format="%.3f"),
+        "\u0398/\u0393": st.column_config.NumberColumn(
+            "\u0398/\u0393",
+            format="%.4f",
+            help="Theta divided by Gamma (per-day theta / gamma) — desk gamma-risk context.",
+        ),
         "OTM %": st.column_config.NumberColumn("OTM", format="%.2f%%"),
         "$/100 sh": st.column_config.NumberColumn("$/100 sh", format="$%.2f"),
         "Ann %": st.column_config.NumberColumn("Ann. yield", format="%.1f%%"),
@@ -961,7 +1018,7 @@ def _options_scan_column_config(*, put_table: bool):
         "MC PoP %": st.column_config.NumberColumn(
             "MC PoP %",
             format="%.1f%%",
-            help="10k antithetic simulations - v16.0 Probability Mode",
+            help="10k antithetic simulations — v17.0 Liquidity & Greeks Mode",
         ),
         "Vol": st.column_config.NumberColumn("Volume", format="%.0f"),
         "OI": st.column_config.NumberColumn("OI", format="%.0f"),

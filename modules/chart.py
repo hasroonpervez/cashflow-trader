@@ -7,6 +7,7 @@ import numpy as np
 import plotly.graph_objects as go
 
 from .ta import TA
+from .options import Opt
 
 def _index_pos(idx_obj):
     """Normalize df.index.get_loc result to a single integer position."""
@@ -42,12 +43,29 @@ def _chart_hoverlabel():
 
 def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_sr=True,
                 show_ichi=False, show_super=False, diamonds=None, gold_zone=None,
-                mobile_layout=False):
+                mobile_layout=False, em_lower=None, em_upper=None, em_expiry=None,
+                em_iv_pct=None, em_days_to_expiry=None):
     """Build four separate figures: price (+ overlays), volume, RSI, MACD — easier to read than one stacked chart.
 
     When ``mobile_layout`` is True (narrow UA / phone), the price panel drops the legend, tightens margins,
     fixes height, and pins Fib / Gann / Gold annotations to the left so labels do not sit on the candles."""
     last_px = float(df["Close"].iloc[-1])
+    try:
+        if (
+            em_lower is None
+            and em_upper is None
+            and em_iv_pct is not None
+            and em_days_to_expiry is not None
+            and float(em_iv_pct) > 0
+            and int(em_days_to_expiry) > 0
+        ):
+            _em = float(
+                Opt.calc_expected_move(last_px, float(em_iv_pct), int(em_days_to_expiry))
+            )
+            em_lower = last_px - _em
+            em_upper = last_px + _em
+    except Exception:
+        pass
     ann_side = "left" if mobile_layout else "right"
     _legend_font = dict(size=11, color="#f1f5f9", family="Inter, system-ui, sans-serif")
     _legend_title_font = dict(size=12, color="#e2e8f0", family="Inter, system-ui, sans-serif")
@@ -176,6 +194,59 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
             annotation_text=f"Gold ${gold_zone:.2f}", annotation_position=ann_side,
             annotation_font=dict(color="#fde047", size=11, family="JetBrains Mono"),
         )
+
+    try:
+        if (
+            em_lower is not None
+            and em_upper is not None
+            and np.isfinite(float(em_lower))
+            and np.isfinite(float(em_upper))
+        ):
+            el, eu = float(em_lower), float(em_upper)
+            fig_p.add_hline(
+                y=eu,
+                line_dash="dash",
+                line_color="#eab308",
+                line_width=1.5,
+                opacity=0.95,
+                annotation_text="Expected Move (1-σ)",
+                annotation_position=ann_side,
+                annotation_font=dict(size=10, color="#eab308"),
+            )
+            fig_p.add_hline(
+                y=el,
+                line_dash="dash",
+                line_color="#eab308",
+                line_width=1.5,
+                opacity=0.95,
+            )
+            if em_expiry is not None:
+                try:
+                    t0 = df.index[-1]
+                    t1 = pd.Timestamp(em_expiry)
+                    if hasattr(t0, "tzinfo") and t0.tzinfo is not None and t1.tzinfo is None:
+                        t1 = t1.tz_localize(t0.tzinfo)
+                    elif hasattr(t1, "tzinfo") and t1.tzinfo is not None and getattr(t0, "tzinfo", None) is None:
+                        t0 = pd.Timestamp(t0).tz_localize(None)
+                        t1 = pd.Timestamp(t1).tz_localize(None)
+                    if t1 > pd.Timestamp(t0):
+                        fig_p.add_trace(
+                            go.Scatter(
+                                x=[t0, t1, t1, t0],
+                                y=[last_px, eu, el, last_px],
+                                fill="toself",
+                                fillcolor="rgba(234,179,8,0.1)",
+                                line=dict(color="rgba(234,179,8,0.35)", width=1),
+                                mode="lines",
+                                name="Probability cone (1-σ)",
+                                showlegend=True,
+                                hoverinfo="skip",
+                            )
+                        )
+                except Exception:
+                    pass
+    except Exception:
+        pass
 
     try:
         hvn_levels = TA.get_volume_nodes(df)

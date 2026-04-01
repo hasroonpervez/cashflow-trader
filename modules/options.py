@@ -870,6 +870,17 @@ def scan_single_ticker(tkr, correlation_haircut=1.0):
 
         d_wr, _d_avg, d_n = diamond_win_rate(df, diamonds, forward_bars=10)
 
+        em_safety = "—"
+        try:
+            iv_pct_em = np.asarray(float(sig_scan * 100.0), dtype=float)
+            dte_em = np.asarray(max(1, int(np.rint(float(T_scan) * 365.25))), dtype=float)
+            em_move = float(Opt.calc_expected_move(float(price), float(iv_pct_em.item()), int(dte_em.item())))
+            k_put = float(K_scan)
+            sp = float(price)
+            em_safety = "SAFE" if k_put < (sp - em_move) else "MONITOR"
+        except Exception:
+            em_safety = "—"
+
         return {
             "ticker": tkr,
             "price": price,
@@ -892,6 +903,7 @@ def scan_single_ticker(tkr, correlation_haircut=1.0):
             "hvn_floor": float(hvn_floor) if hvn_floor is not None else None,
             "scanner_mc_pop": round(scanner_avg_mc, 1),
             "gz_hvn": gz_comp.get("HVN"),
+            "EM Safety": em_safety,
         }
     except Exception:
         return None
@@ -906,6 +918,29 @@ class Opt:
     DELTA_LOW, DELTA_HIGH = 0.15, 0.20
     MIN_OI, MIN_VOL = 100, 10
     RELAXED_MIN_OI, RELAXED_MIN_VOL = 10, 1
+
+    @staticmethod
+    def calc_expected_move(price, iv, days_to_expiry):
+        """Calculates the 1-Standard Deviation Implied Move (scalar or numpy-vectorized)."""
+        try:
+            p = np.asarray(price, dtype=float)
+            iv_a = np.asarray(iv, dtype=float)
+            d = np.asarray(days_to_expiry, dtype=float)
+            t_years = d / 365.25
+            with np.errstate(invalid="ignore"):
+                em = p * (iv_a / 100.0) * np.sqrt(np.maximum(t_years, 0.0))
+            ok = (d > 0) & (iv_a > 0) & np.isfinite(em)
+            em = np.where(ok, em, 0.0)
+            if em.size == 1:
+                v = float(em.reshape(-1)[0])
+                return v if np.isfinite(v) else 0.0
+            return em
+        except Exception:
+            try:
+                sz = np.asarray(price).size
+                return 0.0 if sz <= 1 else np.zeros_like(np.asarray(price, dtype=float))
+            except Exception:
+                return 0.0
 
     @staticmethod
     def _simple_corr_haircut(watchlist_tickers, symbol, returns_df):
@@ -971,6 +1006,7 @@ class Opt:
             iv_dec = iv if iv > 0 else 0.5
             greeks = bs_greeks(price, s, T_y, rfr, iv_dec, "call")
             delta = greeks["delta"]
+            _tgr = _theta_gamma_ratio_from_greeks(greeks)
             mc_pop = Opt._safe_mc_pop(
                 S=price,
                 K=s,
@@ -985,7 +1021,7 @@ class Opt:
             rows.append({"strike": s, "bid": b, "ask": a, "mid": mid, "iv": iv * 100 if iv else 0,
                          "volume": vol, "oi": oi, "otm_pct": otm, "prem_yield": py, "ann_yield": ann,
                          "prem_100": mid * 100, "breakeven": price - mid,
-                         "delta": round(delta, 3), "optimal": False,
+                         "delta": round(delta, 3), "theta_gamma_ratio": _tgr, "optimal": False,
                          "score": Opt._sc(otm, py, ann, vol, delta) + _mag, "mc_pop": round(mc_pop, 1)})
         # Relax liquidity gates if strict pass returns nothing (common on thin chains / after-hours).
         if not rows:
@@ -999,6 +1035,7 @@ class Opt:
                 iv_dec = iv if iv > 0 else 0.5
                 greeks = bs_greeks(price, s, T_y, rfr, iv_dec, "call")
                 delta = greeks["delta"]
+                _tgr = _theta_gamma_ratio_from_greeks(greeks)
                 mc_pop = Opt._safe_mc_pop(
                     S=price,
                     K=s,
@@ -1013,7 +1050,7 @@ class Opt:
                 rows.append({"strike": s, "bid": b, "ask": a, "mid": mid, "iv": iv * 100 if iv else 0,
                              "volume": vol, "oi": oi, "otm_pct": otm, "prem_yield": py, "ann_yield": ann,
                              "prem_100": mid * 100, "breakeven": price - mid,
-                             "delta": round(delta, 3), "optimal": False,
+                             "delta": round(delta, 3), "theta_gamma_ratio": _tgr, "optimal": False,
                              "score": Opt._sc(otm, py, ann, vol, delta) + _mag, "mc_pop": round(mc_pop, 1)})
         rows.sort(key=lambda x: x["score"], reverse=True)
         if rows:
@@ -1035,6 +1072,7 @@ class Opt:
             iv_dec = iv if iv > 0 else 0.5
             greeks = bs_greeks(price, s, T_y, rfr, iv_dec, "put")
             delta = greeks["delta"]
+            _tgr = _theta_gamma_ratio_from_greeks(greeks)
             mc_pop = Opt._safe_mc_pop(
                 S=price,
                 K=s,
@@ -1049,7 +1087,7 @@ class Opt:
             rows.append({"strike": s, "bid": b, "ask": a, "mid": mid, "iv": iv * 100 if iv else 0,
                          "volume": vol, "oi": oi, "otm_pct": otm, "prem_yield": py, "ann_yield": ann,
                          "prem_100": mid * 100, "eff_buy": s - mid, "cash_req": s * 100,
-                         "delta": round(delta, 3), "optimal": False,
+                         "delta": round(delta, 3), "theta_gamma_ratio": _tgr, "optimal": False,
                          "score": Opt._sc(otm, py, ann, vol, delta) + _mag, "mc_pop": round(mc_pop, 1)})
         if not rows:
             for _, r in puts_df.iterrows():
@@ -1062,6 +1100,7 @@ class Opt:
                 iv_dec = iv if iv > 0 else 0.5
                 greeks = bs_greeks(price, s, T_y, rfr, iv_dec, "put")
                 delta = greeks["delta"]
+                _tgr = _theta_gamma_ratio_from_greeks(greeks)
                 mc_pop = Opt._safe_mc_pop(
                     S=price,
                     K=s,
@@ -1076,7 +1115,7 @@ class Opt:
                 rows.append({"strike": s, "bid": b, "ask": a, "mid": mid, "iv": iv * 100 if iv else 0,
                              "volume": vol, "oi": oi, "otm_pct": otm, "prem_yield": py, "ann_yield": ann,
                              "prem_100": mid * 100, "eff_buy": s - mid, "cash_req": s * 100,
-                             "delta": round(delta, 3), "optimal": False,
+                             "delta": round(delta, 3), "theta_gamma_ratio": _tgr, "optimal": False,
                              "score": Opt._sc(otm, py, ann, vol, delta) + _mag, "mc_pop": round(mc_pop, 1)})
         rows.sort(key=lambda x: x["score"], reverse=True)
         if rows:
@@ -1249,41 +1288,93 @@ class MonteCarloEngine:
         return float((success / n_paths) * 100.0) if n_paths > 0 else 50.0
 
 
+def _norm_cdf_vec(z):
+    """Vectorized normal CDF for numpy arrays (SciPy if available)."""
+    z = np.asarray(z, dtype=float)
+    if norm is not None:
+        return norm.cdf(z)
+    return np.vectorize(_cdf, otypes=[float])(z)
+
+
+def _vectorized_theta_gamma(S, K_arr, T_y, r, sigma_arr, option_type):
+    """Black–Scholes per-day theta and gamma for 1D strike/IV arrays (calls or puts)."""
+    S = float(S)
+    K_arr = np.asarray(K_arr, dtype=float)
+    sigma_arr = np.maximum(np.asarray(sigma_arr, dtype=float), 0.001)
+    T_y = max(float(T_y), 1e-12)
+    sqrtT = np.sqrt(T_y)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        d1 = (np.log(S / K_arr) + (r + 0.5 * sigma_arr**2) * T_y) / (sigma_arr * sqrtT)
+        d2 = d1 - sigma_arr * sqrtT
+    pdf = np.exp(-0.5 * d1 * d1) / np.sqrt(2.0 * np.pi)
+    gamma = pdf / (S * sigma_arr * sqrtT)
+    exp_rt = np.exp(-r * T_y)
+    if option_type == "call":
+        cdf_d2 = _norm_cdf_vec(d2)
+        theta = (-S * pdf * sigma_arr / (2 * sqrtT) - r * K_arr * exp_rt * cdf_d2) / 365.0
+    else:
+        cdf_nd2 = _norm_cdf_vec(-d2)
+        theta = (-S * pdf * sigma_arr / (2 * sqrtT) + r * K_arr * exp_rt * cdf_nd2) / 365.0
+    return theta, gamma
+
+
+def _theta_gamma_ratio_from_greeks(greeks):
+    try:
+        gm = float(greeks.get("gamma") or 0.0)
+        if abs(gm) < 1e-12:
+            return None
+        return round(float(greeks.get("theta") or 0.0) / gm, 4)
+    except (TypeError, ValueError):
+        return None
+
+
 def build_chain_mc_dataframe(price, calls_df, puts_df, dte, rfr=0.045):
-    """Every strike in the Yahoo chain with vectorized MC PoP % (short premium)."""
+    """Every strike in the Yahoo chain with vectorized Θ/Γ and MC PoP % (short premium)."""
     T_y = max(int(dte), 1) / 365.0
     rows = []
+    S = float(price)
     for label, sub, otype in (("Call", calls_df, "call"), ("Put", puts_df, "put")):
         if sub is None or sub.empty:
             continue
-        for _, r in sub.iterrows():
+        sub = sub.copy()
+        strike = pd.to_numeric(sub.get("strike"), errors="coerce").to_numpy(dtype=float)
+        b = pd.to_numeric(sub.get("bid"), errors="coerce").fillna(0.0).to_numpy(dtype=float)
+        a = pd.to_numeric(sub.get("ask"), errors="coerce").fillna(0.0).to_numpy(dtype=float)
+        mid = np.where((b > 0) & (a > 0), (b + a) / 2.0, 0.0)
+        iv = pd.to_numeric(sub.get("impliedVolatility"), errors="coerce").fillna(0.0).to_numpy(dtype=float)
+        iv_dec = np.where(iv > 0, iv, 0.5)
+        valid = (mid > 0.01) & (strike > 0) & np.isfinite(strike) & np.isfinite(mid)
+        if not np.any(valid):
+            continue
+        kv = strike[valid]
+        midv = mid[valid]
+        bv, av = b[valid], a[valid]
+        ivv = iv_dec[valid]
+        iv_pct_col = np.where(iv[valid] > 0, iv[valid] * 100.0, ivv * 100.0)
+        theta_v, gamma_v = _vectorized_theta_gamma(S, kv, T_y, rfr, ivv, otype)
+        tg = np.where(np.abs(gamma_v) > 1e-12, theta_v / gamma_v, np.nan)
+        for i in range(kv.shape[0]):
             try:
-                strike = float(pd.to_numeric(r.get("strike"), errors="coerce") or 0.0)
-                b = float(pd.to_numeric(r.get("bid"), errors="coerce") or 0.0)
-                a = float(pd.to_numeric(r.get("ask"), errors="coerce") or 0.0)
-                mid = (b + a) / 2.0 if b > 0 and a > 0 else 0.0
-                if mid <= 0.01 or strike <= 0:
-                    continue
-                iv = float(pd.to_numeric(r.get("impliedVolatility"), errors="coerce") or 0.0)
-                iv_dec = iv if iv > 0 else 0.5
                 mc = MonteCarloEngine.calc_pop(
-                    price,
-                    strike,
+                    S,
+                    float(kv[i]),
                     T_y,
                     rfr,
-                    iv_dec,
-                    mid,
+                    float(ivv[i]),
+                    float(midv[i]),
                     option_type=otype,
                     strat="short",
                 )
+                tgi = float(tg[i]) if np.isfinite(tg[i]) else None
                 rows.append(
                     {
                         "Type": label,
-                        "Strike": strike,
-                        "Bid": b,
-                        "Ask": a,
-                        "Mid": round(mid, 4),
-                        "IV %": round(iv * 100.0, 2) if iv else round(iv_dec * 100.0, 2),
+                        "Strike": float(kv[i]),
+                        "Bid": float(bv[i]),
+                        "Ask": float(av[i]),
+                        "Mid": round(float(midv[i]), 4),
+                        "IV %": round(float(iv_pct_col[i]), 2),
+                        "Θ/Γ": round(tgi, 4) if tgi is not None else None,
                         "MC PoP %": round(float(mc), 1),
                     }
                 )
