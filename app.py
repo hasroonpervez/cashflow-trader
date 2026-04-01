@@ -113,6 +113,7 @@ for _import_try in range(_IMPORT_KEYERROR_RETRIES):
                 _options_scan_column_config,
                 _persist_overlay_prefs,
                 streamlit_df_widget_key,
+                streamlit_show_dataframe,
             )
 
             from modules.css import _CSS, _MINI_MODE_DENSITY_CSS, inject_css_and_navbar
@@ -1207,7 +1208,7 @@ def main():
                             i3.metric("Composite", f"{inst_score:.1f}", help="Capped blend used for the main Quant Edge gauge.")
                             st.markdown("##### Retail: five pillars (20% each)")
                             _pillars = {k: retail_breakdown.get(k) for k in ("trend", "momentum", "volume", "volatility", "structure") if k in retail_breakdown}
-                            st.dataframe(
+                            streamlit_show_dataframe(
                                 pd.DataFrame([{"Dimension": k.title(), "Score": round(float(v), 1)} for k, v in _pillars.items()]),
                                 use_container_width=True,
                                 hide_index=True,
@@ -1235,7 +1236,7 @@ def main():
 
                             with pc1:
                                 st.markdown("**Retail**")
-                                st.dataframe(
+                                streamlit_show_dataframe(
                                     _pillar_df(retail_breakdown),
                                     use_container_width=True,
                                     hide_index=True,
@@ -1246,7 +1247,7 @@ def main():
                                 )
                             with pc2:
                                 st.markdown("**Quant (fallback)**")
-                                st.dataframe(
+                                streamlit_show_dataframe(
                                     _pillar_df(inst_breakdown),
                                     use_container_width=True,
                                     hide_index=True,
@@ -1357,7 +1358,7 @@ def main():
                     rec = df.iloc[-60:]
                     fl = TA.fib_retracement(rec["High"].max(), rec["Low"].min())
                     _fib_df = _df_price_levels(fl, price)
-                    st.dataframe(
+                    streamlit_show_dataframe(
                         _fib_df,
                         column_config=_PRICE_LEVEL_COLUMN_CONFIG,
                         use_container_width=True,
@@ -1373,7 +1374,7 @@ def main():
                 if st.checkbox("Gann Square of 9", key="exp_1"):
                     gl = TA.gann_sq9(price)
                     _gann_df = _df_price_levels(gl, price)
-                    st.dataframe(
+                    streamlit_show_dataframe(
                         _gann_df,
                         column_config=_PRICE_LEVEL_COLUMN_CONFIG,
                         use_container_width=True,
@@ -1602,7 +1603,7 @@ def main():
                         try:
                             _chain_mc = build_chain_mc_dataframe(price, calls, puts, dte, rfr)
                             if _chain_mc is not None and not _chain_mc.empty:
-                                st.dataframe(
+                                streamlit_show_dataframe(
                                     _chain_mc,
                                     use_container_width=True,
                                     hide_index=True,
@@ -1652,7 +1653,7 @@ def main():
                             st.markdown(f"<div class='sb'>{opt_html}<strong>SELL {nc_s}x ${b['strike']:.0f}C @ ${b['mid']:.2f}</strong><br><span style='font-size:.85rem;color:#94a3b8'>Exp: {sel_exp} ({dte}DTE) | IV: {b['iv']:.1f}% | <strong style='color:{delta_color}'>\u0394 {b['delta']:.2f}</strong>{cc_mc_pop_txt}<br>Premium: <strong style='color:#10b981'>${b['prem_100'] * nc_s:,.0f}</strong> | OTM: {b['otm_pct']:.1f}% | Ann: {b['ann_yield']:.1f}% | OI: {b['oi']:,}</span></div>", unsafe_allow_html=True)
                             if st.checkbox("All CC strikes", key="exp_5"):
                                 _cc_df = _options_scan_dataframe(cc, put_table=False)
-                                st.dataframe(
+                                streamlit_show_dataframe(
                                     _cc_df,
                                     column_config=_options_scan_column_config(put_table=False),
                                     use_container_width=True,
@@ -1684,7 +1685,7 @@ def main():
                             st.markdown(f"<div class='sb'>{opt_html_p}<strong>SELL 1x ${b['strike']:.0f}P @ ${b['mid']:.2f}</strong><br><span style='font-size:.85rem;color:#94a3b8'>Exp: {sel_exp} ({dte}DTE) | IV: {b['iv']:.1f}% | <strong style='color:{delta_color_p}'>\u0394 {b['delta']:.2f}</strong>{csp_mc_pop_txt}<br>Premium: <strong style='color:#10b981'>${b['prem_100']:,.0f}</strong> | OTM: {b['otm_pct']:.1f}% | Eff buy: ${b['eff_buy']:.2f} | OI: {b['oi']:,}</span></div>", unsafe_allow_html=True)
                             if st.checkbox("All CSP strikes", key="exp_6"):
                                 _csp_df = _options_scan_dataframe(csp, put_table=True)
-                                st.dataframe(
+                                streamlit_show_dataframe(
                                     _csp_df,
                                     column_config=_options_scan_column_config(put_table=True),
                                     use_container_width=True,
@@ -2240,7 +2241,7 @@ def main():
                             ]
                         )
                         with st.expander("Scanner Data Table", expanded=False):
-                            st.dataframe(
+                            streamlit_show_dataframe(
                                 scanner_df,
                                 use_container_width=True,
                                 hide_index=True,
@@ -2313,7 +2314,7 @@ def main():
                             else ("Today" if days_to_earnings == 0 else f"Reported {abs(days_to_earnings)} day(s) ago")
                         )
                         st.caption("Calendar rows unavailable from feed; showing single-date fallback.")
-                        st.dataframe(
+                        streamlit_show_dataframe(
                             pd.DataFrame(
                                 [
                                     {
@@ -2345,7 +2346,7 @@ def main():
                             st.rerun()
                 else:
                     st.caption("Rows are newest-first. Cross-check **Status** and dates with your broker.")
-                    st.dataframe(
+                    streamlit_show_dataframe(
                         earn_cal_df.reset_index(drop=True),
                         column_config=_earnings_calendar_column_config(),
                         use_container_width=True,

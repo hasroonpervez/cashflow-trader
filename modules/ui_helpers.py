@@ -3,6 +3,8 @@ UI helpers: reusable components, sparklines, glance cards, section dividers,
 DataFrame presentation, and the Technical Zone st.fragment.
 """
 import hashlib
+import inspect
+import re
 import streamlit as st
 import html as _html_mod
 import pandas as pd
@@ -49,6 +51,21 @@ def streamlit_df_widget_key(prefix: str, data) -> str:
     except Exception:
         digest = "err"
     return f"{prefix}_{df.shape[0]}x{df.shape[1]}_{digest}"
+
+
+def streamlit_show_dataframe(data, /, **kwargs):
+    """Call ``st.dataframe`` with only kwargs supported by the installed Streamlit version.
+
+    Streamlit Cloud can resolve a slightly different Streamlit build than ``requirements.txt``;
+    unsupported parameters (``key``, ``height``, ``selection_mode``, ``on_select``, …) raise
+    ``TypeError``, which the hosted runner often surfaces as a redacted ``RuntimeError``.
+    """
+    sig = inspect.signature(st.dataframe)
+    kw = {k: v for k, v in kwargs.items() if k in sig.parameters}
+    if "key" in kw and kw["key"] is not None:
+        ks = str(kw["key"])
+        kw["key"] = re.sub(r"[^a-zA-Z0-9_]", "_", ks)[:120]
+    return st.dataframe(data, **kw)
 
 
 def render_mode_badge(use_quant: bool):
@@ -557,7 +574,7 @@ def _fragment_rolling_edge_capture():
         "Positive: Quant reads more favorable premium selling conditions than the retail five pillars. "
         "Negative: Retail reads stronger. Not a standalone buy or sell signal; combine with confluence and your plan."
     )
-    st.dataframe(
+    streamlit_show_dataframe(
         df_log,
         use_container_width=True,
         hide_index=True,
