@@ -38,7 +38,7 @@ except ImportError:  # keep app usable if scipy is unavailable
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def watchlist_correlation_matrix_cached(closes_wide: pd.DataFrame):
-    """One-hour memo of Pearson correlations on 90-day log-returns (inner-joined dates)."""
+    """One-hour memo of Pearson correlations on **90-day FFD return** innovations (inner-joined dates)."""
     if closes_wide is None or getattr(closes_wide, "empty", True):
         return None
     try:
@@ -281,7 +281,7 @@ def quant_edge_score(df, vix_val=None, options_data=None, use_quant=False):
             from .sentiment import QuantSentiment
             regime_probs = QuantSentiment.regime_detection(df)
             high_vol_regime = float(regime_probs.get(1, 0.0))
-            ffd_series = TA.frac_diff_ffd(df["Close"])
+            ffd_series = TA.apply_ffd(df["Close"], d=0.4)
             ffd_last = float(ffd_series.iloc[-1]) if ffd_series is not None and len(ffd_series) > 0 else 0.0
             edge = 50.0 + (ffd_last * 10.0) - (high_vol_regime * 20.0)
             mc_boost, mc_avg_top = _quant_edge_mc_pop_boost(options_data)
@@ -916,7 +916,18 @@ def scan_single_ticker(tkr, correlation_haircut=1.0, cluster_peers=None, corr_ma
                         pt["type"] = "put"
                     odf = pd.concat([ct, pt], ignore_index=True)
                     dte_g = max(1, (datetime.strptime(str(exp_s)[:10], "%Y-%m-%d") - datetime.now()).days)
-                    gex_s = Opt.calc_gamma_exposure(odf, float(price), rfr=0.045, T_years=dte_g / 365.0)
+                    _hvn_px = [
+                        float(n["price"])
+                        for n in TA.get_volume_nodes(df)
+                        if n.get("price") is not None and np.isfinite(float(n["price"]))
+                    ]
+                    gex_s = Opt.calc_gamma_exposure(
+                        odf,
+                        float(price),
+                        rfr=0.045,
+                        T_years=dte_g / 365.0,
+                        hvn_prices=_hvn_px or None,
+                    )
                     gf_s = Opt.find_gamma_flip(gex_s)
                     if gf_s is not None and np.isfinite(float(gf_s)):
                         gamma_flip_sc = float(gf_s)
@@ -1082,8 +1093,12 @@ class Opt:
     RELAXED_MIN_OI, RELAXED_MIN_VOL = 10, 1
 
     @staticmethod
-    def calc_gamma_exposure(opts_df, spot_price, rfr=0.045, T_years=None):
-        """Per-strike dealer GEX (calls +, puts −) using vectorized gamma × OI × S²/100."""
+    def calc_gamma_exposure(opts_df, spot_price, rfr=0.045, T_years=None, hvn_prices=None):
+        """Per-strike dealer GEX (calls +, puts −) using vectorized gamma × OI × S²/100.
+
+        Optional ``hvn_prices`` (volume-at-price nodes): strikes within a tight band of any HVN
+        get **1.2×** liquidity weight on gamma contribution (synthetic “pain point” emphasis).
+        """
         try:
             if opts_df is None or getattr(opts_df, "empty", True):
                 return pd.Series(dtype=float)
@@ -1125,7 +1140,24 @@ class Opt:
             merged = pd.concat(chunks, ignore_index=True)
             sign = np.where(merged["_t"].to_numpy() == "put", -1.0, 1.0)
             scale = (S * S) / 100.0
-            merged["GEX"] = merged["_gamma_vec"].to_numpy(dtype=float) * merged["openInterest"].to_numpy(dtype=float) * scale * sign
+            kv_m = merged["strike"].to_numpy(dtype=float)
+            liq = np.ones(len(merged), dtype=float)
+            if hvn_prices and S > 0:
+                hp = np.asarray(
+                    [float(h) for h in hvn_prices if h is not None and np.isfinite(float(h))],
+                    dtype=float,
+                )
+                if hp.size:
+                    thr = max(S * 0.004, 0.02)
+                    dmat = np.abs(kv_m[:, None] - hp[None, :])
+                    liq = np.where(np.any(dmat <= thr, axis=1), 1.2, 1.0)
+            merged["GEX"] = (
+                merged["_gamma_vec"].to_numpy(dtype=float)
+                * merged["openInterest"].to_numpy(dtype=float)
+                * scale
+                * sign
+                * liq
+            )
             return merged.groupby("strike", sort=True)["GEX"].sum()
         except Exception:
             return pd.Series(dtype=float)
@@ -1487,7 +1519,7 @@ class PortfolioRisk:
     @staticmethod
     def build_correlation_matrix(closes_df, window=90):
         """
-        Pearson correlation on **log-returns** over the last ``window`` **overlapping** daily bars.
+        Pearson correlation on **FFD return** innovations over the last ``window`` **overlapping** daily bars.
         Delegates to ``TA.get_correlation_matrix`` (inner-joined dates across tickers).
         """
         if closes_df is None or closes_df.empty:

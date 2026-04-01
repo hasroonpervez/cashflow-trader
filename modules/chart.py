@@ -895,7 +895,7 @@ def build_correlation_heatmap(corr_matrix):
     )
     fig.update_layout(
         title=dict(
-            text="Watchlist correlation (90D log-returns, Pearson)",
+            text="Watchlist correlation (90D FFD returns, Pearson)",
             font=dict(size=14, color="#e2e8f0"),
         ),
         template="plotly_dark",

@@ -33,11 +33,12 @@ def test_correlation_matrix_two_tickers_aligned():
 
 
 def test_correlation_matrix_inner_join_mismatched_dates():
-    """Misaligned calendars should align on intersection only."""
-    i1 = pd.date_range("2024-01-01", periods=30, freq="D")
-    i2 = pd.date_range("2024-01-15", periods=30, freq="D")
-    a = pd.Series(np.linspace(100, 110, 30), index=i1)
-    b = pd.Series(np.linspace(200, 190, 30), index=i2)
+    """Misaligned calendars should align on intersection only (enough overlap for FFD + diff)."""
+    i1 = pd.date_range("2024-01-01", periods=130, freq="D")
+    i2 = pd.date_range("2024-02-15", periods=130, freq="D")
+    rng = np.random.default_rng(1)
+    a = pd.Series(100 + np.cumsum(rng.normal(0, 0.5, 130)), index=i1)
+    b = pd.Series(200 + np.cumsum(rng.normal(0, 0.5, 130)), index=i2)
     mat = TA.get_correlation_matrix({"X": a, "Y": b}, lookback_days=90)
     assert not mat.empty
     assert mat.shape == (2, 2)

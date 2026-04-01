@@ -8,6 +8,7 @@ import pandas as pd
 import numpy as np
 import math
 from datetime import timedelta
+from numpy.lib.stride_tricks import sliding_window_view
 
 class TA:
     @staticmethod
@@ -23,18 +24,92 @@ class TA:
         return np.array(w).reshape(-1, 1)
 
     @staticmethod
-    def frac_diff_ffd(series, d=0.45, thres=1e-5):
-        """Applies Fixed-Width Window Fractional Differentiation."""
-        if series is None or len(series) == 0:
+    def apply_ffd(series, d=0.4, max_lags=50, thres=1e-5):
+        """Fixed-width fractional differentiation (max ``max_lags`` weights) for stationarity with memory.
+
+        Vectorized via ``sliding_window_view``; caps expansion at **50** lags to keep UI responsive.
+        """
+        if series is None:
             return pd.Series(dtype=float)
-        w = TA.get_weights_ffd(d, len(series))
-        w_ = w[np.abs(w) >= thres]
-        w_ = w_[::-1]
-        res = []
-        for i in range(len(w_) - 1, len(series)):
-            window = series.iloc[i - len(w_) + 1: i + 1].values
-            res.append(np.dot(window, w_)[0])
-        return pd.Series(res, index=series.index[len(w_) - 1:])
+        s = pd.to_numeric(pd.Series(series), errors="coerce").ffill().bfill()
+        if len(s) < 2:
+            return pd.Series(dtype=float, index=s.index)
+        cap = min(max_lags + 1, len(s))
+        cap = max(2, cap)
+        w = TA.get_weights_ffd(d, cap).flatten()
+        w = w[np.abs(w) >= thres]
+        if w.size == 0:
+            w = np.array([1.0], dtype=np.float64)
+        if w.size > max_lags + 1:
+            w = w[: max_lags + 1].astype(np.float64, copy=False)
+        L = int(w.size)
+        vals = s.to_numpy(dtype=np.float64)
+        n = len(vals)
+        if n < L:
+            return pd.Series(dtype=float, index=s.index)
+        w_rev = w[::-1].astype(np.float64, copy=False)
+        sw = sliding_window_view(vals, L)
+        out = sw @ w_rev
+        idx = s.index[L - 1 :]
+        return pd.Series(out, index=idx)
+
+    @staticmethod
+    def frac_diff_ffd(series, d=0.45, thres=1e-5):
+        """Delegates to :meth:`apply_ffd` with a **50-lag** cap (v21+)."""
+        return TA.apply_ffd(series, d=d, max_lags=50, thres=thres)
+
+    @staticmethod
+    def ffd_returns_from_closes(closes_wide, d=0.4, max_lags=50):
+        """Inner-joined first differences of FFD levels per column (Pearson / sizing inputs)."""
+        if closes_wide is None or getattr(closes_wide, "empty", True):
+            return pd.DataFrame()
+        work = closes_wide.copy()
+        work.columns = [str(c).strip().upper() for c in work.columns]
+        work = work.apply(pd.to_numeric, errors="coerce")
+        parts = {}
+        for c in work.columns:
+            col = work[c].dropna()
+            if len(col) < max_lags + 15:
+                continue
+            fd = TA.apply_ffd(col, d=d, max_lags=max_lags)
+            if fd is not None and len(fd) >= 4:
+                parts[c] = fd
+        if len(parts) < 2:
+            return pd.DataFrame()
+        merged = pd.concat(parts, axis=1, join="inner")
+        if merged.shape[0] < 3:
+            return pd.DataFrame()
+        return merged.diff().dropna(how="any")
+
+    @staticmethod
+    def _whale_zscore_window(df):
+        """10-day volume baseline when short-horizon vol dominates; 40-day when tape is calm."""
+        w_mid = 30
+        if df is None or df.empty or "Volume" not in df.columns:
+            return w_mid
+        if "Close" not in df.columns:
+            return w_mid
+        close = pd.to_numeric(df["Close"], errors="coerce")
+        lr = np.log(close / close.shift(1)).dropna()
+        if len(lr) < 40:
+            return w_mid
+        sig10 = float(lr.iloc[-10:].std(ddof=0))
+        sig40 = float(lr.iloc[-40:].std(ddof=0))
+        if not np.isfinite(sig10) or not np.isfinite(sig40) or sig40 <= 1e-12:
+            return w_mid
+        rvi = sig10 / sig40
+        cr = close.dropna()
+        er = 0.5
+        if len(cr) >= 21:
+            change = abs(float(cr.iloc[-1] - cr.iloc[-21]))
+            path = float(cr.diff().abs().iloc[-20:].sum())
+            if path > 1e-12:
+                er = change / path
+        if rvi >= 1.15 or (rvi >= 1.08 and er < 0.22):
+            return 10
+        if rvi <= 0.88 or (rvi <= 0.95 and er >= 0.55):
+            return 40
+        return w_mid
 
     @staticmethod
     def rsi(s, p=14):
@@ -276,21 +351,28 @@ class TA:
 
     @staticmethod
     def get_dark_pool_proxy(df):
-        """30-day rolling volume Z-score: Z = (V − μ) / σ; whale alert when Z > 2.0 (institutional strength proxy)."""
+        """Adaptive rolling volume Z-score: window **10 / 30 / 40** from vol regime (RVI + ER); whale when Z > 2.0."""
         if df is None or df.empty or "Volume" not in df.columns:
             return pd.DataFrame()
         vol = pd.to_numeric(df["Volume"], errors="coerce")
-        w = 30
+        w = int(TA._whale_zscore_window(df))
+        nobs = int(vol.notna().sum())
+        w = max(5, min(w, max(5, nobs - 1)))
         mu = vol.rolling(w, min_periods=w).mean()
         sd = vol.rolling(w, min_periods=w).std(ddof=0)
         denom = sd.where((sd.notna()) & (sd > 0), np.nan)
         z = (vol - mu) / denom
         z = z.fillna(0.0).replace([np.inf, -np.inf], 0.0)
         is_whale = z > 2.0
+        idx = vol.index
+        wl = np.full(len(idx), int(w), dtype=np.int32)
         return pd.DataFrame(
             {
+                "vol_mean_roll": mu,
+                "vol_std_roll": sd,
                 "vol_mean_30": mu,
                 "vol_std_30": sd,
+                "whale_lookback": wl,
                 "volume_z_score": z,
                 "is_whale_alert": is_whale,
                 "dark_pool_alert": is_whale,
@@ -330,8 +412,8 @@ class TA:
         return round(float(np.clip(H, 0, 1)), 3)
 
     @staticmethod
-    def get_correlation_matrix(price_history_dict, lookback_days=90):
-        """Pearson correlation of log-returns across tickers (``lookback_days`` daily bars).
+    def get_correlation_matrix(price_history_dict, lookback_days=90, ffd_d=0.4):
+        """Pearson correlation of **FFD return** innovations across tickers (``lookback_days`` daily bars).
 
         ``price_history_dict`` maps ticker → ``pd.Series`` of closes (DatetimeIndex) or
         a DataFrame with a ``Close`` column. Series are aligned with ``join='inner'`` on
@@ -362,8 +444,8 @@ class TA:
             return pd.DataFrame()
         lb = max(5, int(lookback_days))
         wide = wide.tail(lb).dropna(how="all")
-        log_ret = np.log(wide / wide.shift(1)).dropna(how="any")
-        if log_ret.empty or len(log_ret) < 3:
+        ffd_ret = TA.ffd_returns_from_closes(wide, d=ffd_d)
+        if ffd_ret.empty or len(ffd_ret) < 3:
             return pd.DataFrame()
-        return log_ret.corr(method="pearson")
+        return ffd_ret.corr(method="pearson")
 

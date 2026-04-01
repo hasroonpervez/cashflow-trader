@@ -37,11 +37,11 @@ class QuantSentiment:
         if not HMM_AVAILABLE or df is None or len(df) < 50:
             return {0: 0.5, 1: 0.5}
 
-        stationary_close = TA.frac_diff_ffd(df["Close"], d=0.45)
+        stationary_close = TA.apply_ffd(df["Close"], d=0.4)
         if stationary_close is None or len(stationary_close) < 40:
             return {0: 0.5, 1: 0.5}
 
-        returns = np.log(stationary_close / stationary_close.shift(1)).replace([np.inf, -np.inf], np.nan).dropna()
+        returns = stationary_close.diff().replace([np.inf, -np.inf], np.nan).dropna()
         volatility = returns.rolling(window=10).std().dropna()
         data = pd.concat([returns, volatility], axis=1).dropna()
         if data.empty or len(data) < 40:

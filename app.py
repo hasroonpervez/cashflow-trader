@@ -1,6 +1,6 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  CASHFLOW COMMAND CENTER v20.0 FREE EDITION · PORTFOLIO INTELLIGENCE      ║
+║  CASHFLOW COMMAND CENTER v21.0 FREE EDITION · ADAPTIVE INTELLIGENCE       ║
 ║  Modular architecture: same UI, same logic, clean separation.           ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 """
@@ -16,7 +16,7 @@ if _app_root not in sys.path:
 import streamlit as st
 
 st.set_page_config(
-    page_title="CashFlow Command Center v20.0",
+    page_title="CashFlow Command Center v21.0",
     page_icon="💰",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -158,7 +158,7 @@ def main():
 
     # ── Watchlist editor (must run before Mission Control so sb_scanner is committed same run)
     _wl_expanded = bool(st.session_state.pop("_open_watchlist_editor", False))
-    st.caption("Institutional Portfolio Optimization, Multi-Factor Risk, & Sentinel Ledger Architecture.")
+    st.caption("Adaptive Risk Oversight, FFD Memory, & Synthetic GEX Architecture.")
     def _persist_watchlist_text_callback():
         raw = st.session_state.get("sb_scanner", "")
         w = _parse_watchlist_string(raw)
@@ -532,7 +532,7 @@ def main():
         "<div style='margin:2px 0 10px 0'>"
         "<span style='font-size:0.72rem;color:#c4b5fd;padding:3px 10px;border-radius:6px;"
         "border:1px solid rgba(139,92,246,0.45);background:rgba(76,29,149,0.22);font-weight:600;letter-spacing:0.04em'>"
-        "v20.0 · PORTFOLIO INTELLIGENCE</span></div>",
+        "v21.0 · ADAPTIVE INTELLIGENCE</span></div>",
         unsafe_allow_html=True,
     )
     qs_color = ctx.qs_color; qs_status = ctx.qs_status
@@ -567,7 +567,9 @@ def main():
                 _cm[_rt] = pd.to_numeric(_rdf["Close"], errors="coerce")
         _risk_closes_df = pd.DataFrame(_cm).dropna(how="all")
         if len(_risk_closes_df.columns) >= 2 and len(_risk_closes_df) >= 5:
-            _portfolio_lr_df = np.log(_risk_closes_df / _risk_closes_df.shift(1)).dropna()
+            _portfolio_lr_df = TA.ffd_returns_from_closes(_risk_closes_df, d=0.4)
+            if _portfolio_lr_df.empty:
+                _portfolio_lr_df = np.log(_risk_closes_df / _risk_closes_df.shift(1)).dropna()
             _simple_corr_mult = Opt._simple_corr_haircut(_risk_syms, _tku, _portfolio_lr_df)
     except Exception:
         _risk_closes_df = pd.DataFrame()
@@ -580,7 +582,7 @@ def main():
             if _cm_cached is not None and not _cm_cached.empty:
                 with st.expander("Portfolio Risk", expanded=False):
                     st.caption(
-                        "90-day Pearson correlation on log-returns (inner-joined dates). "
+                        "90-day Pearson correlation on **FFD return** innovations (inner-joined dates). "
                         "Matrix refreshes at most once per hour while you interact with the desk."
                     )
                     _heat_main = build_correlation_heatmap(_cm_cached)
@@ -1774,7 +1776,7 @@ def main():
                                         "MC PoP %": st.column_config.NumberColumn(
                                             "MC PoP %",
                                             format="%.1f%%",
-                                            help="10k antithetic simulations — v20.0 Portfolio Intelligence",
+                                            help="10k antithetic simulations — v21.0 Adaptive Intelligence",
                                         ),
                                     },
                                 )
@@ -2295,7 +2297,9 @@ def main():
                         except Exception:
                             pass
                     closes_df = pd.DataFrame(closes_map).dropna(how="all")
-                    log_returns_df = np.log(closes_df / closes_df.shift(1)).dropna()
+                    log_returns_df = TA.ffd_returns_from_closes(closes_df, d=0.4)
+                    if log_returns_df.empty:
+                        log_returns_df = np.log(closes_df / closes_df.shift(1)).dropna()
                     corr_matrix = watchlist_correlation_matrix_cached(closes_df)
                     if corr_matrix is None:
                         corr_matrix = PortfolioRisk.build_correlation_matrix(closes_df)
@@ -2368,7 +2372,7 @@ def main():
                             if _alloc_rows:
                                 with st.expander("$50k Kelly-style mix (Blue Diamonds only)", expanded=False):
                                     st.caption(
-                                        "Weights scale with Quant Edge × MC PoP %; each name’s notional is scaled by `_simple_corr_haircut` vs the watchlist."
+                                        "Weights scale with Quant Edge × MC PoP %; each name’s notional is scaled by `_simple_corr_haircut` vs the watchlist (FFD-return correlations when history is sufficient)."
                                     )
                                     _adf = pd.DataFrame(_alloc_rows)
                                     streamlit_show_dataframe(

@@ -206,7 +206,18 @@ def build_context(ticker: str, cfg: dict) -> Optional[DashContext]:
             if not _c.empty or not _p.empty:
                 _odf = pd.concat([_c, _p], ignore_index=True)
                 _Ty = max(1, int(ctx.bluf_dte or 30)) / 365.0
-                _gex = Opt.calc_gamma_exposure(_odf, ctx.price, rfr=ctx.rfr, T_years=_Ty)
+                _hvn_px = [
+                    float(n["price"])
+                    for n in TA.get_volume_nodes(df)
+                    if n.get("price") is not None and np.isfinite(float(n["price"]))
+                ]
+                _gex = Opt.calc_gamma_exposure(
+                    _odf,
+                    ctx.price,
+                    rfr=ctx.rfr,
+                    T_years=_Ty,
+                    hvn_prices=_hvn_px or None,
+                )
                 ctx.gamma_flip = Opt.find_gamma_flip(_gex)
     except Exception:
         ctx.gamma_flip = None

@@ -31,7 +31,8 @@ from .config import save_config, load_config, _overlay_prefs_from_session, _pers
 
 # Watchlist scanner: "Flow / Bias" column (whale Z-score + NLP headline flags).
 SCANNER_WHALE_FLOW_BIAS_HELP = (
-    "Whale Alert (Z-Score): Measures volume deviation from the 30-day mean. "
+    "Whale Alert (Z-Score): Measures volume deviation from an **adaptive** rolling mean (10 / 30 / 40 sessions) "
+    "set by relative volatility and path efficiency. "
     "Z > 2.0 indicates 97.7th percentile institutional activity. "
     "Flags also include bullish/bearish news bias from cached Yahoo headlines (NLP)."
 )
@@ -1207,7 +1208,7 @@ def _options_scan_column_config(*, put_table: bool):
         "MC PoP %": st.column_config.NumberColumn(
             "MC PoP %",
             format="%.1f%%",
-            help="10k antithetic simulations — v20.0 Portfolio Intelligence",
+            help="10k antithetic simulations — v21.0 Adaptive Intelligence",
         ),
         "Vol": st.column_config.NumberColumn("Volume", format="%.0f"),
         "OI": st.column_config.NumberColumn("OI", format="%.0f"),
