@@ -69,6 +69,10 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
     except Exception:
         pass
     ann_side = "left" if mobile_layout else "right"
+    # Wide charts: park retracement / Sq9 / S-R labels on the left so Gold, gamma, EM, and HVN
+    # can use the right margin without ten strings stacking on the same anchor.
+    _level_label_side = "left" if not mobile_layout else ann_side
+    _struct_label_side = ann_side
     _legend_font = dict(size=11, color="#f1f5f9", family="Inter, system-ui, sans-serif")
     _legend_title_font = dict(size=12, color="#e2e8f0", family="Inter, system-ui, sans-serif")
     uirev = f"{ticker}_tech"
@@ -157,44 +161,60 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
             lev = fl[lab]
             ann = ""
             if lab in fib_labeled:
-                ann = f"{lab.split('.')[0]}% · ${lev:.2f}"
+                ann = f"{lab.split('.')[0]}% ${lev:.0f}"
             elif lab in fib_short:
-                ann = f"{fib_short[lab]} ${lev:.2f}"
+                # Keep 0%/100% as thin guides without text — reduces left-edge pile-up.
+                ann = ""
             lw = 1.9 if lab in fib_labeled else 1.1
             op = 0.62 if lab in fib_labeled else 0.38
-            fig_p.add_hline(
-                y=lev, line_dash="dot", line_color="rgba(59,130,246,0.5)", line_width=lw,
-                opacity=op, annotation_text=ann, annotation_position=ann_side,
-                annotation_font=dict(size=10, color="rgba(147,197,253,0.95)"),
+            fib_kw = dict(
+                y=lev,
+                line_dash="dot",
+                line_color="rgba(59,130,246,0.5)",
+                line_width=lw,
+                opacity=op,
             )
+            if ann:
+                fib_kw["annotation_text"] = ann
+                fib_kw["annotation_position"] = _level_label_side
+                fib_kw["annotation_font"] = dict(size=9, color="rgba(147,197,253,0.95)")
+            fig_p.add_hline(**fib_kw)
     if show_gann:
         gl = TA.gann_sq9(last_px)
         near = sorted(gl.items(), key=lambda x: abs(x[1] - last_px))[:3]
         for i, (_lab, lev) in enumerate(near, start=1):
-            fig_p.add_hline(
-                y=lev, line_dash="dash", line_color="rgba(250,204,21,0.42)", line_width=1.2,
-                opacity=0.55, annotation_text=f"G{i} ${lev:.0f}", annotation_position=ann_side,
-                annotation_font=dict(size=9, color="rgba(253,224,71,0.9)"),
+            g_kw = dict(
+                y=lev,
+                line_dash="dash",
+                line_color="rgba(250,204,21,0.42)",
+                line_width=1.2,
+                opacity=0.55,
             )
+            # Label only the single Gann rail nearest spot; others stay as quiet guides.
+            if i == 1:
+                g_kw["annotation_text"] = f"Gann ${lev:.0f}"
+                g_kw["annotation_position"] = _level_label_side
+                g_kw["annotation_font"] = dict(size=9, color="rgba(253,224,71,0.9)")
+            fig_p.add_hline(**g_kw)
     if show_sr:
         sups, ress = TA.find_sr(df)
         for s in _levels_nearest(sups, last_px, 2):
             fig_p.add_hline(
                 y=s, line_dash="solid", line_color="rgba(34,197,94,0.45)", line_width=1.2,
-                opacity=0.55, annotation_text=f"S {s:.2f}", annotation_position="left",
+                opacity=0.55, annotation_text=f"S ${s:.0f}", annotation_position=_level_label_side,
                 annotation_font=dict(size=9, color="rgba(134,239,172,0.95)"),
             )
         for r in _levels_nearest(ress, last_px, 2):
             fig_p.add_hline(
                 y=r, line_dash="solid", line_color="rgba(248,113,113,0.45)", line_width=1.2,
-                opacity=0.55, annotation_text=f"R {r:.2f}", annotation_position="left",
+                opacity=0.55, annotation_text=f"R ${r:.0f}", annotation_position=_level_label_side,
                 annotation_font=dict(size=9, color="rgba(254,202,202,0.95)"),
             )
     if gold_zone is not None:
         fig_p.add_hline(
             y=gold_zone, line_dash="solid", line_color="#eab308", line_width=3, opacity=0.9,
-            annotation_text=f"Gold ${gold_zone:.2f}", annotation_position=ann_side,
-            annotation_font=dict(color="#fde047", size=11, family="JetBrains Mono"),
+            annotation_text=f"Gold ${gold_zone:.0f}", annotation_position=_struct_label_side,
+            annotation_font=dict(color="#fde047", size=10, family="JetBrains Mono"),
         )
 
     _gf = None
@@ -210,9 +230,10 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
             line_color="#39FF14",
             line_width=2,
             opacity=0.95,
-            annotation_text="GAMMA FLIP (Volatility Trigger)",
-            annotation_position=ann_side,
-            annotation_font=dict(size=10, color="#39FF14", family="JetBrains Mono"),
+            annotation_text="Gamma flip",
+            annotation_position=_struct_label_side,
+            annotation_font=dict(size=9, color="#39FF14", family="JetBrains Mono"),
+            annotation_yshift=-14,
         )
         if float(last_px) < _gf:
             try:
@@ -243,9 +264,10 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
                 line_color="#eab308",
                 line_width=1.5,
                 opacity=0.95,
-                annotation_text="Expected Move (1-σ)",
-                annotation_position=ann_side,
-                annotation_font=dict(size=10, color="#eab308"),
+                annotation_text="EM +1σ",
+                annotation_position=_struct_label_side,
+                annotation_font=dict(size=9, color="#eab308"),
+                annotation_yshift=-28,
             )
             fig_p.add_hline(
                 y=el,
@@ -253,6 +275,9 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
                 line_color="#eab308",
                 line_width=1.5,
                 opacity=0.95,
+                annotation_text="EM −1σ",
+                annotation_position=_level_label_side,
+                annotation_font=dict(size=9, color="#eab308"),
             )
             if em_expiry is not None:
                 try:
@@ -305,8 +330,8 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
                     if gz_ref is not None and gz_ref > 0
                     else np.zeros(prices.shape[0], dtype=bool)
                 )
-                order = np.argsort(np.abs(prices - last_px))[:10]
-                for idx in order:
+                order = np.argsort(np.abs(prices - last_px))[:6]
+                for rank, idx in enumerate(order):
                     y = float(prices[idx])
                     base_w = 1.0 + 2.2 * float(wn[idx])
                     op = 0.32 + 0.48 * float(wn[idx])
@@ -315,16 +340,25 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
                         base_w += 1.1
                         op = min(0.92, op + 0.18)
                         r0, g0, b0 = 139, 92, 246
-                    fig_p.add_hline(
+                    hline_kw = dict(
                         y=y,
                         line_dash="dash",
                         line_color=f"rgba({r0},{g0},{b0},{min(0.85, 0.38 + 0.45 * float(wn[idx]))})",
                         line_width=max(1.0, min(4.0, base_w)),
                         opacity=min(0.9, op),
-                        annotation_text="HVN (Institutional Liquidity)",
-                        annotation_position=ann_side,
-                        annotation_font=dict(size=9, color=f"rgba({min(255, r0 + 40)},{min(255, g0 + 40)},{min(255, b0 + 30)},0.92)"),
                     )
+                    # Repeat "HVN (Institutional Liquidity)" on every rail caused unreadable stacking.
+                    # Show price on the two nodes nearest spot only; other rails stay visual-only.
+                    if rank < 2:
+                        hline_kw["annotation_text"] = f"HVN ${y:.0f}"
+                        hline_kw["annotation_position"] = _struct_label_side
+                        hline_kw["annotation_font"] = dict(
+                            size=9,
+                            color=f"rgba({min(255, r0 + 40)},{min(255, g0 + 40)},{min(255, b0 + 30)},0.92)",
+                        )
+                        if rank == 1:
+                            hline_kw["annotation_yshift"] = -16
+                    fig_p.add_hline(**hline_kw)
     except Exception:
         pass
 
@@ -390,7 +424,7 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
             )
 
     _p_height = 450 if mobile_layout else 540
-    _p_margin = dict(l=5, r=5, t=52, b=40) if mobile_layout else dict(l=56, r=88, t=56, b=44)
+    _p_margin = dict(l=5, r=5, t=52, b=40) if mobile_layout else dict(l=64, r=108, t=56, b=44)
     _p_show_legend = not mobile_layout
     _iv_lines = []
     try:
