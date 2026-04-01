@@ -1793,7 +1793,11 @@ def main():
                                 except (TypeError, ValueError):
                                     pass
                             st.markdown(f"<div class='sb'>{opt_html}<strong>SELL {nc_s}x ${b['strike']:.0f}C @ ${b['mid']:.2f}</strong><br><span style='font-size:.85rem;color:#94a3b8'>Exp: {sel_exp} ({dte}DTE) | IV: {b['iv']:.1f}% | <strong style='color:{delta_color}'>\u0394 {b['delta']:.2f}</strong>{cc_mc_pop_txt}<br>Premium: <strong style='color:#10b981'>${b['prem_100'] * nc_s:,.0f}</strong> | OTM: {b['otm_pct']:.1f}% | Ann: {b['ann_yield']:.1f}% | OI: {b['oi']:,}</span>{_theta_gamma_desk_line(b.get('theta_gamma_ratio'))}</div>", unsafe_allow_html=True)
-                            _cc_track_key = re.sub(r"[^a-zA-Z0-9_]", "_", f"cf_track_cc_{sel_exp}_{b['strike']}")[:110]
+                            _cc_track_key = re.sub(
+                                r"[^a-zA-Z0-9_]",
+                                "_",
+                                f"cf_track_cc_{ticker}_{sel_exp}_{b['strike']}",
+                            )[:110]
                             if st.button("Track Trade", key=_cc_track_key, help="Append this optimal covered-call line to the Sentinel Ledger (session only)."):
                                 st.session_state.setdefault("_cf_ledger", []).append(
                                     {
@@ -1842,7 +1846,11 @@ def main():
                                 except (TypeError, ValueError):
                                     pass
                             st.markdown(f"<div class='sb'>{opt_html_p}<strong>SELL 1x ${b['strike']:.0f}P @ ${b['mid']:.2f}</strong><br><span style='font-size:.85rem;color:#94a3b8'>Exp: {sel_exp} ({dte}DTE) | IV: {b['iv']:.1f}% | <strong style='color:{delta_color_p}'>\u0394 {b['delta']:.2f}</strong>{csp_mc_pop_txt}<br>Premium: <strong style='color:#10b981'>${b['prem_100']:,.0f}</strong> | OTM: {b['otm_pct']:.1f}% | Eff buy: ${b['eff_buy']:.2f} | OI: {b['oi']:,}</span>{_theta_gamma_desk_line(b.get('theta_gamma_ratio'))}</div>", unsafe_allow_html=True)
-                            _csp_track_key = re.sub(r"[^a-zA-Z0-9_]", "_", f"cf_track_csp_{sel_exp}_{b['strike']}")[:110]
+                            _csp_track_key = re.sub(
+                                r"[^a-zA-Z0-9_]",
+                                "_",
+                                f"cf_track_csp_{ticker}_{sel_exp}_{b['strike']}",
+                            )[:110]
                             if st.button("Track Trade", key=_csp_track_key, help="Append this optimal cash-secured put to the Sentinel Ledger (session only)."):
                                 st.session_state.setdefault("_cf_ledger", []).append(
                                     {
@@ -2356,28 +2364,39 @@ def main():
                                         _adf,
                                         use_container_width=True,
                                         hide_index=True,
-                                        key=streamlit_df_widget_key("cf_portfolio_alloc", _adf),
+                                        key="cf_portfolio_alloc_df",
                                         on_select="ignore",
                                         selection_mode=[],
                                     )
 
+                        # Single markdown block: one st.markdown per row desyncs Streamlit's element tree
+                        # (setIn index errors) when the watchlist length changes between reruns.
+                        _scan_chunks = []
                         for r in scanner_results:
                             pc = "#10b981" if r["chg_pct"] >= 0 else "#ef4444"
                             cpc = "#10b981" if r["cp_score"] >= 7 else ("#f59e0b" if r["cp_score"] >= 4 else "#ef4444")
                             qec = "#10b981" if r["qs"] > 70 else ("#f59e0b" if r["qs"] > 50 else "#ef4444")
                             gz_c = "#10b981" if r["dist_gz"] > 0 else "#ef4444"
-
                             cp_mini_bar = ""
                             for bi in range(r["cp_max"]):
                                 filled = bi < r["cp_score"]
                                 bc = "#10b981" if filled and r["cp_score"] >= 7 else ("#f59e0b" if filled and r["cp_score"] >= 4 else ("#ef4444" if filled else "#1e293b"))
                                 cp_mini_bar += f"<div style='flex:1;height:6px;background:{bc};border-radius:3px;margin:0 1px'></div>"
-
-                            st.markdown(f"""<div class='scanner-row'>
+                            _tk = _html_mod.escape(str(r["ticker"]))
+                            _sum = _html_mod.escape(str(r.get("summary") or ""))
+                            _st = _html_mod.escape(str(r.get("struct") or ""))
+                            _ds = _html_mod.escape(str(r.get("d_status") or ""))
+                            _ov = (
+                                f"<div style='font-size:.72rem;color:#f59e0b;font-weight:600'>⚠️ High Portfolio Overlap ({float(r.get('overlap', 0.0)):.2f})</div>"
+                                if r.get("overlap", 0.0) >= 0.7
+                                else ""
+                            )
+                            _scan_chunks.append(
+                                f"""<div class='scanner-row'>
                                 <div class='scanner-grid'>
                                     <div style='min-width:80px'>
-                                        <div style='font-size:1.1rem;font-weight:700;color:#e2e8f0'>{r['ticker']}</div>
-                                        {"<div style='font-size:.72rem;color:#f59e0b;font-weight:600'>⚠️ High Portfolio Overlap (" + f"{r['overlap']:.2f}" + ")</div>" if r.get("overlap", 0.0) >= 0.7 else ""}
+                                        <div style='font-size:1.1rem;font-weight:700;color:#e2e8f0'>{_tk}</div>
+                                        {_ov}
                                         <div class='mono' style='font-size:.9rem;color:{pc}'>${r['price']:.2f} ({r['chg_pct']:+.1f}%)</div>
                                     </div>
                                     <div style='text-align:center;min-width:70px'>
@@ -2396,7 +2415,7 @@ def main():
                                     </div>
                                     <div style='text-align:center;min-width:100px'>
                                         <div style='font-size:.65rem;color:#64748b;text-transform:uppercase'>Diamond</div>
-                                        <span class='diamond-badge {r["d_class"]}'>{r['d_status']}</span>
+                                        <span class='diamond-badge {r["d_class"]}'>{_ds}</span>
                                     </div>
                                     <div style='text-align:center;min-width:100px'>
                                         <div style='font-size:.65rem;color:#64748b;text-transform:uppercase'>GEX Regime</div>
@@ -2418,14 +2437,17 @@ def main():
                                     </div>
                                     <div style='text-align:center;min-width:60px'>
                                         <div style='font-size:.65rem;color:#64748b;text-transform:uppercase'>Daily</div>
-                                        <div style='font-size:.8rem;color:{"#10b981" if r["struct"]=="BULLISH" else ("#ef4444" if r["struct"]=="BEARISH" else "#f59e0b")}'>{r['struct']}</div>
+                                        <div style='font-size:.8rem;color:{"#10b981" if r["struct"]=="BULLISH" else ("#ef4444" if r["struct"]=="BEARISH" else "#f59e0b")}'>{_st}</div>
                                     </div>
                                     <div style='flex:1;min-width:180px'>
                                         <div style='font-size:.65rem;color:#64748b;text-transform:uppercase'>Summary</div>
-                                        <div class='scan-summary' style='font-size:.82rem;color:#e2e8f0;line-height:1.4'>{r['summary']}</div>
+                                        <div class='scan-summary' style='font-size:.82rem;color:#e2e8f0;line-height:1.4'>{_sum}</div>
                                     </div>
                                 </div>
-                            </div>""", unsafe_allow_html=True)
+                            </div>"""
+                            )
+                        if _scan_chunks:
+                            st.markdown("\n".join(_scan_chunks), unsafe_allow_html=True)
 
                         scanner_df = pd.DataFrame(
                             [
@@ -2457,7 +2479,7 @@ def main():
                                 scanner_df,
                                 use_container_width=True,
                                 hide_index=True,
-                                key=streamlit_df_widget_key("cf_scanner_tbl", scanner_df),
+                                key="cf_scanner_tbl_df",
                                 on_select="ignore",
                                 selection_mode=[],
                                 column_config={
@@ -2622,25 +2644,27 @@ def main():
             )
             _led = st.session_state.get("_cf_ledger") or []
             if not _led:
-                st.info("No tracked trades yet. Use **Track Trade** on the optimal Covered Call or Cash Secured Put card in **Cashflow & strikes**.")
-            else:
-                _ldf = pd.DataFrame(_led)
-                streamlit_show_dataframe(
-                    _ldf,
-                    use_container_width=True,
-                    hide_index=True,
-                    key=streamlit_df_widget_key("cf_sentinel_ledger", _ldf),
-                    on_select="ignore",
-                    selection_mode=[],
+                st.caption(
+                    "No tracked trades yet. Use **Track Trade** on the optimal Covered Call or Cash Secured Put "
+                    "card in **Cashflow & strikes**."
                 )
-                _m = sentinel_ledger_metrics(_led, rfr=float(rfr))
-                m1, m2, m3 = st.columns(3)
-                with m1:
-                    st.metric("Total portfolio Δ (equiv. shares)", f"{_m['total_delta']:,.2f}")
-                with m2:
-                    st.metric("Total Θ / day (desk income)", f"${_m['total_theta_day']:,.2f}")
-                with m3:
-                    st.metric("Unrealized P&L (model)", f"${_m['unrealized_pnl']:,.2f}")
+            _ldf = pd.DataFrame(_led)
+            streamlit_show_dataframe(
+                _ldf,
+                use_container_width=True,
+                hide_index=True,
+                key="cf_sentinel_ledger_df",
+                on_select="ignore",
+                selection_mode=[],
+            )
+            _m = sentinel_ledger_metrics(_led, rfr=float(rfr))
+            m1, m2, m3 = st.columns(3)
+            with m1:
+                st.metric("Total portfolio Δ (equiv. shares)", f"{_m['total_delta']:,.2f}")
+            with m2:
+                st.metric("Total Θ / day (desk income)", f"${_m['total_theta_day']:,.2f}")
+            with m3:
+                st.metric("Unrealized P&L (model)", f"${_m['unrealized_pnl']:,.2f}")
             if st.button("Clear Sentinel Ledger", key="cf_ledger_clear"):
                 st.session_state["_cf_ledger"] = []
                 st.rerun()
