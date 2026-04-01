@@ -18,6 +18,24 @@ from .data import compute_iv_rank_proxy
 from .chart import build_chart
 from .config import save_config, load_config, _overlay_prefs_from_session
 
+def render_mode_badge(use_quant: bool):
+    """Renders a sleek, non-intrusive badge indicating the active mathematical engine."""
+    if use_quant:
+        badge_html = (
+            "<span style='background: linear-gradient(90deg, #1e3a8a 0%, #312e81 100%); "
+            "color: #60a5fa; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; "
+            "font-weight: 600; letter-spacing: 0.05em; border: 1px solid #1e40af;'>"
+            "🔬 INSTITUTIONAL MODE</span>"
+        )
+    else:
+        badge_html = (
+            "<span style='background: #1e293b; color: #94a3b8; padding: 2px 8px; "
+            "border-radius: 4px; font-size: 0.75rem; font-weight: 600; letter-spacing: 0.05em; "
+            "border: 1px solid #334155;'>📊 RETAIL MODE</span>"
+        )
+    st.markdown(badge_html, unsafe_allow_html=True)
+
+
 def _factor_checklist_labels():
     return {
         "Supertrend": "Supertrend supports buyers",

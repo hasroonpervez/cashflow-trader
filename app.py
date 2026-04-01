@@ -53,6 +53,9 @@ import textwrap
 from pathlib import Path
 warnings.filterwarnings("ignore")
 
+if "edge_log" not in st.session_state:
+    st.session_state.edge_log = pd.DataFrame(columns=["Time", "Ticker", "Retail", "Quant", "Delta"])
+
 # ── Module imports ──
 from modules.config import (
     load_config, save_config, DEFAULT_CONFIG, CONFIG_PATH,
@@ -80,6 +83,7 @@ from modules.chart import build_chart, _chart_hoverlabel
 from modules.ui_helpers import (
     _factor_checklist_labels, _confluence_why_trade_plain,
     _iv_rank_qualitative_words, _iv_rank_pill_html,
+    render_mode_badge,
     _explain, _section, _mini_sparkline, _glance_sparkline_svg,
     _glance_metric_card, _render_html_block, _parse_watchlist_string,
     _fragment_technical_zone, _df_price_levels, _style_price_levels_table,
@@ -311,6 +315,15 @@ def main():
             scanner_sort_mode = (
                 "Custom watchlist order" if _scan_seg == "Custom order" else "Highest confluence first"
             )
+        use_quant = st.toggle(
+            "🔬 Enable Quant/Institutional Models",
+            value=bool(cfg.get("use_quant_models", False)),
+            help="Replaces standard Black-Scholes and RSI logic with Corrado-Su pricing, Fractional Differentiation, and HMM Regime Detection.",
+        )
+        if use_quant != bool(cfg.get("use_quant_models", False)):
+            cfg = {**cfg, "use_quant_models": bool(use_quant)}
+            save_config(cfg)
+            st.rerun()
 
     # Clickable ticker tape (chunk rows on wide lists so columns stay usable on mobile)
     if watch_items:
@@ -364,6 +377,7 @@ def main():
         "strat_focus": st.session_state.get("sb_strat_radio", DEFAULT_CONFIG["strat_focus"]),
         "strat_horizon": st.session_state.get("sb_horizon_radio", DEFAULT_CONFIG["strat_horizon"]),
         "mini_mode": bool(st.session_state.get("sb_mini_mode", cfg.get("mini_mode", False))),
+        "use_quant_models": bool(cfg.get("use_quant_models", DEFAULT_CONFIG["use_quant_models"])),
     }
     if prefs_cfg != cfg:
         save_config(prefs_cfg)
@@ -392,6 +406,7 @@ def main():
     price = ctx.price; prev = ctx.prev; chg = ctx.chg; chg_pct = ctx.chg_pct
     hi52 = ctx.hi52; lo52 = ctx.lo52; vix_v = ctx.vix_v
     qs = ctx.qs; qb = ctx.qb
+    use_quant_models = bool(cfg.get("use_quant_models", False))
     earnings_near = ctx.earnings_near; earnings_dt = ctx.earnings_dt
     days_to_earnings = ctx.days_to_earnings; earnings_parse_failed = ctx.earnings_parse_failed
     earn_glance = ctx.earn_glance
@@ -407,6 +422,8 @@ def main():
     diamonds = ctx.diamonds; latest_d = ctx.latest_d
     d_wr = ctx.d_wr; d_avg = ctx.d_avg; d_n = ctx.d_n
     daily_struct = ctx.daily_struct; weekly_struct = ctx.weekly_struct
+
+    render_mode_badge(use_quant_models)
     qs_color = ctx.qs_color; qs_status = ctx.qs_status
     rfr = ctx.rfr; bluf_cc = ctx.bluf_cc; bluf_csp = ctx.bluf_csp
     bluf_exp = ctx.bluf_exp; bluf_dte = ctx.bluf_dte
@@ -962,9 +979,107 @@ def main():
                     <div style='font-size:.75rem;color:#8b5cf6;text-transform:uppercase;letter-spacing:.1em'>QUANT EDGE SCORE</div>
                     <div style='font-size:3rem;font-weight:800;color:{qs_color};font-family:JetBrains Mono,monospace'>{qs:.0f}</div>
                     <div style='font-size:.85rem;color:#94a3b8'>Your overall score from 5 independent checks</div></div>""", unsafe_allow_html=True)
-                for k, v in qb.items():
-                    clr = "#10b981" if v > 70 else ("#f59e0b" if v > 50 else "#ef4444")
-                    st.markdown(f"<div style='display:flex;align-items:center;margin:3px 0'><span style='width:85px;color:#94a3b8;font-size:.8rem;text-transform:capitalize'>{k}</span><div style='flex:1;background:#1e293b;border-radius:4px;height:7px;margin:0 8px'><div style='width:{v}%;background:{clr};border-radius:4px;height:7px'></div></div><span class='mono' style='color:#e2e8f0;font-size:.8rem'>{v:.0f}</span></div>", unsafe_allow_html=True)
+                if use_quant_models:
+                    retail_score, retail_breakdown = quant_edge_score(df, vix_val=vix_v, use_quant=False)
+                    inst_score, inst_breakdown = qs, qb
+                    delta_q = inst_score - retail_score
+                    try:
+                        new_row = {
+                            "Time": datetime.now().strftime("%H:%M:%S"),
+                            "Ticker": ticker,
+                            "Retail": int(retail_score),
+                            "Quant": int(inst_score),
+                            "Delta": int(delta_q),
+                        }
+                        df_log = st.session_state.edge_log
+                        df_log = df_log[df_log["Ticker"] != new_row["Ticker"]]
+                        df_log = pd.concat([pd.DataFrame([new_row]), df_log], ignore_index=True).head(50)
+                        st.session_state.edge_log = df_log
+                    except Exception:
+                        pass
+                    st.metric(
+                        label="Quant Edge (Institutional)",
+                        value=f"{inst_score:.0f}/100",
+                        delta=f"{delta_q:+.0f} vs Retail",
+                        delta_color="normal" if delta_q >= 0 else "inverse",
+                    )
+                    with st.expander("🔬 A/B Engine Diagnostics"):
+                        st.caption("Comparing standard RSI/MA logic against FFD/HMM models.")
+                        col1, col2 = st.columns(2)
+                        col1.metric("Retail Engine", f"{retail_score:.0f}")
+                        col2.metric("Quant Engine", f"{inst_score:.0f}")
+                        st.json(inst_breakdown)
+                    with st.expander("📝 Rolling Edge Capture Log", expanded=False):
+                        st.caption("Live tracking of Institutional vs Retail score deltas across your session.")
+                        if not st.session_state.edge_log.empty:
+                            df_log = st.session_state.edge_log
+                            try:
+                                mean_delta = df_log["Delta"].mean()
+                                hit_rate = (df_log["Quant"] > df_log["Retail"]).mean() * 100
+
+                                best_idx = df_log["Delta"].idxmax()
+                                worst_idx = df_log["Delta"].idxmin()
+
+                                best_ticker = df_log.loc[best_idx, "Ticker"]
+                                best_delta = int(df_log.loc[best_idx, "Delta"])
+                                worst_ticker = df_log.loc[worst_idx, "Ticker"]
+                                worst_delta = int(df_log.loc[worst_idx, "Delta"])
+
+                                sc1, sc2, sc3, sc4 = st.columns(4)
+                                sc1.metric(
+                                    "Mean Edge Δ",
+                                    f"{mean_delta:+.1f}",
+                                    help="Average point difference between Quant and Retail scores.",
+                                )
+                                sc2.metric(
+                                    "Quant > Retail",
+                                    f"{hit_rate:.0f}%",
+                                    help="Win rate where the Quant engine scores higher than Retail.",
+                                )
+                                sc3.metric("Max Divergence", f"{best_delta:+d}", delta=best_ticker, delta_color="off")
+                                sc4.metric("Min Divergence", f"{worst_delta:+d}", delta=worst_ticker, delta_color="off")
+                                st.divider()
+                                try:
+                                    csv_data = df_log.to_csv(index=False).encode("utf-8")
+                                    dl_col1, dl_col2 = st.columns([8, 2])
+                                    with dl_col2:
+                                        st.download_button(
+                                            label="📥 Export to CSV",
+                                            data=csv_data,
+                                            file_name=f"quant_edge_log_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                                            mime="text/csv",
+                                            use_container_width=True,
+                                        )
+                                except Exception:
+                                    pass
+                            except Exception:
+                                pass
+                            st.dataframe(
+                                df_log,
+                                use_container_width=True,
+                                hide_index=True,
+                                column_config={
+                                    "Time": st.column_config.TextColumn("Time"),
+                                    "Ticker": st.column_config.TextColumn("Ticker", width="small"),
+                                    "Retail": st.column_config.NumberColumn("Retail", format="%d"),
+                                    "Quant": st.column_config.NumberColumn("Quant", format="%d"),
+                                    "Delta": st.column_config.NumberColumn("Delta", format="%+d"),
+                                },
+                            )
+                        else:
+                            st.info("Log is empty. Scan a ticker to record edge data.")
+                    if isinstance(retail_breakdown, dict):
+                        for k, v in retail_breakdown.items():
+                            if not isinstance(v, (int, float, np.integer, np.floating)):
+                                continue
+                            clr = "#10b981" if v > 70 else ("#f59e0b" if v > 50 else "#ef4444")
+                            st.markdown(f"<div style='display:flex;align-items:center;margin:3px 0'><span style='width:85px;color:#94a3b8;font-size:.8rem;text-transform:capitalize'>{k}</span><div style='flex:1;background:#1e293b;border-radius:4px;height:7px;margin:0 8px'><div style='width:{v}%;background:{clr};border-radius:4px;height:7px'></div></div><span class='mono' style='color:#e2e8f0;font-size:.8rem'>{v:.0f}</span></div>", unsafe_allow_html=True)
+                else:
+                    for k, v in qb.items():
+                        if not isinstance(v, (int, float, np.integer, np.floating)):
+                            continue
+                        clr = "#10b981" if v > 70 else ("#f59e0b" if v > 50 else "#ef4444")
+                        st.markdown(f"<div style='display:flex;align-items:center;margin:3px 0'><span style='width:85px;color:#94a3b8;font-size:.8rem;text-transform:capitalize'>{k}</span><div style='flex:1;background:#1e293b;border-radius:4px;height:7px;margin:0 8px'><div style='width:{v}%;background:{clr};border-radius:4px;height:7px'></div></div><span class='mono' style='color:#e2e8f0;font-size:.8rem'>{v:.0f}</span></div>", unsafe_allow_html=True)
 
                 # ── CONFLUENCE POINTS (0-9 visual meter) ──
                 st.markdown(f"""<div class='confluence-meter' style='margin-top:16px'>
@@ -1415,17 +1530,31 @@ def main():
                 # Kelly Criterion — mathematically optimal allocation
                 k_full, k_half = 0.0, 0.0
                 k_source = ""
+                use_quant_models = bool(cfg.get("use_quant_models", False))
+                daily_ret = df["Close"].pct_change().dropna()
+                exp_ret = float(daily_ret.mean() * 252) if len(daily_ret) > 0 else 0.0
+                ret_var = float(daily_ret.var() * 252) if len(daily_ret) > 1 else 0.0
                 if bluf_cc:
                     k_pop = min(85, max(50, 100 - bluf_cc["otm_pct"] * 5))
                     k_win = bluf_cc["prem_100"]
                     k_loss = k_win * 3
-                    k_full, k_half = kelly_criterion(k_pop, k_win, k_loss)
+                    k_full, k_half = kelly_criterion(
+                        k_pop, k_win, k_loss,
+                        use_quant=use_quant_models,
+                        expected_return=exp_ret,
+                        variance=ret_var,
+                    )
                     k_source = f"CC ${bluf_cc['strike']:.0f}"
                 elif bluf_csp:
                     k_pop = min(85, max(50, 100 - bluf_csp["otm_pct"] * 5))
                     k_win = bluf_csp["prem_100"]
                     k_loss = bluf_csp["strike"] * 100 - k_win
-                    k_full, k_half = kelly_criterion(k_pop, k_win, k_loss)
+                    k_full, k_half = kelly_criterion(
+                        k_pop, k_win, k_loss,
+                        use_quant=use_quant_models,
+                        expected_return=exp_ret,
+                        variance=ret_var,
+                    )
                     k_source = f"CSP ${bluf_csp['strike']:.0f}"
                 if k_half > 0:
                     k_cap = KELLY_DISPLAY_CAP_PCT

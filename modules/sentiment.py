@@ -10,6 +10,45 @@ from datetime import datetime
 from .ta import TA
 from .data import fetch_stock
 
+try:
+    from hmmlearn import hmm
+    HMM_AVAILABLE = True
+except ImportError:
+    HMM_AVAILABLE = False
+
+
+class QuantSentiment:
+    @staticmethod
+    def regime_detection(df, n_regimes=2):
+        """
+        Uses a Gaussian Hidden Markov Model to probabilistically classify market regimes.
+        Returns a dictionary of state probabilities for the latest day.
+        """
+        if not HMM_AVAILABLE or df is None or len(df) < 50:
+            return {0: 0.5, 1: 0.5}
+
+        returns = np.log(df["Close"] / df["Close"].shift(1)).dropna()
+        volatility = returns.rolling(window=10).std().dropna()
+        data = pd.concat([returns, volatility], axis=1).dropna()
+        if data.empty:
+            return {0: 0.5, 1: 0.5}
+
+        X = data.values
+        model = hmm.GaussianHMM(
+            n_components=n_regimes,
+            covariance_type="full",
+            n_iter=100,
+            random_state=42,
+        )
+        try:
+            model.fit(X)
+            probabilities = model.predict_proba(X)
+            current_probs = probabilities[-1]
+            return {i: prob for i, prob in enumerate(current_probs)}
+        except Exception:
+            return {0: 0.5, 1: 0.5}
+
+
 class Sentiment:
     @staticmethod
     def fear_greed(df, vix_val=None):

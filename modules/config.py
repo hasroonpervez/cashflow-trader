@@ -22,6 +22,7 @@ DEFAULT_CONFIG = {
     "overlay_super": False,
     "overlay_diamonds": True,
     "overlay_gold": True,
+    "use_quant_models": False,
 }
 
 _LEGACY_CONFIG_KEYS = frozenset({
@@ -73,11 +74,14 @@ def load_config():
                 merged.pop(k, None)
     except Exception:
         pass
+    merged["use_quant_models"] = bool(merged.get("use_quant_models", DEFAULT_CONFIG["use_quant_models"]))
     return merged
 
 def save_config(cfg):
     """Atomic write — writes to .tmp first, then renames. Zero corruption risk."""
     try:
+        cfg = {**DEFAULT_CONFIG, **(cfg or {})}
+        cfg["use_quant_models"] = bool(cfg.get("use_quant_models", DEFAULT_CONFIG["use_quant_models"]))
         temp_path = CONFIG_PATH.with_suffix('.tmp')
         with open(temp_path, "w") as f:
             json.dump(cfg, f, indent=2)

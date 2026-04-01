@@ -8,6 +8,10 @@ import numpy as np
 import math
 from math import log, sqrt, exp
 from datetime import datetime
+try:
+    from scipy.stats import norm
+except ImportError:  # keep app usable if scipy is unavailable
+    norm = None
 
 from .ta import TA
 from .data import fetch_stock
@@ -72,10 +76,22 @@ def calc_ev(premium, max_loss, pop_pct):
     return round(ev, 2)
 
 
-def kelly_criterion(win_prob_pct, win_amount, loss_amount):
+def kelly_criterion(
+    win_prob_pct,
+    win_amount,
+    loss_amount,
+    use_quant=False,
+    expected_return=0.0,
+    variance=0.0,
+    risk_free_rate=0.05,
+):
     """Kelly Criterion: optimal bankroll fraction.
     f* = W - (1-W)/R where W = win probability, R = win/loss payout ratio.
     Returns (full_kelly_pct, half_kelly_pct) as percentages."""
+    if use_quant and variance > 0:
+        full = continuous_kelly(expected_return, risk_free_rate, variance, half_kelly=False)
+        half = continuous_kelly(expected_return, risk_free_rate, variance, half_kelly=True)
+        return round(full, 1), round(half, 1)
     if loss_amount <= 0 or win_amount <= 0 or win_prob_pct <= 0 or win_prob_pct >= 100:
         return 0.0, 0.0
     W = win_prob_pct / 100
@@ -85,6 +101,44 @@ def kelly_criterion(win_prob_pct, win_amount, loss_amount):
     full = W - (1 - W) / R
     half = full / 2
     return round(max(0.0, full) * 100, 1), round(max(0.0, half) * 100, 1)
+
+def bs_corrado_su(S, K, T, r, sigma, skew=0.0, kurt=3.0, option_type="call"):
+    """
+    Prices options using the Corrado-Su expansion to account for volatility skew
+    and fat tails (kurtosis).
+    """
+    S, K = float(S), float(K)
+    if S <= 0 or K <= 0 or T <= 0 or sigma <= 0:
+        return bs_price(S, K, max(T, 0), r, max(sigma, 0.001), option_type)
+
+    d1 = (np.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
+    d2 = d1 - sigma * np.sqrt(T)
+
+    cdf = norm.cdf if norm is not None else _cdf
+    pdf = norm.pdf if norm is not None else _pdf
+
+    if option_type == "call":
+        bs_px = S * cdf(d1) - K * np.exp(-r * T) * cdf(d2)
+    else:
+        bs_px = K * np.exp(-r * T) * cdf(-d2) - S * cdf(-d1)
+
+    q3 = (1 / 6) * S * sigma * np.sqrt(T) * ((2 * sigma * np.sqrt(T)) - d1) * pdf(d1)
+    q4 = (1 / 24) * S * sigma * np.sqrt(T) * (
+        d1**2 - 1 - 3 * sigma * np.sqrt(T) * d1 + 3 * sigma**2 * T
+    ) * pdf(d1)
+
+    return max(0.0, float(bs_px + (skew * q3) + ((kurt - 3.0) * q4)))
+
+
+def continuous_kelly(expected_return, risk_free_rate, variance, half_kelly=True):
+    """
+    Calculates optimal continuous-time allocation (Merton's Portfolio Problem).
+    """
+    if variance <= 0:
+        return 0.0
+    f_star = (expected_return - risk_free_rate) / variance
+    allocation = f_star / 2.0 if half_kelly else f_star
+    return max(0.0, min(1.0, allocation)) * 100
 
 
 # ═════════════════════════════════════════════════════════════════════════
@@ -109,7 +163,7 @@ def calc_vol_skew(price, calls_df, puts_df, otm_pct=0.10):
 
 
 @st.cache_data(ttl=120, show_spinner=False)
-def quant_edge_score(df, vix_val=None):
+def quant_edge_score(df, vix_val=None, options_data=None, use_quant=False):
     """Composite 0-100 using five de-correlated dimensions (no Supertrend here — that
     belongs in confluence/diamond context, not double-counted with EMA trend):
     1. Trend — EMA stack only (structure of moving averages)
@@ -119,6 +173,24 @@ def quant_edge_score(df, vix_val=None):
     5. Structure — market-structure label (not redundant with EMA slope)
     Equal 20% weights.
     """
+    if use_quant:
+        try:
+            from .sentiment import QuantSentiment
+            regime_probs = QuantSentiment.regime_detection(df)
+            high_vol_regime = float(regime_probs.get(1, 0.0))
+            ffd_series = TA.frac_diff_ffd(df["Close"])
+            ffd_last = float(ffd_series.iloc[-1]) if ffd_series is not None and len(ffd_series) > 0 else 0.0
+            edge = 50.0 + (ffd_last * 10.0) - (high_vol_regime * 20.0)
+            edge = float(max(0.0, min(100.0, edge)))
+            breakdown = {
+                "regime_prob_high_vol": round(high_vol_regime, 4),
+                "ffd_last": round(ffd_last, 6),
+                "model": "institutional",
+            }
+            return round(edge, 1), breakdown
+        except Exception:
+            pass
+
     sc = {}; close = df["Close"].iloc[-1]
     # 1. TREND (equal 20% weight in composite; important for premium sellers)
     if len(df) >= 200:

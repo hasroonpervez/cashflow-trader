@@ -165,7 +165,8 @@ def build_context(ticker: str, cfg: dict) -> Optional[DashContext]:
     ctx.hi52 = float(df["High"].max())
     ctx.lo52 = float(df["Low"].min())
     ctx.vix_v = ctx.macro.get("VIX", {}).get("price", 0)
-    ctx.qs, ctx.qb = quant_edge_score(df, ctx.vix_v)
+    use_quant = bool(ctx.cfg.get("use_quant_models", False))
+    ctx.qs, ctx.qb = quant_edge_score(df, ctx.vix_v, use_quant=use_quant)
 
     # Earnings
     _parse_earnings(ctx)

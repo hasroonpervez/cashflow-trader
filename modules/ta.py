@@ -16,6 +16,27 @@ class TA:
     def sma(s, p): return s.rolling(window=p).mean()
 
     @staticmethod
+    def get_weights_ffd(d, size):
+        w = [1.0]
+        for k in range(1, size):
+            w.append(-w[-1] * (d - k + 1) / k)
+        return np.array(w).reshape(-1, 1)
+
+    @staticmethod
+    def frac_diff_ffd(series, d=0.45, thres=1e-5):
+        """Applies Fixed-Width Window Fractional Differentiation."""
+        if series is None or len(series) == 0:
+            return pd.Series(dtype=float)
+        w = TA.get_weights_ffd(d, len(series))
+        w_ = w[np.abs(w) >= thres]
+        w_ = w_[::-1]
+        res = []
+        for i in range(len(w_) - 1, len(series)):
+            window = series.iloc[i - len(w_) + 1: i + 1].values
+            res.append(np.dot(window, w_)[0])
+        return pd.Series(res, index=series.index[len(w_) - 1:])
+
+    @staticmethod
     def rsi(s, p=14):
         d = s.diff()
         g = d.where(d > 0, 0).rolling(p).mean()
