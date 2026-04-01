@@ -190,7 +190,11 @@ def build_context(ticker: str, cfg: dict) -> Optional[DashContext]:
     ctx.cp_score, ctx.cp_max, ctx.cp_breakdown, ctx.cp_bearish = calc_confluence_points(
         df, ctx.df_wk, ctx.vix_v, gold_zone_price=ctx.gold_zone_price
     )
-    ctx.diamonds = detect_diamonds(df, ctx.df_wk)
+    ctx.diamonds = detect_diamonds(
+        df,
+        ctx.df_wk,
+        use_quant=bool(ctx.cfg.get("use_quant_models", False)),
+    )
     ctx.latest_d = latest_diamond_status(ctx.diamonds)
     ctx.d_wr, ctx.d_avg, ctx.d_n = diamond_win_rate(df, ctx.diamonds, forward_bars=10)
 

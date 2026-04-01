@@ -274,6 +274,7 @@ def _fragment_technical_zone(
     struct,
     mini_mode,
     mobile_chart_layout,
+    use_quant=False,
 ):
     """Charts + overlay toggles + diamond cards + gold zone copy. Reruns without refetching Yahoo data."""
     if mini_mode:
@@ -416,6 +417,17 @@ def _fragment_technical_zone(
                     if d_n > 0
                     else "<div style='color:#64748b;font-size:.85rem;margin:8px 0'>Not enough history for a win rate badge yet.</div>"
                 )
+                quant_overlay = ""
+                if latest_d["type"] == "blue" and use_quant:
+                    suggested_shares = int(latest_d.get("suggested_shares", 0) or 0)
+                    trailing_exit = float(latest_d.get("trailing_exit", 0.0) or 0.0)
+                    if suggested_shares > 0 and trailing_exit > 0:
+                        quant_overlay = (
+                            f"<div style='margin:10px 0 12px 0;padding:10px 12px;border:1px solid rgba(59,130,246,.4);"
+                            f"border-radius:10px;background:rgba(59,130,246,.08);font-size:.9rem;line-height:1.6;color:#dbeafe'>"
+                            f"💎 Blue Diamond Active: Accumulate {suggested_shares} Shares (Target Vol: 15%)<br>"
+                            f"🛑 Trailing Exit (Pink Diamond) dynamically set at ${trailing_exit:.2f}</div>"
+                        )
                 st.markdown(
                     f"<div style='background:rgba(15,23,42,.95);border:1px solid {why_color};border-radius:12px;padding:18px 20px;margin:12px 0'>"
                     f"<div style='font-size:.8rem;color:{why_color};text-transform:uppercase;letter-spacing:.1em;font-weight:700;margin-bottom:6px'>"
@@ -423,6 +435,7 @@ def _fragment_technical_zone(
                     f"<div style='color:#e2e8f0;font-size:.95rem;margin-bottom:6px'>Signal fired at <strong>{latest_d['score']}/9</strong> confluence. "
                     f"Live checklist now shows <strong>{passed}/7</strong> headline factors green.</div>"
                     f"<div style='color:#94a3b8;font-size:.88rem;margin-bottom:12px;line-height:1.5'>{why_action}</div>"
+                    f"{quant_overlay}"
                     f"{win_badge}"
                     f"<div style='font-size:.72rem;color:#64748b;text-transform:uppercase;margin-bottom:6px'>Diamond checklist</div>"
                     f"<div>{factor_lines}</div>"

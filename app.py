@@ -873,6 +873,7 @@ def main():
         struct,
         mini_mode,
         mobile_chart_layout,
+        use_quant=use_quant_models,
     )
     chart_mood = "bull" if struct == "BULLISH" else ("bear" if struct == "BEARISH" else "neutral")
 

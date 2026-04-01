@@ -408,8 +408,49 @@ def _index_pos(idx_obj):
     return int(arr.flat[-1])
 
 
+def optimal_pyramid_size(df, capital=10000.0, target_vol=0.15):
+    """
+    Calculates the optimal number of shares to accumulate based on inverse volatility.
+    Formula: S_t = (Capital * Target_Vol) / (Realized_Vol * Price)
+    """
+    if len(df) < 20:
+        return 0
+    price = float(df["Close"].iloc[-1])
+    if price <= 0:
+        return 0
+    # 20-day annualized realized volatility
+    realized_vol = float(df["Close"].pct_change().tail(20).std() * np.sqrt(252))
+    if realized_vol <= 0:
+        return 0
+
+    # Calculate share size to target a specific portfolio volatility impact
+    shares = (capital * target_vol) / (realized_vol * price)
+    return max(1, int(shares))
+
+
+def quant_trailing_exit(df, atr_multiplier=3.0):
+    """
+    Calculates a volatility-adjusted trailing stop (Pink Diamond exit).
+    Formula: E_t = Max(High_22) - (k * ATR_22)
+    """
+    if len(df) < 22:
+        return float(df["Close"].iloc[-1]) * 0.95
+    high_22 = float(df["High"].tail(22).max())
+
+    # Calculate simple ATR
+    high_low = df["High"] - df["Low"]
+    high_close = np.abs(df["High"] - df["Close"].shift())
+    low_close = np.abs(df["Low"] - df["Close"].shift())
+    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+    atr_22 = float(tr.tail(22).mean())
+    if atr_22 <= 0:
+        return max(0.0, high_22)
+
+    return max(0.0, high_22 - (atr_multiplier * atr_22))
+
+
 @st.cache_data(ttl=300)
-def detect_diamonds(df, df_wk=None, lookback=None):
+def detect_diamonds(df, df_wk=None, lookback=None, use_quant=False):
     """Blue Diamond (strict): point-in-time **daily** confluence **crosses** to 7+ (was <7 prior bar),
     **daily structure BULLISH**, **weekly trend not BEARISH**, **volume ≥ 90% of 20-day volume SMA**,
     plus ATR blow-off guard inside the institutional filter.
@@ -440,16 +481,46 @@ def detect_diamonds(df, df_wk=None, lookback=None):
         pi = float(df["Close"].iloc[i])
 
         # Blue: 7+ cross + daily BULLISH + weekly not BEARISH + explicit 90% vol SMA gate + ATR filter
-        if (
+        is_blue_diamond = (
             sc >= 7
             and prev_score < 7
             and struct_i == "BULLISH"
             and wk_bias != "BEARISH"
             and _blue_diamond_volume_gate(sub)
-        ):
-            if _blue_diamond_institutional_ok(sub):
-                diamonds.append({"date": df.index[i], "price": pi, "type": "blue",
-                                 "score": sc, "rsi": rsi_i, "weekly": wk_bias})
+            and _blue_diamond_institutional_ok(sub)
+        )
+        size_suggestion = 0
+        quant_exit_price = 0.0
+
+        if use_quant:
+            try:
+                from .sentiment import QuantSentiment
+                regime_probs = QuantSentiment.regime_detection(sub)
+                # State 0 is treated as lower-volatility / safer regime.
+                safe_regime_prob = float(regime_probs.get(0, 0.5))
+                if is_blue_diamond and safe_regime_prob < 0.75:
+                    # Veto retail signal in hostile volatility regime.
+                    is_blue_diamond = False
+
+                if is_blue_diamond:
+                    size_suggestion = optimal_pyramid_size(sub)
+                    quant_exit_price = quant_trailing_exit(sub)
+            except Exception:
+                # Keep behavior robust: quant path must not break baseline engine.
+                size_suggestion = 0
+                quant_exit_price = 0.0
+
+        if is_blue_diamond:
+            diamonds.append({
+                "date": df.index[i],
+                "price": pi,
+                "type": "blue",
+                "score": sc,
+                "rsi": rsi_i,
+                "weekly": wk_bias,
+                "suggested_shares": size_suggestion,
+                "trailing_exit": quant_exit_price,
+            })
 
         # Pink: collapse or RSI exhaustion — allow BULLISH weeks too (fade / de-risk in extended runs)
         if (sc <= 3 and prev_score >= 5) or (rsi_i > 75 and sc <= 4 and prev_score > 4):
