@@ -2154,9 +2154,10 @@ def main():
                         if earnings_parse_failed:
                             _earn_empty += " A raw value came back but could not be parsed into a calendar date."
                         st.info(_earn_empty)
-                        if st.button("Refresh earnings", key="retry_earnings_tab", help="Clears cached earnings fetches"):
+                        if st.button("Refresh earnings", key="retry_earnings_tab", help="Clears cached earnings and quote info"):
                             fetch_earnings_date.clear()
                             fetch_earnings_calendar_display.clear()
+                            fetch_info.clear()
                             st.rerun()
                 else:
                     st.caption("Rows are newest-first. The next on-calendar print (today or later) is highlighted.")

@@ -1,6 +1,8 @@
 """
 Data layer — yfinance fetchers with retry/backoff, caching, macro dashboard.
 """
+from __future__ import annotations
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -318,51 +320,234 @@ def fetch_news(ticker):
         return []
 
 def _earnings_date_from_quote_info(info: dict):
-    """Fallback when ``calendar`` is empty: next earnings unix timestamp from quote summary."""
+    """Next earnings as YYYY-MM-DD from yfinance ``.info``-style flat dict (unix ms/s or nested)."""
     if not info:
         return None
-    ts = info.get("earningsTimestamp") or info.get("earningsCallTimestampStart")
-    try:
+    keys = (
+        "earningsTimestamp",
+        "earningsTimestampStart",
+        "earningsCallTimestampStart",
+    )
+    for k in keys:
+        ts = info.get(k)
         if ts is None:
-            return None
-        if isinstance(ts, (int, float)) and ts > 1e9:
-            return datetime.utcfromtimestamp(int(ts)).strftime("%Y-%m-%d")
-    except (TypeError, ValueError, OSError):
-        pass
+            continue
+        try:
+            if isinstance(ts, dict):
+                raw = ts.get("raw")
+                if isinstance(raw, (int, float)) and raw > 1e9:
+                    return datetime.utcfromtimestamp(int(raw)).strftime("%Y-%m-%d")
+                fmt = ts.get("fmt") or ts.get("longFmt")
+                if fmt and len(str(fmt)) >= 10:
+                    return str(fmt)[:10]
+            if isinstance(ts, (int, float)) and ts > 1e12:
+                return datetime.utcfromtimestamp(int(ts / 1000)).strftime("%Y-%m-%d")
+            if isinstance(ts, (int, float)) and ts > 1e9:
+                return datetime.utcfromtimestamp(int(ts)).strftime("%Y-%m-%d")
+        except (TypeError, ValueError, OSError):
+            continue
     return None
 
 
-@st.cache_data(ttl=3600)
-def fetch_earnings_date(ticker):
-    """Fetch next earnings date from yfinance corporate calendar, then quote-summary timestamps."""
+def _coerce_earnings_to_yyyy_mm_dd(raw) -> str | None:
+    """Normalize calendar/earnings row values to YYYY-MM-DD."""
+    if raw is None:
+        return None
     try:
-        cal = _yfinance_ticker(ticker).calendar
-        if cal is not None:
+        if isinstance(raw, float) and np.isnan(raw):
+            return None
+    except Exception:
+        pass
+    try:
+        if isinstance(raw, str):
+            s = raw.strip()
+            if len(s) >= 10 and s[4] == "-" and s[7] == "-":
+                return s[:10]
+        ts = pd.Timestamp(raw)
+        if pd.isna(ts):
+            return None
+        return ts.strftime("%Y-%m-%d")
+    except Exception:
+        return None
+
+
+def _earnings_next_from_yahoo_quotesummary(symbol: str) -> str | None:
+    """Yahoo v10 quoteSummary calendarEvents — works when yfinance ``calendar`` is empty (common on Cloud)."""
+    sym = str(symbol).upper().strip()
+    if not sym:
+        return None
+    url = (
+        f"https://query2.finance.yahoo.com/v10/finance/quoteSummary/{sym}"
+        "?modules=calendarEvents"
+    )
+    try:
+        r = requests.get(url, headers=_YAHOO_OPTIONS_HEADERS, timeout=16)
+        if r.status_code != 200:
+            return None
+        js = r.json()
+        res = (js.get("quoteSummary") or {}).get("result") or []
+        if not res:
+            return None
+        ce = res[0].get("calendarEvents") or {}
+        earn = ce.get("earnings") or {}
+        dates = earn.get("earningsDate")
+        if dates is None:
+            return None
+        items = dates if isinstance(dates, list) else [dates]
+        parsed: list = []
+        today = datetime.utcnow().date()
+        for item in items:
+            if item is None:
+                continue
+            if isinstance(item, dict):
+                raw = item.get("raw")
+                fmt = item.get("fmt")
+                d = None
+                if isinstance(raw, (int, float)) and raw > 1e9:
+                    try:
+                        d = datetime.utcfromtimestamp(int(raw)).date()
+                    except (TypeError, ValueError, OSError):
+                        pass
+                if d is None and fmt:
+                    try:
+                        d = datetime.strptime(str(fmt)[:10], "%Y-%m-%d").date()
+                    except Exception:
+                        pass
+                if d is not None:
+                    parsed.append(d)
+            elif isinstance(item, (int, float)) and item > 1e9:
+                try:
+                    parsed.append(datetime.utcfromtimestamp(int(item)).date())
+                except (TypeError, ValueError, OSError):
+                    pass
+        if not parsed:
+            return None
+        future = [d for d in parsed if d >= today]
+        pick = min(future) if future else max(parsed)
+        return pick.strftime("%Y-%m-%d")
+    except Exception:
+        return None
+
+
+def _earnings_from_yfinance_calendar(symbol: str, attempts: int = 4) -> str | None:
+    """yfinance ``Ticker.calendar`` with retries; tolerates dict/DataFrame and alternate key names."""
+    sym = str(symbol).upper().strip()
+    for attempt in range(attempts):
+        try:
+            cal = _yfinance_ticker(sym).calendar
+            raw = None
             if isinstance(cal, dict):
-                ed = cal.get("Earnings Date")
-                if isinstance(ed, (list, tuple)) and ed:
-                    return ed[0]
-                if ed:
-                    return ed
-            elif isinstance(cal, pd.DataFrame):
+                for k in ("Earnings Date", "earningsDate", "Earnings date"):
+                    if k not in cal:
+                        continue
+                    ed = cal[k]
+                    if isinstance(ed, (list, tuple)) and ed:
+                        raw = ed[0]
+                    elif ed is not None and not (isinstance(ed, float) and pd.isna(ed)):
+                        raw = ed
+                    if raw is not None:
+                        break
+                if raw is None:
+                    for k, ed in cal.items():
+                        lk = str(k).lower().replace(" ", "")
+                        if "earnings" in lk and "date" in lk:
+                            if isinstance(ed, (list, tuple)) and ed:
+                                raw = ed[0]
+                            elif ed is not None and not (
+                                isinstance(ed, float) and pd.isna(ed)
+                            ):
+                                raw = ed
+                            break
+            elif isinstance(cal, pd.DataFrame) and not cal.empty:
+                raw = None
                 if "Earnings Date" in cal.columns:
                     v = cal["Earnings Date"].iloc[0]
                     if pd.notna(v):
-                        return v
-                if "Earnings Date" in cal.index:
+                        raw = v
+                if raw is None and "Earnings Date" in cal.index:
                     val = cal.loc["Earnings Date"]
                     v = val.iloc[0] if hasattr(val, "iloc") else val
                     if pd.notna(v):
-                        return v
-    except Exception:
-        pass
-    try:
-        from_info = _earnings_date_from_quote_info(fetch_info(ticker))
-        if from_info:
-            return from_info
-    except Exception:
-        pass
+                        raw = v
+                if raw is None:
+                    for col in cal.columns:
+                        cl = str(col).lower()
+                        if "earnings" in cl and "date" in cl:
+                            v = cal[col].iloc[0]
+                            if pd.notna(v):
+                                raw = v
+                                break
+            s = _coerce_earnings_to_yyyy_mm_dd(raw)
+            if s:
+                return s
+        except Exception:
+            pass
+        if attempt < attempts - 1:
+            time.sleep(0.1 * (2**attempt))
     return None
+
+
+def _earnings_from_yfinance_earnings_dates(symbol: str) -> str | None:
+    """Next or most recent earnings from ``Ticker.earnings_dates`` table (separate Yahoo scrape path)."""
+    sym = str(symbol).upper().strip()
+    try:
+        ed = _yfinance_ticker(sym).earnings_dates
+        if ed is None or not isinstance(ed, pd.DataFrame) or ed.empty:
+            return None
+        ed = ed.copy()
+        ed.index = [_earnings_ts_normalize(i) for i in ed.index]
+        ed = ed.sort_index()
+        today = pd.Timestamp(datetime.now().date()).normalize()
+        future = ed[ed.index.normalize() >= today]
+        if not future.empty:
+            pick = future.index.min()
+        else:
+            pick = ed.index.max()
+        return _coerce_earnings_to_yyyy_mm_dd(pick)
+    except Exception:
+        return None
+
+
+def _resolve_next_earnings_yyyy_mm_dd(symbol: str) -> str | None:
+    """Merge all sources (HTTP first, then yfinance paths). Uncached — wrap with ``fetch_earnings_date``."""
+    sym = str(symbol).upper().strip()
+    if not sym:
+        return None
+
+    got = _earnings_next_from_yahoo_quotesummary(sym)
+    if got:
+        return got
+
+    got = _earnings_from_yfinance_calendar(sym)
+    if got:
+        return got
+
+    got = _earnings_from_yfinance_earnings_dates(sym)
+    if got:
+        return got
+
+    try:
+        info = _yfinance_ticker(sym).info
+        got = _earnings_date_from_quote_info(info or {})
+        if got:
+            return got
+    except Exception:
+        pass
+
+    try:
+        got = _earnings_date_from_quote_info(fetch_info(sym))
+        if got:
+            return got
+    except Exception:
+        pass
+
+    return None
+
+
+@st.cache_data(ttl=600)
+def fetch_earnings_date(ticker):
+    """Next earnings date as YYYY-MM-DD — multi-source (Yahoo quoteSummary, calendar, earnings_dates, .info)."""
+    return _resolve_next_earnings_yyyy_mm_dd(str(ticker).upper().strip())
 
 
 def _earnings_ts_normalize(x):
@@ -402,7 +587,7 @@ def _earnings_find_col(df: pd.DataFrame, *candidates: str):
     return None
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=900, show_spinner=False)
 def fetch_earnings_calendar_display(ticker: str):
     """Build earnings calendar rows for the desk table. Returns (df, highlight_row_index | None)."""
     today_d = datetime.now().date()
