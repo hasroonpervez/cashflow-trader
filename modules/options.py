@@ -84,13 +84,26 @@ def kelly_criterion(
     expected_return=0.0,
     variance=0.0,
     risk_free_rate=0.05,
+    correlation_haircut=1.0,
 ):
     """Kelly Criterion: optimal bankroll fraction.
     f* = W - (1-W)/R where W = win probability, R = win/loss payout ratio.
     Returns (full_kelly_pct, half_kelly_pct) as percentages."""
     if use_quant and variance > 0:
-        full = continuous_kelly(expected_return, risk_free_rate, variance, half_kelly=False)
-        half = continuous_kelly(expected_return, risk_free_rate, variance, half_kelly=True)
+        full = continuous_kelly(
+            expected_return,
+            risk_free_rate,
+            variance,
+            half_kelly=False,
+            correlation_haircut=correlation_haircut,
+        )
+        half = continuous_kelly(
+            expected_return,
+            risk_free_rate,
+            variance,
+            half_kelly=True,
+            correlation_haircut=correlation_haircut,
+        )
         return round(full, 1), round(half, 1)
     if loss_amount <= 0 or win_amount <= 0 or win_prob_pct <= 0 or win_prob_pct >= 100:
         return 0.0, 0.0
@@ -130,15 +143,17 @@ def bs_corrado_su(S, K, T, r, sigma, skew=0.0, kurt=3.0, option_type="call"):
     return max(0.0, float(bs_px + (skew * q3) + ((kurt - 3.0) * q4)))
 
 
-def continuous_kelly(expected_return, risk_free_rate, variance, half_kelly=True):
+def continuous_kelly(expected_return, risk_free_rate, variance, half_kelly=True, correlation_haircut=1.0):
     """
     Calculates optimal continuous-time allocation (Merton's Portfolio Problem).
+    Applies a mathematical haircut if the asset is highly correlated to the portfolio.
     """
     if variance <= 0:
         return 0.0
     f_star = (expected_return - risk_free_rate) / variance
     allocation = f_star / 2.0 if half_kelly else f_star
-    return max(0.0, min(1.0, allocation)) * 100
+    final_allocation = max(0.0, min(1.0, allocation)) * 100 * correlation_haircut
+    return final_allocation
 
 
 # ═════════════════════════════════════════════════════════════════════════
@@ -580,7 +595,7 @@ def latest_diamond_status(diamonds):
 
 
 
-def scan_single_ticker(tkr):
+def scan_single_ticker(tkr, correlation_haircut=1.0):
     """Fetch data and compute all scores for a single ticker (for the scanner)."""
     try:
         df = fetch_stock(tkr, "1y", "1d")
@@ -600,6 +615,19 @@ def scan_single_ticker(tkr):
 
         struct, _, _ = TA.market_structure(df)
         wk_lbl, _ = weekly_trend_label(df_wk)
+
+        ret = df["Close"].pct_change().dropna()
+        exp_ret = float(ret.mean() * 252) if len(ret) > 0 else 0.0
+        ret_var = float(ret.var() * 252) if len(ret) > 1 else 0.0
+        k_full, k_half = kelly_criterion(
+            55.0,
+            max(1.0, abs(chg_pct)),
+            max(1.0, abs(chg_pct) * 1.5),
+            use_quant=True,
+            expected_return=exp_ret,
+            variance=ret_var,
+            correlation_haircut=correlation_haircut,
+        )
 
         d_status = "None"
         d_class = "badge-none"
@@ -621,7 +649,8 @@ def scan_single_ticker(tkr):
         return {"ticker": tkr, "price": price, "chg_pct": chg_pct, "qs": qs,
                 "cp_score": cp_score, "cp_max": cp_max, "d_status": d_status,
                 "d_class": d_class, "gold_zone": gold_zone, "dist_gz": dist_gz,
-                "struct": struct, "wk_trend": wk_lbl, "summary": summary}
+                "struct": struct, "wk_trend": wk_lbl, "summary": summary,
+                "kelly_full": k_full, "kelly_half": k_half, "Adj. Kelly %": k_half}
     except Exception:
         return None
 
@@ -791,4 +820,52 @@ def calc_skew_regime(opts_df, spot_price):
     if skew_ratio < 0.85:
         return "UPSIDE MANIA", "#22c55e", f"Call frenzy. Call IV is {(1 / skew_ratio):.2f}x higher than Put IV."
     return "BALANCED SMILE", "#3b82f6", f"Neutral skew. Put and Call IV are relatively balanced (Ratio: {skew_ratio:.2f})."
+
+
+class PortfolioRisk:
+    @staticmethod
+    def build_correlation_matrix(closes_df, window=60):
+        """
+        Takes a DataFrame where columns are tickers and rows are daily closing prices.
+        Returns a rolling correlation matrix based on log returns.
+        """
+        if closes_df is None or closes_df.empty or len(closes_df) < window:
+            return None
+
+        # Institutional standard: use log returns for correlation, not absolute price.
+        log_returns = np.log(closes_df / closes_df.shift(1)).dropna()
+        recent_returns = log_returns.tail(window)
+        if recent_returns.empty:
+            return None
+        return recent_returns.corr()
+
+    @staticmethod
+    def get_overlap_score(corr_matrix, ticker):
+        """
+        Calculates the average correlation of a specific ticker against the rest of the matrix.
+        """
+        if corr_matrix is None or ticker not in corr_matrix.columns or len(corr_matrix.columns) < 2:
+            return 0.0
+
+        # Drop self-correlation (which is always 1.0) and get the mean of the rest.
+        others = corr_matrix[ticker].drop(labels=[ticker], errors="ignore")
+        if others.empty:
+            return 0.0
+        return float(others.mean())
+
+    @staticmethod
+    def calc_kelly_haircut(overlap_score):
+        """
+        Determines the Kelly multiplier based on correlation risk.
+        > 0.8: Extreme Overlap (50% Haircut)
+        > 0.6: High Overlap (25% Haircut)
+        < 0.0: True Hedge (20% Sizing Boost)
+        """
+        if overlap_score >= 0.8:
+            return 0.50
+        if overlap_score >= 0.6:
+            return 0.75
+        if overlap_score <= 0.0:
+            return 1.20
+        return 1.0
 

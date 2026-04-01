@@ -81,10 +81,10 @@ from modules.options import (
     bs_price, bs_greeks, calc_ev, kelly_criterion, calc_vol_skew,
     quant_edge_score, weekly_trend_label, calc_gold_zone,
     calc_confluence_points, detect_diamonds, latest_diamond_status,
-    diamond_win_rate, scan_single_ticker, Opt, calc_skew_regime,
+    diamond_win_rate, scan_single_ticker, Opt, calc_skew_regime, PortfolioRisk,
 )
 from modules.sentiment import Sentiment, Backtest, Alerts, run_cc_sim_cached, QuantBacktest
-from modules.chart import build_chart, _chart_hoverlabel, build_skew_chart
+from modules.chart import build_chart, _chart_hoverlabel, build_skew_chart, build_correlation_heatmap
 from modules.ui_helpers import (
     _factor_checklist_labels, _confluence_why_trade_plain,
     _iv_rank_qualitative_words, _iv_rank_pill_html,
@@ -1683,6 +1683,23 @@ def main():
                 daily_ret = df["Close"].pct_change().dropna()
                 exp_ret = float(daily_ret.mean() * 252) if len(daily_ret) > 0 else 0.0
                 ret_var = float(daily_ret.var() * 252) if len(daily_ret) > 1 else 0.0
+                kelly_overlap = 0.0
+                kelly_corr_haircut = 1.0
+                try:
+                    risk_symbols = list(dict.fromkeys([t for t in watch_items if t]))[:20]
+                    if ticker not in risk_symbols:
+                        risk_symbols.append(ticker)
+                    risk_closes = {}
+                    for rt in risk_symbols:
+                        rdf = fetch_stock(rt, "1y", "1d")
+                        if rdf is not None and not rdf.empty and "Close" in rdf.columns:
+                            risk_closes[rt] = pd.to_numeric(rdf["Close"], errors="coerce")
+                    risk_corr = PortfolioRisk.build_correlation_matrix(pd.DataFrame(risk_closes).dropna(how="all"))
+                    kelly_overlap = PortfolioRisk.get_overlap_score(risk_corr, ticker)
+                    kelly_corr_haircut = PortfolioRisk.calc_kelly_haircut(kelly_overlap)
+                except Exception:
+                    kelly_overlap = 0.0
+                    kelly_corr_haircut = 1.0
                 if bluf_cc:
                     k_pop = min(85, max(50, 100 - bluf_cc["otm_pct"] * 5))
                     k_win = bluf_cc["prem_100"]
@@ -1692,6 +1709,7 @@ def main():
                         use_quant=use_quant_models,
                         expected_return=exp_ret,
                         variance=ret_var,
+                        correlation_haircut=kelly_corr_haircut,
                     )
                     k_source = f"CC ${bluf_cc['strike']:.0f}"
                 elif bluf_csp:
@@ -1703,6 +1721,7 @@ def main():
                         use_quant=use_quant_models,
                         expected_return=exp_ret,
                         variance=ret_var,
+                        correlation_haircut=kelly_corr_haircut,
                     )
                     k_source = f"CSP ${bluf_csp['strike']:.0f}"
                 if k_half > 0:
@@ -1719,7 +1738,7 @@ def main():
                         f"<div class='tc'><div style='font-size:.75rem;color:#64748b'>KELLY HALF MODE · UI CAP</div>"
                         f"<div class='mono' style='font-size:1.3rem;color:{kc}'>{k_show:.1f}% = ${k_dollars:,.0f}</div>"
                         f"<div style='font-size:.7rem;color:#64748b;margin-top:4px'>Raw half Kelly {k_half:.1f}% · full Kelly {k_full:.1f}% · {k_source}. "
-                        f"Display max {k_cap:.0f}% for risk hygiene.{capped_note}</div></div>",
+                        f"Corr overlap {kelly_overlap:.2f} · haircut x{kelly_corr_haircut:.2f}. Display max {k_cap:.0f}% for risk hygiene.{capped_note}</div></div>",
                         unsafe_allow_html=True)
                     _explain("Kelly Criterion in plain English",
                         f"The Kelly formula can suggest large fractions; here we show <strong>Half Kelly</strong> then <strong>cap the headline at {k_cap:.0f}%</strong> "
@@ -1845,6 +1864,23 @@ def main():
             watchlist_tickers = [t.strip().upper() for t in scanner_watchlist.split(",") if t.strip()]
             if watchlist_tickers:
                 if st.button("Scan Watchlist", key="run_scanner"):
+                    closes_map = {}
+                    for tkr in watchlist_tickers:
+                        try:
+                            cdf = fetch_stock(tkr, "1y", "1d")
+                            if cdf is not None and not cdf.empty and "Close" in cdf.columns:
+                                closes_map[tkr] = pd.to_numeric(cdf["Close"], errors="coerce")
+                        except Exception:
+                            pass
+                    closes_df = pd.DataFrame(closes_map).dropna(how="all")
+                    corr_matrix = PortfolioRisk.build_correlation_matrix(closes_df)
+                    overlap_map = {tkr: PortfolioRisk.get_overlap_score(corr_matrix, tkr) for tkr in watchlist_tickers}
+                    haircut_map = {tkr: PortfolioRisk.calc_kelly_haircut(overlap_map.get(tkr, 0.0)) for tkr in watchlist_tickers}
+                    corr_fig = build_correlation_heatmap(corr_matrix)
+                    if corr_fig is not None:
+                        with st.expander("🕸️ Dynamic Correlation Matrix", expanded=False):
+                            st.plotly_chart(corr_fig, use_container_width=True, config=_PLOTLY_UI_CONFIG)
+
                     scanner_results = []
                     n_scan = len(watchlist_tickers)
                     workers = min(8, max(1, n_scan))
@@ -1852,14 +1888,22 @@ def main():
                     done_ct = 0
                     scan_failed = []
                     with ThreadPoolExecutor(max_workers=workers) as pool:
-                        future_map = {pool.submit(scan_single_ticker, tkr): tkr for tkr in watchlist_tickers}
+                        future_map = {
+                            pool.submit(scan_single_ticker, tkr, haircut_map.get(tkr, 1.0)): tkr
+                            for tkr in watchlist_tickers
+                        }
                         for fut in as_completed(future_map):
                             done_ct += 1
                             tkr = future_map[fut]
                             scan_progress.progress(done_ct / n_scan, text=f"Scanning {tkr}… ({done_ct}/{n_scan})")
                             try:
+                                overlap = overlap_map.get(tkr, 0.0)
+                                haircut = haircut_map.get(tkr, 1.0)
                                 result = fut.result()
                                 if result:
+                                    result["overlap"] = overlap
+                                    result["haircut"] = haircut
+                                    result["Adj. Kelly %"] = float(result.get("kelly_half", 0.0))
                                     scanner_results.append(result)
                             except Exception as e:
                                 scan_failed.append((tkr, type(e).__name__))
@@ -1892,11 +1936,16 @@ def main():
                                 <div class='scanner-grid'>
                                     <div style='min-width:80px'>
                                         <div style='font-size:1.1rem;font-weight:700;color:#e2e8f0'>{r['ticker']}</div>
+                                        {"<div style='font-size:.72rem;color:#f59e0b;font-weight:600'>⚠️ High Portfolio Overlap (" + f"{r['overlap']:.2f}" + ")</div>" if r.get("overlap", 0.0) >= 0.7 else ""}
                                         <div class='mono' style='font-size:.9rem;color:{pc}'>${r['price']:.2f} ({r['chg_pct']:+.1f}%)</div>
                                     </div>
                                     <div style='text-align:center;min-width:70px'>
                                         <div style='font-size:.65rem;color:#64748b;text-transform:uppercase'>QE Score</div>
                                         <div class='mono' style='color:{qec};font-weight:700'>{r['qs']:.0f}/100</div>
+                                    </div>
+                                    <div style='text-align:center;min-width:90px'>
+                                        <div style='font-size:.65rem;color:#64748b;text-transform:uppercase'>Adj. Kelly</div>
+                                        <div class='mono' style='font-size:.82rem;color:#93c5fd;font-weight:700'>{r.get('Adj. Kelly %', 0.0):.1f}%</div>
                                     </div>
                                     <div style='text-align:center;min-width:100px'>
                                         <div style='font-size:.65rem;color:#64748b;text-transform:uppercase'>Confluence</div>
@@ -1922,6 +1971,46 @@ def main():
                                     </div>
                                 </div>
                             </div>""", unsafe_allow_html=True)
+
+                        scanner_df = pd.DataFrame(
+                            [
+                                {
+                                    "Ticker": r["ticker"],
+                                    "Price": float(r["price"]),
+                                    "Change %": float(r["chg_pct"]),
+                                    "QE Score": float(r["qs"]),
+                                    "Adj. Kelly %": float(r.get("Adj. Kelly %", 0.0)),
+                                    "Confluence": int(r["cp_score"]),
+                                    "Diamond": r["d_status"],
+                                    "Gold Zone Dist %": float(r["dist_gz"]),
+                                    "Daily": r["struct"],
+                                    "Summary": r["summary"],
+                                }
+                                for r in scanner_results
+                            ]
+                        )
+                        with st.expander("Scanner Data Table", expanded=False):
+                            st.dataframe(
+                                scanner_df,
+                                use_container_width=True,
+                                hide_index=True,
+                                column_config={
+                                    "Ticker": st.column_config.TextColumn("Ticker", width="small"),
+                                    "Price": st.column_config.NumberColumn("Price", format="$%.2f"),
+                                    "Change %": st.column_config.NumberColumn("Change", format="%+.1f%%"),
+                                    "QE Score": st.column_config.NumberColumn("QE Score", format="%.0f"),
+                                    "Adj. Kelly %": st.column_config.NumberColumn(
+                                        "Adj. Kelly",
+                                        format="%.1f%%",
+                                        help="Kelly Criterion sizing after applying the Portfolio Correlation Haircut.",
+                                    ),
+                                    "Confluence": st.column_config.NumberColumn("Confluence", format="%d"),
+                                    "Diamond": st.column_config.TextColumn("Diamond"),
+                                    "Gold Zone Dist %": st.column_config.NumberColumn("Gold Zone Dist", format="%+.1f%%"),
+                                    "Daily": st.column_config.TextColumn("Daily"),
+                                    "Summary": st.column_config.TextColumn("Summary", width="large"),
+                                },
+                            )
 
                         _explain("🔎 How to use the Scanner",
                             "Look for tickers with <strong>7+ confluence points</strong> and an active <strong>Blue Diamond</strong>. "
