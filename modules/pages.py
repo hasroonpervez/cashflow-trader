@@ -32,7 +32,7 @@ from .config import (
     REF_NOTIONAL, RISK_PCT_EXAMPLE, KELLY_DISPLAY_CAP_PCT,
     EMA_EXTENSION_WARN_PCT,
 )
-from .streamlit_threading import make_script_ctx_pool
+from .streamlit_threading import make_script_ctx_pool, submit_with_script_ctx
 from .ui_helpers import (
     _factor_checklist_labels, _confluence_why_trade_plain,
     _iv_rank_qualitative_words, _iv_rank_pill_html,
@@ -138,13 +138,13 @@ def build_context(ticker: str, cfg: dict) -> Optional[DashContext]:
     # ── Parallel fetch ──
     with st.spinner(f"Loading {ticker}..."):
         with make_script_ctx_pool(7) as pool:
-            f_df = pool.submit(fetch_stock, ticker, "1y", "1d")
-            f_wk = pool.submit(fetch_stock, ticker, "2y", "1wk")
-            f_1mo = pool.submit(fetch_stock, ticker, "1mo", "1d")
-            f_vix = pool.submit(fetch_stock, "^VIX", "1mo", "1d")
-            f_macro = pool.submit(fetch_macro)
-            f_news = pool.submit(fetch_news, ticker)
-            f_earn = pool.submit(fetch_earnings_date, ticker)
+            f_df = submit_with_script_ctx(pool, fetch_stock, ticker, "1y", "1d")
+            f_wk = submit_with_script_ctx(pool, fetch_stock, ticker, "2y", "1wk")
+            f_1mo = submit_with_script_ctx(pool, fetch_stock, ticker, "1mo", "1d")
+            f_vix = submit_with_script_ctx(pool, fetch_stock, "^VIX", "1mo", "1d")
+            f_macro = submit_with_script_ctx(pool, fetch_macro)
+            f_news = submit_with_script_ctx(pool, fetch_news, ticker)
+            f_earn = submit_with_script_ctx(pool, fetch_earnings_date, ticker)
 
             ctx.df = f_df.result()
             ctx.df_wk = f_wk.result()

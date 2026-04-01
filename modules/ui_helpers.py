@@ -48,8 +48,14 @@ def _factor_checklist_labels():
     }
 
 
-def _confluence_why_trade_plain(cp_breakdown):
+def _confluence_why_trade_plain(cp_breakdown, *, options_chain_available=True):
     """One-line copy for Recommended Trade tooltip — same 7 headline rows as Diamond checklist."""
+    if not options_chain_available:
+        return (
+            "The options feed did not return expirations for this symbol, so this card cannot anchor to a live strike or IV rank. "
+            "Quant Edge and Confluence above still describe tape quality. Retry during regular market hours, use Refresh below in Cash Flow Strategies, "
+            "or pick strikes in your broker from the same playbook (roughly 3–7% OTM, monthly-ish expiry)."
+        )
     head = (
         "7/9 Diamond headline checklist: Supertrend (2), Ichimoku cloud (2), ADX DI (1), OBV (1), "
         "Divergence (1), Gold Zone (1), Structure (1). "
@@ -94,9 +100,9 @@ def _iv_rank_pill_html(ticker, price, ref_iv_pct=None, *, stub=None):
     if stub == "offline":
         return (
             pill_open
-            + "<span class='mono' style='font-weight:800;color:#64748b;font-size:1.05rem'>—</span>"
             + label
-            + "<span style='font-size:.68rem;color:#64748b'>chain offline</span></div>"
+            + "<span style='margin-left:10px;font-size:.8rem;font-weight:700;color:#94a3b8'>No options chain</span>"
+            + "<span style='font-size:.68rem;color:#64748b;margin-left:8px'>IV rank needs live expirations · try RTH or Refresh</span></div>"
         )
     if stub == "no_strike":
         return (
@@ -274,10 +280,12 @@ def _fragment_technical_zone(
     struct,
     mini_mode,
     mobile_chart_layout,
+    **_st_fragment_extras,
 ):
     """Charts + overlay toggles + diamond cards + gold zone copy. Reruns without refetching Yahoo data."""
     # Quant mode is stored in session_state (not passed as a kwarg) because @st.fragment reruns
     # may not forward arbitrary kwargs to the inner function reliably on all Streamlit versions.
+    # _st_fragment_extras absorbs stale keys (e.g. use_quant) from fragment cache / older deploys.
     use_quant = bool(st.session_state.get("_cf_use_quant_models", False))
     if mini_mode:
         chg_pct = 0.0

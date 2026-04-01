@@ -227,27 +227,52 @@ def fetch_news(ticker):
     except Exception:
         return []
 
+def _earnings_date_from_quote_info(info: dict):
+    """Fallback when ``calendar`` is empty: next earnings unix timestamp from quote summary."""
+    if not info:
+        return None
+    ts = info.get("earningsTimestamp") or info.get("earningsCallTimestampStart")
+    try:
+        if ts is None:
+            return None
+        if isinstance(ts, (int, float)) and ts > 1e9:
+            return datetime.utcfromtimestamp(int(ts)).strftime("%Y-%m-%d")
+    except (TypeError, ValueError, OSError):
+        pass
+    return None
+
+
 @st.cache_data(ttl=3600)
 def fetch_earnings_date(ticker):
-    """Fetch next earnings date from yfinance corporate calendar."""
+    """Fetch next earnings date from yfinance corporate calendar, then quote-summary timestamps."""
     try:
         cal = _yfinance_ticker(ticker).calendar
-        if cal is None:
-            return None
-        if isinstance(cal, dict):
-            ed = cal.get("Earnings Date")
-            if isinstance(ed, (list, tuple)) and ed:
-                return ed[0]
-            return ed if ed else None
-        if isinstance(cal, pd.DataFrame):
-            if "Earnings Date" in cal.columns:
-                return cal["Earnings Date"].iloc[0]
-            if "Earnings Date" in cal.index:
-                val = cal.loc["Earnings Date"]
-                return val.iloc[0] if hasattr(val, "iloc") else val
-        return None
+        if cal is not None:
+            if isinstance(cal, dict):
+                ed = cal.get("Earnings Date")
+                if isinstance(ed, (list, tuple)) and ed:
+                    return ed[0]
+                if ed:
+                    return ed
+            elif isinstance(cal, pd.DataFrame):
+                if "Earnings Date" in cal.columns:
+                    v = cal["Earnings Date"].iloc[0]
+                    if pd.notna(v):
+                        return v
+                if "Earnings Date" in cal.index:
+                    val = cal.loc["Earnings Date"]
+                    v = val.iloc[0] if hasattr(val, "iloc") else val
+                    if pd.notna(v):
+                        return v
     except Exception:
-        return None
+        pass
+    try:
+        from_info = _earnings_date_from_quote_info(fetch_info(ticker))
+        if from_info:
+            return from_info
+    except Exception:
+        pass
+    return None
 
 
 def _earnings_ts_normalize(x):

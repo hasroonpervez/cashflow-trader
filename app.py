@@ -62,7 +62,7 @@ if "bt_hold" not in st.session_state:
     st.session_state.bt_hold = 5
 
 # ── Module imports ──
-from modules.streamlit_threading import make_script_ctx_pool
+from modules.streamlit_threading import make_script_ctx_pool, submit_with_script_ctx
 from modules.config import (
     load_config, save_config, DEFAULT_CONFIG, CONFIG_PATH,
     _hydrate_sidebar_prefs, _overlay_prefs_from_session,
@@ -89,6 +89,7 @@ from modules.chart import build_chart, _chart_hoverlabel, build_skew_chart, buil
 from modules.ui_helpers import (
     _factor_checklist_labels, _confluence_why_trade_plain,
     _iv_rank_qualitative_words, _iv_rank_pill_html,
+    render_mode_badge,
     _explain, _section, _mini_sparkline, _glance_sparkline_svg,
     _glance_metric_card, _render_html_block, _parse_watchlist_string,
     _fragment_technical_zone, _df_price_levels, _style_price_levels_table,
@@ -97,13 +98,6 @@ from modules.ui_helpers import (
     _options_scan_column_config, _style_propdesk_highlight,
     _persist_overlay_prefs,
 )
-try:
-    from modules.ui_helpers import render_mode_badge
-except ImportError:
-    def render_mode_badge(use_quant: bool):
-        """Safe fallback when older ui_helpers lacks the badge helper."""
-        mode = "INSTITUTIONAL MODE" if use_quant else "RETAIL MODE"
-        st.caption(f"Mode: {mode}")
 
 from modules.css import _CSS, _MINI_MODE_DENSITY_CSS, inject_css_and_navbar
 
@@ -558,7 +552,9 @@ def main():
             unsafe_allow_html=True,
         )
 
-    why_trade_tip = _html_mod.escape(_confluence_why_trade_plain(cp_breakdown))
+    why_trade_tip = _html_mod.escape(
+        _confluence_why_trade_plain(cp_breakdown, options_chain_available=bool(opt_exps))
+    )
     trade_hdr_html = (
         "<div style='display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px'>"
         "<div style='font-size:.72rem;font-weight:800;color:#00e5ff;letter-spacing:.18em'>RECOMMENDED TRADE</div>"
@@ -654,7 +650,15 @@ def main():
             f"<div class='trade-master'>"
             f"{trade_hdr_html}"
             f"{_iv_off}"
-            f"<p style='color:#e2e8f0;font-size:1rem;margin:0'>Options chain is offline. Retry when the pit is open or jump to Cash Flow Strategies.</p>"
+            f"<p style='color:#e2e8f0;font-size:1rem;line-height:1.55;margin:0 0 10px 0'>"
+            f"We are not getting option expirations from the data feed for <span class='mono'>{_html_mod.escape(ticker)}</span>. "
+            f"That usually means after-hours or weekend gaps, Yahoo throttling, or a brief API miss—not that the symbol has no options."
+            f"</p>"
+            f"<ul style='color:#94a3b8;font-size:.88rem;margin:0 0 12px 1.1rem;line-height:1.5'>"
+            f"<li>Try <strong style='color:#e2e8f0'>Refresh</strong> under <strong style='color:#e2e8f0'>Cash Flow Strategies</strong> during regular hours.</li>"
+            f"<li>Keep using <strong style='color:#e2e8f0'>Quant Edge</strong> and <strong style='color:#e2e8f0'>Confluence</strong> above for context; strike selection can wait until the chain loads.</li>"
+            f"</ul>"
+            f"<p style='color:#64748b;font-size:.8rem;margin:0'>Jump to <a href='#strategies' style='color:#22d3ee'>Cash Flow Strategies</a> for retry and expiry picker once the feed responds.</p>"
             f"</div>"
         )
     else:
@@ -1427,15 +1431,25 @@ def main():
             #  SECTION 4 \u2014 CASH-FLOW STRATEGIES
             # ══════════════════════════════════════════════════════════════════
             st.markdown('<div id="strategies" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
-            _section("Cash Flow Strategies", f"Concrete strikes for {ticker} at ${price:.2f}. Lift them straight into your ticket.",
-                     tip_plain="Start with the optimal line the desk highlights. Covered calls need stock on hand. Cash secured puts monetize patience. Spreads are for when you want a hard loss ceiling.")
-            st.markdown(
-                f"<div class='tc'><div style='text-align:center'><span style='color:#64748b;font-size:.8rem'>ANALYZING</span><br>"
-                f"<span style='font-size:1.4rem;font-weight:700;color:#e2e8f0'>{_html_mod.escape(ticker)} @ ${price:.2f}</span></div></div>",
-                unsafe_allow_html=True,
+            _cfs_subtitle = (
+                f"Concrete strikes for {ticker} at ${price:.2f}. Lift them straight into your ticket."
+                if opt_exps
+                else (
+                    f"Spot ${price:.2f}. The options feed returned no expirations yet—use Refresh during market hours, "
+                    f"or mirror the desk rules in your broker (≈3–7% OTM, standard monthly cycle)."
+                )
             )
-
+            _section(
+                "Cash Flow Strategies",
+                _cfs_subtitle,
+                tip_plain="Start with the optimal line the desk highlights. Covered calls need stock on hand. Cash secured puts monetize patience. Spreads are for when you want a hard loss ceiling.",
+            )
             if opt_exps:
+                st.markdown(
+                    f"<div class='tc'><div style='text-align:center'><span style='color:#64748b;font-size:.8rem'>ANALYZING</span><br>"
+                    f"<span style='font-size:1.4rem;font-weight:700;color:#e2e8f0'>{_html_mod.escape(ticker)} @ ${price:.2f}</span></div></div>",
+                    unsafe_allow_html=True,
+                )
                 sel_exp = st.selectbox("Expiration", opt_exps[:10], index=min(2, len(opt_exps) - 1), key="sel_exp")
                 dte = max(1, (datetime.strptime(sel_exp, "%Y-%m-%d") - datetime.now()).days)
                 try:
@@ -1664,7 +1678,19 @@ def main():
                         "Pick another expiry or retry when the options pit is live."
                     )
             else:
-                st.warning("Options data currently unavailable for this ticker.")
+                st.markdown(
+                    f"<div class='tc'><div style='text-align:center'><span style='color:#f59e0b;font-size:.75rem;font-weight:700;letter-spacing:.12em'>OPTIONS FEED</span><br>"
+                    f"<span style='font-size:1.25rem;font-weight:700;color:#e2e8f0'>{_html_mod.escape(ticker)} @ ${price:.2f}</span>"
+                    f"<br><span style='color:#94a3b8;font-size:.82rem'>No expirations returned — not necessarily illiquid; often a data gap</span></div></div>",
+                    unsafe_allow_html=True,
+                )
+                st.info(
+                    "Yahoo Finance sometimes omits option chains off-hours, under load, or on Streamlit Cloud. "
+                    "Use **Refresh** to bust the cache and pull again. If it persists, open your broker’s chain for the same symbol."
+                )
+                if st.button("Refresh options data", key="retry_opts_chain", help="Clears cached option expirations and reloads"):
+                    fetch_options.clear()
+                    st.rerun()
 
             # ══════════════════════════════════════════════════════════════════
 
@@ -1918,8 +1944,11 @@ def main():
                     scan_failed = []
                     with make_script_ctx_pool(workers) as pool:
                         future_map = {
-                            pool.submit(
-                                scan_single_ticker, tkr, haircut_map.get(tkr, 1.0)
+                            submit_with_script_ctx(
+                                pool,
+                                scan_single_ticker,
+                                tkr,
+                                haircut_map.get(tkr, 1.0),
                             ): tkr
                             for tkr in watchlist_tickers
                         }
@@ -2101,10 +2130,18 @@ def main():
                             hide_index=True,
                         )
                     else:
-                        _earn_empty = "No upcoming earnings data available for this ticker."
+                        _earn_empty = (
+                            "We could not load earnings dates from the feed for this symbol. "
+                            "That can happen with API gaps, very new listings, or certain ADRs. "
+                            "Confirm the next print in your broker or any public earnings calendar."
+                        )
                         if earnings_parse_failed:
-                            _earn_empty += " The feed returned a value we could not parse into a date."
+                            _earn_empty += " A raw value came back but could not be parsed into a calendar date."
                         st.info(_earn_empty)
+                        if st.button("Refresh earnings", key="retry_earnings_tab", help="Clears cached earnings fetches"):
+                            fetch_earnings_date.clear()
+                            fetch_earnings_calendar_display.clear()
+                            st.rerun()
                 else:
                     st.caption("Rows are newest-first. The next on-calendar print (today or later) is highlighted.")
                     st.dataframe(

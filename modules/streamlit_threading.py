@@ -41,3 +41,22 @@ def make_script_ctx_pool(max_workers: int) -> ThreadPoolExecutor:
             add_ctx(threading.current_thread(), captured)
 
     return ThreadPoolExecutor(max_workers=max_workers, initializer=_initializer)
+
+
+def submit_with_script_ctx(pool: ThreadPoolExecutor, fn, /, *args, **kwargs):
+    """
+    Submit fn(*args, **kwargs) on pool after re-attaching ScriptRunContext on the worker.
+
+    Streamlit can clear thread-local context between cache layers; capturing ctx at submit
+    time (main script thread) and calling add_script_run_ctx at task start avoids
+    \"missing ScriptRunContext\" warnings from @st.cache_data inside workers.
+    """
+    get_ctx, add_ctx = _scriptrunner_ctx_apis()
+    captured = get_ctx() if get_ctx else None
+
+    def _run():
+        if captured is not None and add_ctx is not None:
+            add_ctx(threading.current_thread(), captured)
+        return fn(*args, **kwargs)
+
+    return pool.submit(_run)
