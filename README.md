@@ -2,7 +2,7 @@
 
 **Single-screen options income desk for PLTR and multi-ticker watchlists.**
 
-Glanceable execution guidance, Diamond buy/sell signals, Gold Zone confluence, Black-Scholes Greeks, and a full technical chart stack — all in a Streamlit dashboard built for mobile-first traders who sell covered calls and cash-secured puts for weekly income.
+Glanceable execution guidance, Diamond buy/sell signals, Gold Zone confluence, Black-Scholes + Corrado-Su options math, and a full technical chart stack — all in a Streamlit dashboard built for mobile-first traders who sell covered calls and cash-secured puts for weekly income.
 
 ---
 
@@ -14,8 +14,12 @@ The dashboard answers one question: **"What should I do right now?"**
 - **Traffic Light Indicators** — green/amber/red across Quant Edge Score, Confluence, Market Structure
 - **Diamond Signals** — Blue (buy zone) and Pink (take profit) triggered by 7+/9 confluence crossover
 - **Gold Zone** — dynamic institutional anchor fusing Volume Profile POC, Fib 61.8%, 200-SMA, Gann Sq9
-- **De-correlated Quant Edge Score** — five orthogonal dimensions (Trend, Momentum, Volume, Volatility, Structure)
-- **Black-Scholes Greeks** — live 10Y yield as risk-free rate, Expected Value, Kelly sizing, Volatility Skew
+- **Feature-Flagged Institutional Mode** — one-click toggle between retail and quant engines
+- **A/B Quant Diagnostics** — institutional vs retail Quant Edge delta shown live
+- **Rolling Edge Capture Log** — session ledger of ticker-level deltas with summary strip and CSV export
+- **De-correlated Quant Edge Score** — retail path uses five orthogonal dimensions (Trend, Momentum, Volume, Volatility, Structure)
+- **Institutional Quant Edge Path** — HMM regime detection + Fractional Differentiation synthesis
+- **Options Math Stack** — Black-Scholes Greeks, Corrado-Su skew/kurtosis expansion, Expected Value, discrete/continuous Kelly sizing, Volatility Skew
 - **Multi-Ticker Scanner** — ranks your full watchlist by confluence and diamond status
 - **Premium Simulator** — covered call backtest with honest disclaimers
 
@@ -33,9 +37,9 @@ cashflow-trader/
     ├── __init__.py
     ├── config.py             # Config persistence, defaults, st.secrets overlay
     ├── data.py               # yfinance fetchers, retry/backoff, caching, macro
-    ├── ta.py                 # TA class — 25+ indicators (RSI, MACD, Ichimoku, etc.)
-    ├── options.py            # Black-Scholes, Greeks, EV, Kelly, Quant Edge, Diamonds
-    ├── sentiment.py          # Sentiment, Backtest simulator, Alerts scanner
+    ├── ta.py                 # TA class — indicators + fractional differentiation (FFD)
+    ├── options.py            # Black-Scholes, Corrado-Su, EV, Kelly, Quant Edge, Diamonds
+    ├── sentiment.py          # Sentiment + HMM regime detection, Backtest simulator, Alerts
     ├── chart.py              # Four-panel Plotly chart builder
     ├── ui_helpers.py         # Sparklines, glance cards, sections, DataFrame styling
     └── css.py                # Full CSS theme + Mini Mode + sidebar toggle JS
@@ -72,7 +76,16 @@ streamlit run app.py
 
 Persisted locally via atomic writes (`.tmp` → `os.replace`). On Streamlit Cloud the filesystem resets on deploy, so preferences are ephemeral unless backed by `st.secrets`.
 
-Keys: `watchlist`, `scanner_sort_mode`, `strat_focus`, `strat_horizon`, `mini_mode`, `overlay_ema`, `overlay_fib`, `overlay_gann`, `overlay_sr`, `overlay_ichi`, `overlay_super`, `overlay_diamonds`, `overlay_gold`.
+Keys: `watchlist`, `scanner_sort_mode`, `strat_focus`, `strat_horizon`, `mini_mode`, `overlay_ema`, `overlay_fib`, `overlay_gann`, `overlay_sr`, `overlay_ichi`, `overlay_super`, `overlay_diamonds`, `overlay_gold`, `use_quant_models`.
+
+### Institutional Mode Toggle
+
+- `use_quant_models: false` (default) keeps the original retail scoring/sizing path.
+- `use_quant_models: true` enables:
+  - HMM-based regime influence in Quant Edge scoring
+  - FFD-based momentum input
+  - Continuous-time Kelly routing in risk sizing
+  - A/B diagnostics and rolling edge-capture telemetry in the UI
 
 ### Chart Layer Persistence
 
@@ -106,6 +119,17 @@ If the earnings calendar endpoint returns no rows, the app falls back to the pri
 | Structure | Market Structure (BOS/CHOCH), Support/Resistance, Fair Value Gaps |
 | Gann | Square of 9 levels, Angles, Time Cycles |
 | Fibonacci | Retracement levels (0%, 23.6%, 38.2%, 50%, 61.8%, 78.6%, 100%) |
+
+## Institutional Math Extensions
+
+| Engine | Purpose |
+|---|---|
+| Corrado-Su Expansion | Adjust option pricing for skew and fat tails beyond Gaussian Black-Scholes assumptions |
+| Fractional Differentiation (FFD) | Improve stationarity while preserving memory in time-series dynamics |
+| HMM Regime Detection | Classify latent volatility regimes probabilistically from returns + rolling volatility |
+| Continuous Kelly (Merton) | Compute variance-aware continuous-time allocation with optional half-Kelly |
+
+`hmmlearn` and `scipy` are handled with safe fallbacks so the app remains usable if those packages are unavailable.
 
 ---
 

@@ -83,7 +83,6 @@ from modules.chart import build_chart, _chart_hoverlabel
 from modules.ui_helpers import (
     _factor_checklist_labels, _confluence_why_trade_plain,
     _iv_rank_qualitative_words, _iv_rank_pill_html,
-    render_mode_badge,
     _explain, _section, _mini_sparkline, _glance_sparkline_svg,
     _glance_metric_card, _render_html_block, _parse_watchlist_string,
     _fragment_technical_zone, _df_price_levels, _style_price_levels_table,
@@ -92,6 +91,14 @@ from modules.ui_helpers import (
     _options_scan_column_config, _style_propdesk_highlight,
     _persist_overlay_prefs,
 )
+try:
+    from modules.ui_helpers import render_mode_badge
+except ImportError:
+    def render_mode_badge(use_quant: bool):
+        """Safe fallback when older ui_helpers lacks the badge helper."""
+        mode = "INSTITUTIONAL MODE" if use_quant else "RETAIL MODE"
+        st.caption(f"Mode: {mode}")
+
 from modules.css import _CSS, _MINI_MODE_DENSITY_CSS, inject_css_and_navbar
 
 # ── Inject theme + navbar (must happen before any widgets) ──
