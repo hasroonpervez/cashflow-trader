@@ -106,6 +106,7 @@ for _import_try in range(_IMPORT_KEYERROR_RETRIES):
                 _iv_rank_qualitative_words, _iv_rank_pill_html,
                 render_mode_badge,
                 sentinel_ledger_metrics,
+                earnings_runway_spark_series,
                 _explain, _section, _mini_sparkline, _glance_sparkline_svg,
                 _glance_metric_card, _render_html_block, _parse_watchlist_string,
                 walk_up_limit_sell_per_share,
@@ -643,11 +644,7 @@ def main():
         if vix_1mo_df is not None and not vix_1mo_df.empty
         else pd.Series([vix_v, vix_v, vix_v, vix_v, vix_v, vix_v, vix_v])
     )
-    if days_to_earnings is not None:
-        earn_anchor = max(1, min(30, days_to_earnings if days_to_earnings >= 0 else 1))
-        earnings_spark = pd.Series(np.linspace(earn_anchor + 1, max(0, earn_anchor - 1), 7))
-    else:
-        earnings_spark = pd.Series(np.linspace(24, 1, 7))
+    earnings_spark = earnings_runway_spark_series(days_to_earnings)
     qe_spark = pd.Series(np.linspace(max(0, qs - 10), min(100, qs + 4), 7))
 
     g1, g2, g3, g4 = st.columns(4)
@@ -674,10 +671,24 @@ def main():
             unsafe_allow_html=True,
         )
     with g3:
-        earnings_caption = (
-            "Plan size before the print"
-            if earn_glance != "Date unavailable from feed"
-            else "Keep base size until date is confirmed"
+        if earn_glance == "Date unavailable from feed":
+            earnings_caption = "Confirm the next print in your broker or calendar feed"
+        elif days_to_earnings is not None:
+            de = int(days_to_earnings)
+            if de < 0:
+                earnings_caption = "Print is behind you — size for the next cycle once the date is fresh"
+            elif de == 0:
+                earnings_caption = "Earnings today — gaps and IV swings; size to what you can hold through"
+            elif de <= 5:
+                earnings_caption = "Under a week — IV often richest here; ease naked upside risk if you run tight"
+            elif de <= 14:
+                earnings_caption = "Inside two weeks — decide strikes and contracts before the event"
+            else:
+                earnings_caption = "Outside two weeks — set risk budget and strikes before IV heats up (hover the gold line for what it shows)"
+        else:
+            earnings_caption = "Plan size before the print"
+        _earn_spark_hint = (
+            "Illustrative: days-to-earnings stepping down toward the print — not stock price or IV."
         )
         st.markdown(
             _glance_metric_card(
@@ -686,6 +697,7 @@ def main():
                 f"<div class='glance-caption'>{_html_mod.escape(earnings_caption)}</div>",
                 earnings_spark,
                 "#FFD700",
+                spark_title=_earn_spark_hint,
             ),
             unsafe_allow_html=True,
         )

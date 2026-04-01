@@ -410,7 +410,28 @@ def _mini_sparkline(series, color="#00E5FF"):
     return fig
 
 
-def _glance_sparkline_svg(series, color="#00E5FF", w=112, h=44):
+def earnings_runway_spark_series(days_to_earnings):
+    """Seven-point series for the earnings glance spark: left = more days ago (higher runway), right = now.
+
+    Values are **illustrative days-to-print** (not OHLC). Slopes down as you approach earnings; far-dated
+    prints use a gentle flat segment so the line is not confused with price.
+    """
+    if days_to_earnings is None:
+        return pd.Series(np.linspace(24.0, 1.0, 7))
+    d = int(days_to_earnings)
+    if d < 0:
+        return pd.Series(np.linspace(4.0, 0.0, 7))
+    if d >= 28:
+        # Far-dated print: gentle dip — reads as “plenty of runway,” not price action.
+        return pd.Series(np.linspace(32.0, 29.5, 7))
+    hi = min(30.0, float(d) + 6.0)
+    lo = float(d)
+    if hi <= lo + 0.75:
+        hi = lo + 4.0
+    return pd.Series(np.linspace(hi, lo, 7))
+
+
+def _glance_sparkline_svg(series, color="#00E5FF", w=112, h=44, title=None):
     """Single SVG path sparkline for glance cards (sidebar-safe; no Plotly iframe)."""
     s = pd.Series(series).dropna().astype(float)
     if len(s) < 2:
@@ -428,17 +449,25 @@ def _glance_sparkline_svg(series, color="#00E5FF", w=112, h=44):
         pts.append(f"{x:.1f},{y:.1f}")
     d = "M " + " L ".join(pts)
     esc_color = _html_mod.escape(color)
+    if title:
+        t_esc = _html_mod.escape(str(title))
+        meta = f"<title>{t_esc}</title><desc>{t_esc}</desc>"
+        a11y = f' role="img" aria-label="{t_esc}"'
+    else:
+        meta = ""
+        a11y = ' aria-hidden="true"'
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" '
-        f'viewBox="0 0 {w} {h}" class="glance-spark-svg" aria-hidden="true">'
+        f'viewBox="0 0 {w} {h}" class="glance-spark-svg"{a11y}>'
+        f"{meta}"
         f'<path d="{d}" fill="none" stroke="{esc_color}" stroke-width="2.25" '
         f'stroke-linecap="round" stroke-linejoin="round"/></svg>'
     )
 
 
-def _glance_metric_card(label, value_html, caption_html, series, line_color):
+def _glance_metric_card(label, value_html, caption_html, series, line_color, spark_title=None):
     """One self-contained glass card: text left, SVG sparkline right (works with sidebar open)."""
-    spark = _glance_sparkline_svg(series, line_color)
+    spark = _glance_sparkline_svg(series, line_color, title=spark_title)
     return (
         "<div class='tc glass-card glance-card glance-card-whole'>"
         "<div class='glance-row-flex'>"
