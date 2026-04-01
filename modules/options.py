@@ -1289,5 +1289,8 @@ def build_chain_mc_dataframe(price, calls_df, puts_df, dte, rfr=0.045):
                 )
             except Exception:
                 continue
-    return pd.DataFrame(rows)
+    out = pd.DataFrame(rows)
+    if out.empty:
+        return out
+    return out.reset_index(drop=True)
 

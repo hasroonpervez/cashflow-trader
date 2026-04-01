@@ -532,6 +532,7 @@ def _fragment_rolling_edge_capture():
         df_log,
         use_container_width=True,
         hide_index=True,
+        key=f"cf_edge_log_{df_log.shape[0]}_{df_log.shape[1]}",
         column_config={
             "Time": st.column_config.TextColumn("Time"),
             "Ticker": st.column_config.TextColumn("Ticker", width="small"),
@@ -912,7 +913,7 @@ def _options_scan_column_config(*, put_table: bool):
         "MC PoP %": st.column_config.NumberColumn(
             "MC PoP %",
             format="%.1f%%",
-            help="10k antithetic simulations • v16.0 Probability Mode",
+            help="10k antithetic simulations - v16.0 Probability Mode",
         ),
         "Vol": st.column_config.NumberColumn("Volume", format="%.0f"),
         "OI": st.column_config.NumberColumn("OI", format="%.0f"),

@@ -1210,6 +1210,7 @@ def main():
                                 pd.DataFrame([{"Dimension": k.title(), "Score": round(float(v), 1)} for k, v in _pillars.items()]),
                                 use_container_width=True,
                                 hide_index=True,
+                                key=f"qe_pillars_inst_{ticker}_{len(_pillars)}",
                                 column_config={"Score": st.column_config.NumberColumn("Score", format="%.1f")},
                             )
                         else:
@@ -1235,6 +1236,7 @@ def main():
                                     _pillar_df(retail_breakdown),
                                     use_container_width=True,
                                     hide_index=True,
+                                    key=f"qe_pillars_retail_{ticker}",
                                     column_config={"Score": st.column_config.NumberColumn(format="%.1f")},
                                 )
                             with pc2:
@@ -1243,6 +1245,7 @@ def main():
                                     _pillar_df(inst_breakdown),
                                     use_container_width=True,
                                     hide_index=True,
+                                    key=f"qe_pillars_qfb_{ticker}",
                                     column_config={"Score": st.column_config.NumberColumn(format="%.1f")},
                                 )
                     with st.expander("⏳ Time-Machine Backtester (Historical Edge)", expanded=False):
@@ -1352,6 +1355,7 @@ def main():
                         column_config=_PRICE_LEVEL_COLUMN_CONFIG,
                         use_container_width=True,
                         hide_index=True,
+                        key=f"cf_fib_levels_{ticker}_{len(_fib_df)}",
                     )
                 _explain("What are Fibonacci levels?",
                     "After a big move, stocks tend to pull back to specific levels before continuing. The key levels are 38.2%, 50%, and 61.8%. "
@@ -1365,6 +1369,7 @@ def main():
                         column_config=_PRICE_LEVEL_COLUMN_CONFIG,
                         use_container_width=True,
                         hide_index=True,
+                        key=f"cf_gann_levels_{ticker}_{len(_gann_df)}",
                     )
                 if st.checkbox("Gann Angles", key="exp_2"):
                     ang, sp = TA.gann_angles(df)
@@ -1590,6 +1595,7 @@ def main():
                                     _chain_mc,
                                     use_container_width=True,
                                     hide_index=True,
+                                    key=f"cf_opt_mc_chain_{sel_exp}_{_chain_mc.shape[0]}_{_chain_mc.shape[1]}",
                                     column_config={
                                         "Type": st.column_config.TextColumn("Type", width="small"),
                                         "Strike": st.column_config.NumberColumn("Strike", format="$%.2f"),
@@ -1600,7 +1606,7 @@ def main():
                                         "MC PoP %": st.column_config.NumberColumn(
                                             "MC PoP %",
                                             format="%.1f%%",
-                                            help="10k antithetic simulations • v16.0 Probability Mode",
+                                            help="10k antithetic simulations - v16.0 Probability Mode",
                                         ),
                                     },
                                 )
@@ -1637,6 +1643,7 @@ def main():
                                     column_config=_options_scan_column_config(put_table=False),
                                     use_container_width=True,
                                     hide_index=True,
+                                    key=f"cf_cc_strikes_{sel_exp}_{len(_cc_df)}",
                                 )
                         else:
                             st.info("No covered call strikes met pricing/liquidity checks in this snapshot. Try a nearby expiry or refresh.")
@@ -1666,6 +1673,7 @@ def main():
                                     column_config=_options_scan_column_config(put_table=True),
                                     use_container_width=True,
                                     hide_index=True,
+                                    key=f"cf_csp_strikes_{sel_exp}_{len(_csp_df)}",
                                 )
                         else:
                             st.info("No put strikes met pricing/liquidity checks in this snapshot. Try a nearby expiry or refresh.")
@@ -2218,6 +2226,11 @@ def main():
                                 scanner_df,
                                 use_container_width=True,
                                 hide_index=True,
+                                key=(
+                                    "cf_scanner_tbl_"
+                                    f"{scanner_df.shape[0]}x{scanner_df.shape[1]}_"
+                                    f"{abs(hash(tuple(scanner_df['Ticker'].astype(str).tolist()))) % (10**9)}"
+                                ),
                                 column_config={
                                     "Ticker": st.column_config.TextColumn("Ticker", width="small"),
                                     "Price": st.column_config.NumberColumn("Price", format="$%.2f"),
@@ -2296,6 +2309,7 @@ def main():
                             ),
                             use_container_width=True,
                             hide_index=True,
+                            key=f"cf_earn_fallback_{ticker}_{earnings_dt.strftime('%Y%m%d')}",
                         )
                     else:
                         _earn_empty = (
@@ -2318,6 +2332,7 @@ def main():
                         column_config=_earnings_calendar_column_config(),
                         use_container_width=True,
                         hide_index=True,
+                        key=f"cf_earn_cal_{ticker}_{earn_cal_df.shape[0]}_{earn_cal_df.shape[1]}",
                     )
 
             with st.expander("Quick Reference Guide", expanded=False):
