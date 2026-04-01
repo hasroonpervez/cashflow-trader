@@ -107,11 +107,12 @@ for _import_try in range(_IMPORT_KEYERROR_RETRIES):
                 _explain, _section, _mini_sparkline, _glance_sparkline_svg,
                 _glance_metric_card, _render_html_block, _parse_watchlist_string,
                 walk_up_limit_sell_per_share,
-                _fragment_technical_zone, _fragment_rolling_edge_capture, _df_price_levels, _style_price_levels_table,
-                _earnings_calendar_column_config, _style_earnings_next_highlight,
+                _fragment_technical_zone, _fragment_rolling_edge_capture, _df_price_levels,
+                _earnings_calendar_column_config,
                 _PRICE_LEVEL_COLUMN_CONFIG, _options_scan_dataframe,
-                _options_scan_column_config, _style_propdesk_highlight,
+                _options_scan_column_config,
                 _persist_overlay_prefs,
+                streamlit_df_widget_key,
             )
 
             from modules.css import _CSS, _MINI_MODE_DENSITY_CSS, inject_css_and_navbar
@@ -1211,6 +1212,8 @@ def main():
                                 use_container_width=True,
                                 hide_index=True,
                                 key=f"qe_pillars_inst_{ticker}_{len(_pillars)}",
+                                on_select="ignore",
+                                selection_mode=[],
                                 column_config={"Score": st.column_config.NumberColumn("Score", format="%.1f")},
                             )
                         else:
@@ -1237,6 +1240,8 @@ def main():
                                     use_container_width=True,
                                     hide_index=True,
                                     key=f"qe_pillars_retail_{ticker}",
+                                    on_select="ignore",
+                                    selection_mode=[],
                                     column_config={"Score": st.column_config.NumberColumn(format="%.1f")},
                                 )
                             with pc2:
@@ -1246,6 +1251,8 @@ def main():
                                     use_container_width=True,
                                     hide_index=True,
                                     key=f"qe_pillars_qfb_{ticker}",
+                                    on_select="ignore",
+                                    selection_mode=[],
                                     column_config={"Score": st.column_config.NumberColumn(format="%.1f")},
                                 )
                     with st.expander("⏳ Time-Machine Backtester (Historical Edge)", expanded=False):
@@ -1351,11 +1358,13 @@ def main():
                     fl = TA.fib_retracement(rec["High"].max(), rec["Low"].min())
                     _fib_df = _df_price_levels(fl, price)
                     st.dataframe(
-                        _style_price_levels_table(_fib_df, mode="fib", spot=price),
+                        _fib_df,
                         column_config=_PRICE_LEVEL_COLUMN_CONFIG,
                         use_container_width=True,
                         hide_index=True,
-                        key=f"cf_fib_levels_{ticker}_{len(_fib_df)}",
+                        key=streamlit_df_widget_key(f"cf_fib_{ticker}", _fib_df),
+                        on_select="ignore",
+                        selection_mode=[],
                     )
                 _explain("What are Fibonacci levels?",
                     "After a big move, stocks tend to pull back to specific levels before continuing. The key levels are 38.2%, 50%, and 61.8%. "
@@ -1365,11 +1374,13 @@ def main():
                     gl = TA.gann_sq9(price)
                     _gann_df = _df_price_levels(gl, price)
                     st.dataframe(
-                        _style_price_levels_table(_gann_df, mode="gann", spot=price),
+                        _gann_df,
                         column_config=_PRICE_LEVEL_COLUMN_CONFIG,
                         use_container_width=True,
                         hide_index=True,
-                        key=f"cf_gann_levels_{ticker}_{len(_gann_df)}",
+                        key=streamlit_df_widget_key(f"cf_gann_{ticker}", _gann_df),
+                        on_select="ignore",
+                        selection_mode=[],
                     )
                 if st.checkbox("Gann Angles", key="exp_2"):
                     ang, sp = TA.gann_angles(df)
@@ -1595,7 +1606,10 @@ def main():
                                     _chain_mc,
                                     use_container_width=True,
                                     hide_index=True,
-                                    key=f"cf_opt_mc_chain_{sel_exp}_{_chain_mc.shape[0]}_{_chain_mc.shape[1]}",
+                                    height=min(520, 36 + min(len(_chain_mc), 100) * 28),
+                                    key=streamlit_df_widget_key(f"cf_opt_mc_{sel_exp}", _chain_mc),
+                                    on_select="ignore",
+                                    selection_mode=[],
                                     column_config={
                                         "Type": st.column_config.TextColumn("Type", width="small"),
                                         "Strike": st.column_config.NumberColumn("Strike", format="$%.2f"),
@@ -1639,11 +1653,13 @@ def main():
                             if st.checkbox("All CC strikes", key="exp_5"):
                                 _cc_df = _options_scan_dataframe(cc, put_table=False)
                                 st.dataframe(
-                                    _style_propdesk_highlight(_cc_df),
+                                    _cc_df,
                                     column_config=_options_scan_column_config(put_table=False),
                                     use_container_width=True,
                                     hide_index=True,
-                                    key=f"cf_cc_strikes_{sel_exp}_{len(_cc_df)}",
+                                    key=streamlit_df_widget_key(f"cf_cc_{sel_exp}", _cc_df),
+                                    on_select="ignore",
+                                    selection_mode=[],
                                 )
                         else:
                             st.info("No covered call strikes met pricing/liquidity checks in this snapshot. Try a nearby expiry or refresh.")
@@ -1669,11 +1685,13 @@ def main():
                             if st.checkbox("All CSP strikes", key="exp_6"):
                                 _csp_df = _options_scan_dataframe(csp, put_table=True)
                                 st.dataframe(
-                                    _style_propdesk_highlight(_csp_df),
+                                    _csp_df,
                                     column_config=_options_scan_column_config(put_table=True),
                                     use_container_width=True,
                                     hide_index=True,
-                                    key=f"cf_csp_strikes_{sel_exp}_{len(_csp_df)}",
+                                    key=streamlit_df_widget_key(f"cf_csp_{sel_exp}", _csp_df),
+                                    on_select="ignore",
+                                    selection_mode=[],
                                 )
                         else:
                             st.info("No put strikes met pricing/liquidity checks in this snapshot. Try a nearby expiry or refresh.")
@@ -2226,11 +2244,9 @@ def main():
                                 scanner_df,
                                 use_container_width=True,
                                 hide_index=True,
-                                key=(
-                                    "cf_scanner_tbl_"
-                                    f"{scanner_df.shape[0]}x{scanner_df.shape[1]}_"
-                                    f"{abs(hash(tuple(scanner_df['Ticker'].astype(str).tolist()))) % (10**9)}"
-                                ),
+                                key=streamlit_df_widget_key("cf_scanner_tbl", scanner_df),
+                                on_select="ignore",
+                                selection_mode=[],
                                 column_config={
                                     "Ticker": st.column_config.TextColumn("Ticker", width="small"),
                                     "Price": st.column_config.NumberColumn("Price", format="$%.2f"),
@@ -2310,6 +2326,8 @@ def main():
                             use_container_width=True,
                             hide_index=True,
                             key=f"cf_earn_fallback_{ticker}_{earnings_dt.strftime('%Y%m%d')}",
+                            on_select="ignore",
+                            selection_mode=[],
                         )
                     else:
                         _earn_empty = (
@@ -2326,13 +2344,15 @@ def main():
                             fetch_info.clear()
                             st.rerun()
                 else:
-                    st.caption("Rows are newest-first. The next on-calendar print (today or later) is highlighted.")
+                    st.caption("Rows are newest-first. Cross-check **Status** and dates with your broker.")
                     st.dataframe(
-                        _style_earnings_next_highlight(earn_cal_df, earn_highlight_idx),
+                        earn_cal_df.reset_index(drop=True),
                         column_config=_earnings_calendar_column_config(),
                         use_container_width=True,
                         hide_index=True,
-                        key=f"cf_earn_cal_{ticker}_{earn_cal_df.shape[0]}_{earn_cal_df.shape[1]}",
+                        key=streamlit_df_widget_key(f"cf_earn_cal_{ticker}", earn_cal_df),
+                        on_select="ignore",
+                        selection_mode=[],
                     )
 
             with st.expander("Quick Reference Guide", expanded=False):

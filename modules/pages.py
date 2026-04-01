@@ -38,10 +38,8 @@ from .ui_helpers import (
     _iv_rank_qualitative_words, _iv_rank_pill_html,
     _explain, _section, _mini_sparkline, _glance_sparkline_svg,
     _glance_metric_card, _render_html_block, _parse_watchlist_string,
-    _fragment_technical_zone, _df_price_levels, _style_price_levels_table,
-    _earnings_calendar_column_config, _style_earnings_next_highlight,
-    _PRICE_LEVEL_COLUMN_CONFIG, _options_scan_dataframe,
-    _options_scan_column_config, _style_propdesk_highlight,
+    _fragment_technical_zone, _df_price_levels,
+    _earnings_calendar_column_config,
     _persist_overlay_prefs,
 )
 import plotly.graph_objects as go

@@ -2,6 +2,7 @@
 UI helpers: reusable components, sparklines, glance cards, section dividers,
 DataFrame presentation, and the Technical Zone st.fragment.
 """
+import hashlib
 import streamlit as st
 import html as _html_mod
 import pandas as pd
@@ -21,6 +22,34 @@ from .options import (
 from .data import compute_iv_rank_proxy
 from .chart import build_chart
 from .config import save_config, load_config, _overlay_prefs_from_session, _persist_overlay_prefs
+
+
+def streamlit_df_widget_key(prefix: str, data) -> str:
+    """Element key for ``st.dataframe`` that tracks content shape + checksum.
+
+    Avoids Streamlit frontend ``setIn`` crashes when row counts or cell values change between
+    reruns (especially with ``column_config``). Do not pass ``pandas.Styler`` here — use the
+    underlying ``DataFrame`` instead.
+    """
+    df = data
+    try:
+        if hasattr(data, "data") and not isinstance(data, pd.DataFrame):
+            df = data.data
+    except Exception:
+        df = data
+    if df is None:
+        return f"{prefix}_none"
+    if not isinstance(df, pd.DataFrame):
+        return f"{prefix}_other"
+    if df.empty:
+        return f"{prefix}_empty"
+    try:
+        blob = df.reset_index(drop=True).astype(str).to_csv(index=False).encode("utf-8", errors="replace")
+        digest = hashlib.sha256(blob).hexdigest()[:16]
+    except Exception:
+        digest = "err"
+    return f"{prefix}_{df.shape[0]}x{df.shape[1]}_{digest}"
+
 
 def render_mode_badge(use_quant: bool):
     """Renders a sleek, non-intrusive badge indicating the active mathematical engine."""
@@ -532,7 +561,9 @@ def _fragment_rolling_edge_capture():
         df_log,
         use_container_width=True,
         hide_index=True,
-        key=f"cf_edge_log_{df_log.shape[0]}_{df_log.shape[1]}",
+        key=streamlit_df_widget_key("cf_edge_log", df_log),
+        on_select="ignore",
+        selection_mode=[],
         column_config={
             "Time": st.column_config.TextColumn("Time"),
             "Ticker": st.column_config.TextColumn("Ticker", width="small"),
