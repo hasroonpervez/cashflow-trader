@@ -464,14 +464,21 @@ def quant_trailing_exit(df, atr_multiplier=3.0):
     return max(0.0, high_22 - (atr_multiplier * atr_22))
 
 
-@st.cache_data(ttl=300)
+# Only scan the last N daily bars for diamonds (each bar runs full confluence on a growing slice).
+_DIAMOND_SCAN_TAIL_BARS = 320
+
+
+@st.cache_data(ttl=300, show_spinner=False)
 def detect_diamonds(df, df_wk=None, lookback=None, use_quant=False):
     """Blue Diamond (strict): point-in-time **daily** confluence **crosses** to 7+ (was <7 prior bar),
     **daily structure BULLISH**, **weekly trend not BEARISH**, **volume ≥ 90% of 20-day volume SMA**,
     plus ATR blow-off guard inside the institutional filter.
 
     Pink Diamond: confluence collapse (≤3 after ≥5) **or** RSI > 75 with fading score;
-    weekly bias can be **BULLISH** too (take-profit / de-risk in extended runs)."""
+    weekly bias can be **BULLISH** too (take-profit / de-risk in extended runs).
+
+    ``lookback`` is reserved for future use (unused). Scan window is capped to the last
+    ``_DIAMOND_SCAN_TAIL_BARS`` rows so long histories stay responsive."""
     diamonds = []
     n = len(df)
     if n < 55:
@@ -485,12 +492,16 @@ def detect_diamonds(df, df_wk=None, lookback=None, use_quant=False):
 
     # First index where slice has 55 rows (need stable Ichimoku / gold / structure).
     start = 54
+    scan_start = max(start, n - _DIAMOND_SCAN_TAIL_BARS)
     prev_score = 0
+    if scan_start > start:
+        _psc, _, _, _ = _calc_confluence_points_core(df.iloc[:scan_start], df_wk, None)
+        prev_score = int(_psc)
 
-    for i in range(start, n):
+    for i in range(scan_start, n):
         sub = df.iloc[: i + 1]
-        sc, _, _, _ = _calc_confluence_points_core(sub, df_wk, None)
-        struct_i, _, _ = TA.market_structure(sub)
+        sc, _, bd, _ = _calc_confluence_points_core(sub, df_wk, None)
+        struct_i = (bd.get("Structure") or {}).get("detail", "RANGING")
 
         rsi_i = float(rsi_series.iloc[i]) if not pd.isna(rsi_series.iloc[i]) else 50.0
         pi = float(df["Close"].iloc[i])
@@ -507,21 +518,18 @@ def detect_diamonds(df, df_wk=None, lookback=None, use_quant=False):
         size_suggestion = 0
         quant_exit_price = 0.0
 
-        if use_quant:
+        # HMM / quant sizing is expensive — run only when retail already says blue (was: every bar × O(n) HMM).
+        if use_quant and is_blue_diamond:
             try:
                 from .sentiment import QuantSentiment
                 regime_probs = QuantSentiment.regime_detection(sub)
-                # State 0 is treated as lower-volatility / safer regime.
                 safe_regime_prob = float(regime_probs.get(0, 0.5))
-                if is_blue_diamond and safe_regime_prob < 0.75:
-                    # Veto retail signal in hostile volatility regime.
+                if safe_regime_prob < 0.75:
                     is_blue_diamond = False
-
                 if is_blue_diamond:
                     size_suggestion = optimal_pyramid_size(sub)
                     quant_exit_price = quant_trailing_exit(sub)
             except Exception:
-                # Keep behavior robust: quant path must not break baseline engine.
                 size_suggestion = 0
                 quant_exit_price = 0.0
 
