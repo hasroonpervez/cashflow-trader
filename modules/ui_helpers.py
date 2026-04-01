@@ -5,6 +5,7 @@ DataFrame presentation, and the Technical Zone st.fragment.
 import hashlib
 import inspect
 import re
+from typing import Optional
 import streamlit as st
 import html as _html_mod
 import pandas as pd
@@ -15,10 +16,12 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 from .ta import TA
-from .data import _PLOTLY_UI_CONFIG, compute_iv_rank_proxy, fetch_news_headlines
+from .data import _PLOTLY_UI_CONFIG, compute_iv_rank_proxy, fetch_news_headlines, fetch_stock
 from .sentiment import Sentiment
 from .options import (
     Opt,
+    bs_greeks,
+    bs_price,
     calc_gold_zone, calc_confluence_points, detect_diamonds,
     latest_diamond_status, diamond_win_rate,
     scan_watchlist_edge_rows, quant_edge_status_line,
@@ -92,6 +95,79 @@ def render_mode_badge(use_quant: bool):
             "border: 1px solid #334155;'>📊 RETAIL MODE</span>"
         )
     st.markdown(badge_html, unsafe_allow_html=True)
+
+
+def sentinel_ledger_metrics(ledger: list, rfr: float = 0.045) -> dict:
+    """Aggregate Δ, daily Θ income, and mark-to-model unrealized P&L for tracked short-premium legs."""
+    empty = {"total_delta": 0.0, "total_theta_day": 0.0, "unrealized_pnl": 0.0}
+    if not ledger:
+        return empty
+    total_delta = 0.0
+    total_theta = 0.0
+    unrealized = 0.0
+    today = datetime.now().date()
+    cache_spot = {}
+
+    def _spot(sym: str) -> Optional[float]:
+        if sym in cache_spot:
+            return cache_spot[sym]
+        try:
+            df_s = fetch_stock(sym, "3mo", "1d")
+            if df_s is not None and not df_s.empty and "Close" in df_s.columns:
+                v = float(pd.to_numeric(df_s["Close"], errors="coerce").iloc[-1])
+                cache_spot[sym] = v if np.isfinite(v) else None
+            else:
+                cache_spot[sym] = None
+        except Exception:
+            cache_spot[sym] = None
+        return cache_spot[sym]
+
+    for row in ledger:
+        if not isinstance(row, dict):
+            continue
+        sym = str(row.get("ticker", "")).strip().upper()
+        if not sym:
+            continue
+        spot = _spot(sym)
+        if spot is None or spot <= 0:
+            continue
+        strike = float(row.get("strike", 0) or 0)
+        if strike <= 0:
+            continue
+        contracts = int(row.get("contracts", 1) or 1)
+        prem_100 = float(row.get("premium_100", 0) or 0)
+        iv_pct = float(row.get("iv", 30) or 30)
+        iv = max(iv_pct / 100.0, 0.001)
+        opt_type = str(row.get("option_type", "put")).lower().strip()
+        if opt_type not in ("call", "put"):
+            opt_type = "put"
+        exp_s = row.get("expiry")
+        dte = 0
+        try:
+            if exp_s:
+                exp_d = datetime.strptime(str(exp_s)[:10], "%Y-%m-%d").date()
+                dte = max(0, (exp_d - today).days)
+        except Exception:
+            dte = int(row.get("dte_at_entry", 30) or 30)
+        T = max(dte, 1) / 365.0
+        try:
+            g = bs_greeks(spot, strike, T, float(rfr), iv, opt_type)
+            mark = float(bs_price(spot, strike, T, float(rfr), iv, opt_type))
+        except Exception:
+            continue
+        mult = 100 * max(1, contracts)
+        # Short option: position delta = −Δ_option × multiplier
+        total_delta -= float(g.get("delta", 0)) * mult
+        # Long-option theta from BS is negative; short collects +|theta| × multiplier
+        total_theta -= float(g.get("theta", 0)) * mult
+        prem_share = prem_100 / 100.0
+        unrealized += (prem_share - mark) * mult
+
+    return {
+        "total_delta": round(total_delta, 2),
+        "total_theta_day": round(total_theta, 2),
+        "unrealized_pnl": round(unrealized, 2),
+    }
 
 
 def _theta_gamma_desk_line(theta_gamma_ratio):
@@ -1100,7 +1176,7 @@ def _options_scan_column_config(*, put_table: bool):
         "MC PoP %": st.column_config.NumberColumn(
             "MC PoP %",
             format="%.1f%%",
-            help="10k antithetic simulations — v19 Dark Pool & News Bias Mode",
+            help="10k antithetic simulations — v20.0 Portfolio Intelligence",
         ),
         "Vol": st.column_config.NumberColumn("Volume", format="%.0f"),
         "OI": st.column_config.NumberColumn("OI", format="%.0f"),

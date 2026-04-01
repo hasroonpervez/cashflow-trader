@@ -1,6 +1,6 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  CASHFLOW COMMAND CENTER v19 FREE EDITION · Z-SCORE & NLP SIGNALS         ║
+║  CASHFLOW COMMAND CENTER v20.0 FREE EDITION · PORTFOLIO INTELLIGENCE      ║
 ║  Modular architecture: same UI, same logic, clean separation.           ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 """
@@ -16,7 +16,7 @@ if _app_root not in sys.path:
 import streamlit as st
 
 st.set_page_config(
-    page_title="CashFlow Command Center v19",
+    page_title="CashFlow Command Center v20.0",
     page_icon="💰",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -53,11 +53,10 @@ footer,
 import html as _html_mod
 import pandas as pd
 import numpy as np
-from concurrent.futures import as_completed
 from datetime import datetime, timedelta
 import plotly.graph_objects as go
 import plotly.express as px
-import math, warnings, json, time, os
+import math, warnings, json, time, os, re
 import textwrap
 from pathlib import Path
 warnings.filterwarnings("ignore")
@@ -68,6 +67,8 @@ if "bt_thresh" not in st.session_state:
     st.session_state.bt_thresh = 70
 if "bt_hold" not in st.session_state:
     st.session_state.bt_hold = 5
+if "_cf_ledger" not in st.session_state:
+    st.session_state["_cf_ledger"] = []
 
 # ── Module imports: serialize + retry on KeyError (Streamlit watcher vs import race; see streamlit#6404)
 _modules_import_lock = threading.Lock()
@@ -75,7 +76,6 @@ _IMPORT_KEYERROR_RETRIES = 5
 for _import_try in range(_IMPORT_KEYERROR_RETRIES):
     try:
         with _modules_import_lock:
-            from modules.streamlit_threading import make_script_ctx_pool, submit_with_script_ctx
             from modules.config import (
                 load_config, save_config, DEFAULT_CONFIG, CONFIG_PATH,
                 _hydrate_sidebar_prefs, _overlay_prefs_from_session,
@@ -97,6 +97,7 @@ for _import_try in range(_IMPORT_KEYERROR_RETRIES):
                 calc_confluence_points, detect_diamonds, latest_diamond_status,
                 diamond_win_rate, scan_single_ticker, Opt, calc_skew_regime, PortfolioRisk,
                 build_chain_mc_dataframe,
+                watchlist_correlation_matrix_cached,
             )
             from modules.sentiment import Sentiment, Backtest, Alerts, run_cc_sim_cached, QuantBacktest
             from modules.chart import build_chart, _chart_hoverlabel, build_skew_chart, build_correlation_heatmap
@@ -104,6 +105,7 @@ for _import_try in range(_IMPORT_KEYERROR_RETRIES):
                 _factor_checklist_labels, _confluence_why_trade_plain,
                 _iv_rank_qualitative_words, _iv_rank_pill_html,
                 render_mode_badge,
+                sentinel_ledger_metrics,
                 _explain, _section, _mini_sparkline, _glance_sparkline_svg,
                 _glance_metric_card, _render_html_block, _parse_watchlist_string,
                 walk_up_limit_sell_per_share,
@@ -156,7 +158,7 @@ def main():
 
     # ── Watchlist editor (must run before Mission Control so sb_scanner is committed same run)
     _wl_expanded = bool(st.session_state.pop("_open_watchlist_editor", False))
-    st.caption("Institutional Flow Tracking & NLP Sentiment Architecture.")
+    st.caption("Institutional Portfolio Optimization, Multi-Factor Risk, & Sentinel Ledger Architecture.")
     def _persist_watchlist_text_callback():
         raw = st.session_state.get("sb_scanner", "")
         w = _parse_watchlist_string(raw)
@@ -530,7 +532,7 @@ def main():
         "<div style='margin:2px 0 10px 0'>"
         "<span style='font-size:0.72rem;color:#c4b5fd;padding:3px 10px;border-radius:6px;"
         "border:1px solid rgba(139,92,246,0.45);background:rgba(76,29,149,0.22);font-weight:600;letter-spacing:0.04em'>"
-        "v19</span></div>",
+        "v20.0 · PORTFOLIO INTELLIGENCE</span></div>",
         unsafe_allow_html=True,
     )
     qs_color = ctx.qs_color; qs_status = ctx.qs_status
@@ -571,6 +573,21 @@ def main():
         _risk_closes_df = pd.DataFrame()
         _portfolio_lr_df = pd.DataFrame()
         _simple_corr_mult = 1.0
+
+    try:
+        if len(_risk_closes_df.columns) >= 2:
+            _cm_cached = watchlist_correlation_matrix_cached(_risk_closes_df)
+            if _cm_cached is not None and not _cm_cached.empty:
+                with st.expander("Portfolio Risk", expanded=False):
+                    st.caption(
+                        "90-day Pearson correlation on log-returns (inner-joined dates). "
+                        "Matrix refreshes at most once per hour while you interact with the desk."
+                    )
+                    _heat_main = build_correlation_heatmap(_cm_cached)
+                    if _heat_main is not None:
+                        st.plotly_chart(_heat_main, use_container_width=True, config=_PLOTLY_UI_CONFIG)
+    except Exception:
+        pass
 
     # HEADER: Live Pulse
     last_update = datetime.now().strftime("%H:%M:%S")
@@ -1177,11 +1194,12 @@ def main():
     )
     chart_mood = "bull" if struct == "BULLISH" else ("bear" if struct == "BEARISH" else "neutral")
 
-    dash_tab_setup, dash_tab_cashflow, dash_tab_intel = st.tabs(
+    dash_tab_setup, dash_tab_cashflow, dash_tab_intel, dash_tab_ledger = st.tabs(
         [
             "Setup & quant",
             "Cashflow & strikes",
             "Risk, scanner & intel",
+            "📊 Sentinel Ledger",
         ]
     )
 
@@ -1745,7 +1763,7 @@ def main():
                                         "MC PoP %": st.column_config.NumberColumn(
                                             "MC PoP %",
                                             format="%.1f%%",
-                                            help="10k antithetic simulations — v19 Dark Pool & News Bias Mode",
+                                            help="10k antithetic simulations — v20.0 Portfolio Intelligence",
                                         ),
                                     },
                                 )
@@ -1775,6 +1793,23 @@ def main():
                                 except (TypeError, ValueError):
                                     pass
                             st.markdown(f"<div class='sb'>{opt_html}<strong>SELL {nc_s}x ${b['strike']:.0f}C @ ${b['mid']:.2f}</strong><br><span style='font-size:.85rem;color:#94a3b8'>Exp: {sel_exp} ({dte}DTE) | IV: {b['iv']:.1f}% | <strong style='color:{delta_color}'>\u0394 {b['delta']:.2f}</strong>{cc_mc_pop_txt}<br>Premium: <strong style='color:#10b981'>${b['prem_100'] * nc_s:,.0f}</strong> | OTM: {b['otm_pct']:.1f}% | Ann: {b['ann_yield']:.1f}% | OI: {b['oi']:,}</span>{_theta_gamma_desk_line(b.get('theta_gamma_ratio'))}</div>", unsafe_allow_html=True)
+                            _cc_track_key = re.sub(r"[^a-zA-Z0-9_]", "_", f"cf_track_cc_{sel_exp}_{b['strike']}")[:110]
+                            if st.button("Track Trade", key=_cc_track_key, help="Append this optimal covered-call line to the Sentinel Ledger (session only)."):
+                                st.session_state.setdefault("_cf_ledger", []).append(
+                                    {
+                                        "ticker": str(ticker).upper(),
+                                        "strike": float(b["strike"]),
+                                        "premium_100": float(b["prem_100"]),
+                                        "entry_date": datetime.now().strftime("%Y-%m-%d"),
+                                        "leg": "CC",
+                                        "option_type": "call",
+                                        "iv": float(b.get("iv") or 0),
+                                        "expiry": str(sel_exp)[:10],
+                                        "dte_at_entry": int(dte),
+                                        "contracts": int(nc_s),
+                                    }
+                                )
+                                st.rerun()
                             if st.checkbox("All CC strikes", key="exp_5"):
                                 _cc_df = _options_scan_dataframe(cc, put_table=False)
                                 streamlit_show_dataframe(
@@ -1807,6 +1842,23 @@ def main():
                                 except (TypeError, ValueError):
                                     pass
                             st.markdown(f"<div class='sb'>{opt_html_p}<strong>SELL 1x ${b['strike']:.0f}P @ ${b['mid']:.2f}</strong><br><span style='font-size:.85rem;color:#94a3b8'>Exp: {sel_exp} ({dte}DTE) | IV: {b['iv']:.1f}% | <strong style='color:{delta_color_p}'>\u0394 {b['delta']:.2f}</strong>{csp_mc_pop_txt}<br>Premium: <strong style='color:#10b981'>${b['prem_100']:,.0f}</strong> | OTM: {b['otm_pct']:.1f}% | Eff buy: ${b['eff_buy']:.2f} | OI: {b['oi']:,}</span>{_theta_gamma_desk_line(b.get('theta_gamma_ratio'))}</div>", unsafe_allow_html=True)
+                            _csp_track_key = re.sub(r"[^a-zA-Z0-9_]", "_", f"cf_track_csp_{sel_exp}_{b['strike']}")[:110]
+                            if st.button("Track Trade", key=_csp_track_key, help="Append this optimal cash-secured put to the Sentinel Ledger (session only)."):
+                                st.session_state.setdefault("_cf_ledger", []).append(
+                                    {
+                                        "ticker": str(ticker).upper(),
+                                        "strike": float(b["strike"]),
+                                        "premium_100": float(b["prem_100"]),
+                                        "entry_date": datetime.now().strftime("%Y-%m-%d"),
+                                        "leg": "CSP",
+                                        "option_type": "put",
+                                        "iv": float(b.get("iv") or 0),
+                                        "expiry": str(sel_exp)[:10],
+                                        "dte_at_entry": int(dte),
+                                        "contracts": 1,
+                                    }
+                                )
+                                st.rerun()
                             if st.checkbox("All CSP strikes", key="exp_6"):
                                 _csp_df = _options_scan_dataframe(csp, put_table=True)
                                 streamlit_show_dataframe(
@@ -2225,7 +2277,9 @@ def main():
                             pass
                     closes_df = pd.DataFrame(closes_map).dropna(how="all")
                     log_returns_df = np.log(closes_df / closes_df.shift(1)).dropna()
-                    corr_matrix = PortfolioRisk.build_correlation_matrix(closes_df)
+                    corr_matrix = watchlist_correlation_matrix_cached(closes_df)
+                    if corr_matrix is None:
+                        corr_matrix = PortfolioRisk.build_correlation_matrix(closes_df)
                     overlap_map = {tkr: PortfolioRisk.get_overlap_score(corr_matrix, tkr) for tkr in watchlist_tickers}
                     haircut_map = {tkr: PortfolioRisk.calc_kelly_haircut(overlap_map.get(tkr, 0.0)) for tkr in watchlist_tickers}
                     corr_fig = build_correlation_heatmap(corr_matrix)
@@ -2235,42 +2289,34 @@ def main():
 
                     scanner_results = []
                     n_scan = len(watchlist_tickers)
-                    workers = min(8, n_scan)
                     scan_progress = st.progress(0)
-                    done_ct = 0
                     scan_failed = []
-                    # Submit all tickers to the pool queue; bounded workers drain tasks as they finish
-                    # (avoids 1:1 thread-per-ticker churn on small Cloud CPUs).
-                    with make_script_ctx_pool(workers) as pool:
-                        future_map = {}
-                        for tkr in watchlist_tickers:
-                            _simp = Opt._simple_corr_haircut(watchlist_tickers, tkr, log_returns_df)
-                            _comb = float(haircut_map.get(tkr, 1.0)) * float(_simp)
-                            fut = submit_with_script_ctx(
-                                pool,
-                                scan_single_ticker,
+                    peer_blues = set()
+                    for idx, tkr in enumerate(watchlist_tickers):
+                        scan_progress.progress((idx + 1) / n_scan, text=f"Scanning {tkr}… ({idx + 1}/{n_scan})")
+                        _simp = Opt._simple_corr_haircut(watchlist_tickers, tkr, log_returns_df)
+                        _comb = float(haircut_map.get(tkr, 1.0)) * float(_simp)
+                        try:
+                            overlap = overlap_map.get(tkr, 0.0)
+                            haircut = haircut_map.get(tkr, 1.0)
+                            result = scan_single_ticker(
                                 tkr,
                                 _comb,
+                                cluster_peers=frozenset(peer_blues),
+                                corr_matrix=corr_matrix,
                             )
-                            future_map[fut] = tkr
-                        for fut in as_completed(future_map):
-                            done_ct += 1
-                            tkr = future_map[fut]
-                            scan_progress.progress(done_ct / n_scan, text=f"Scanning {tkr}… ({done_ct}/{n_scan})")
-                            try:
-                                overlap = overlap_map.get(tkr, 0.0)
-                                haircut = haircut_map.get(tkr, 1.0)
-                                result = fut.result()
-                                if result:
-                                    result["overlap"] = overlap
-                                    result["haircut"] = haircut
-                                    result["risk_multiplier"] = float(
-                                        Opt._simple_corr_haircut(watchlist_tickers, tkr, log_returns_df)
-                                    )
-                                    result["Adj. Kelly %"] = float(result.get("kelly_half", 0.0))
-                                    scanner_results.append(result)
-                            except Exception as e:
-                                scan_failed.append((tkr, type(e).__name__))
+                            if result:
+                                result["overlap"] = overlap
+                                result["haircut"] = haircut
+                                result["risk_multiplier"] = float(
+                                    Opt._simple_corr_haircut(watchlist_tickers, tkr, log_returns_df)
+                                )
+                                result["Adj. Kelly %"] = float(result.get("kelly_half", 0.0))
+                                scanner_results.append(result)
+                                if "BLUE" in str(result.get("d_status", "")):
+                                    peer_blues.add(tkr)
+                        except Exception as e:
+                            scan_failed.append((tkr, type(e).__name__))
                     scan_progress.empty()
                     if scan_failed:
                         failed_line = ", ".join(f"{_html_mod.escape(t)} ({err})" for t, err in scan_failed[:12])
@@ -2283,6 +2329,37 @@ def main():
                         else:
                             order = {t: i for i, t in enumerate(watchlist_tickers)}
                             scanner_results.sort(key=lambda x: order.get(x["ticker"], 10_000))
+
+                        _blues_alloc = [r for r in scanner_results if "BLUE" in str(r.get("d_status", ""))]
+                        if _blues_alloc:
+                            _alloc_rows = Opt.portfolio_allocation(
+                                [
+                                    {
+                                        "ticker": r["ticker"],
+                                        "quant_edge": float(r["qs"]),
+                                        "mc_pop_pct": float(r.get("scanner_mc_pop") or 0),
+                                        "premium_per_contract": float(r.get("reference_prem_100") or 1),
+                                    }
+                                    for r in _blues_alloc
+                                ],
+                                total_capital=50000,
+                                watchlist_tickers=watchlist_tickers,
+                                log_returns_df=log_returns_df,
+                            )
+                            if _alloc_rows:
+                                with st.expander("$50k Kelly-style mix (Blue Diamonds only)", expanded=False):
+                                    st.caption(
+                                        "Weights scale with Quant Edge × MC PoP %; each name’s notional is scaled by `_simple_corr_haircut` vs the watchlist."
+                                    )
+                                    _adf = pd.DataFrame(_alloc_rows)
+                                    streamlit_show_dataframe(
+                                        _adf,
+                                        use_container_width=True,
+                                        hide_index=True,
+                                        key=streamlit_df_widget_key("cf_portfolio_alloc", _adf),
+                                        on_select="ignore",
+                                        selection_mode=[],
+                                    )
 
                         for r in scanner_results:
                             pc = "#10b981" if r["chg_pct"] >= 0 else "#ef4444"
@@ -2535,6 +2612,38 @@ def main():
                     with ec2:
                         if i + 1 < len(edu):
                             st.markdown(f"<div class='edu-card'><strong style='font-size:.82rem;letter-spacing:.01em'>{edu[i + 1][0]}</strong><div style='color:#9fb0c7;font-size:.76rem;margin-top:5px;line-height:1.38'>{edu[i + 1][1]}</div></div>", unsafe_allow_html=True)
+
+    with dash_tab_ledger:
+            st.markdown('<div id="sentinel-ledger" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
+            _section(
+                "📊 Sentinel Ledger",
+                "Session-based simulated trade log: track desk strikes, then read portfolio-level Greeks and mark-to-model P&L.",
+                tip_plain="This is not a broker blotter. Rows are what you explicitly track from Cash Flow Strategies; metrics use Black–Scholes marks vs entry premium.",
+            )
+            _led = st.session_state.get("_cf_ledger") or []
+            if not _led:
+                st.info("No tracked trades yet. Use **Track Trade** on the optimal Covered Call or Cash Secured Put card in **Cashflow & strikes**.")
+            else:
+                _ldf = pd.DataFrame(_led)
+                streamlit_show_dataframe(
+                    _ldf,
+                    use_container_width=True,
+                    hide_index=True,
+                    key=streamlit_df_widget_key("cf_sentinel_ledger", _ldf),
+                    on_select="ignore",
+                    selection_mode=[],
+                )
+                _m = sentinel_ledger_metrics(_led, rfr=float(rfr))
+                m1, m2, m3 = st.columns(3)
+                with m1:
+                    st.metric("Total portfolio Δ (equiv. shares)", f"{_m['total_delta']:,.2f}")
+                with m2:
+                    st.metric("Total Θ / day (desk income)", f"${_m['total_theta_day']:,.2f}")
+                with m3:
+                    st.metric("Unrealized P&L (model)", f"${_m['unrealized_pnl']:,.2f}")
+            if st.button("Clear Sentinel Ledger", key="cf_ledger_clear"):
+                st.session_state["_cf_ledger"] = []
+                st.rerun()
 
 
 if __name__ == "__main__":

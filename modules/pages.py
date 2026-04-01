@@ -223,6 +223,7 @@ def build_context(ticker: str, cfg: dict) -> Optional[DashContext]:
         use_quant=bool(ctx.cfg.get("use_quant_models", DEFAULT_CONFIG["use_quant_models"])),
         gamma_flip_price=ctx.gamma_flip,
         gold_zone_price=ctx.gold_zone_price,
+        ticker_symbol=ctx.ticker,
     )
     ctx.latest_d = latest_diamond_status(ctx.diamonds)
     ctx.d_wr, ctx.d_avg, ctx.d_n = diamond_win_rate(df, ctx.diamonds, forward_bars=10)

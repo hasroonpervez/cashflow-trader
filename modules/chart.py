@@ -767,7 +767,7 @@ def build_skew_chart(opts_df, spot_price):
 
 
 def build_correlation_heatmap(corr_matrix):
-    """Renders a Plotly heatmap for the correlation matrix."""
+    """Renders a Plotly heatmap for the correlation matrix (RdBu_r: hot = positive ρ)."""
     import plotly.express as px
 
     if corr_matrix is None or corr_matrix.empty:
@@ -777,13 +777,13 @@ def build_correlation_heatmap(corr_matrix):
         corr_matrix,
         text_auto=".2f",
         aspect="auto",
-        color_continuous_scale="RdYlGn_r",
+        color_continuous_scale="RdBu_r",
         zmin=-1,
         zmax=1,
     )
     fig.update_layout(
         title=dict(
-            text="Portfolio Correlation Matrix (Fake Diversification Radar)",
+            text="Watchlist correlation (90D log-returns, Pearson)",
             font=dict(size=14, color="#e2e8f0"),
         ),
         template="plotly_dark",

@@ -329,3 +329,41 @@ class TA:
         H = slope / 2.0
         return round(float(np.clip(H, 0, 1)), 3)
 
+    @staticmethod
+    def get_correlation_matrix(price_history_dict, lookback_days=90):
+        """Pearson correlation of log-returns across tickers (``lookback_days`` daily bars).
+
+        ``price_history_dict`` maps ticker → ``pd.Series`` of closes (DatetimeIndex) or
+        a DataFrame with a ``Close`` column. Series are aligned with ``join='inner'`` on
+        dates so mismatched lengths do not skew pairwise samples.
+        """
+        if not price_history_dict:
+            return pd.DataFrame()
+        series_list = []
+        for sym, data in price_history_dict.items():
+            if data is None:
+                continue
+            label = str(sym).strip().upper()
+            if not label:
+                continue
+            if isinstance(data, pd.Series):
+                s = pd.to_numeric(data, errors="coerce")
+            elif isinstance(data, pd.DataFrame) and "Close" in data.columns:
+                s = pd.to_numeric(data["Close"], errors="coerce")
+            else:
+                continue
+            if s is None or len(s) < 5:
+                continue
+            series_list.append(s.rename(label))
+        if len(series_list) < 2:
+            return pd.DataFrame()
+        wide = pd.concat(series_list, axis=1, join="inner")
+        if wide.empty or len(wide) < 5:
+            return pd.DataFrame()
+        lb = max(5, int(lookback_days))
+        wide = wide.tail(lb).dropna(how="all")
+        log_ret = np.log(wide / wide.shift(1)).dropna(how="any")
+        if log_ret.empty or len(log_ret) < 3:
+            return pd.DataFrame()
+        return log_ret.corr(method="pearson")
+

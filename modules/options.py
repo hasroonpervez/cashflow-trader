@@ -17,6 +17,24 @@ except ImportError:  # keep app usable if scipy is unavailable
 
 from .ta import TA
 from .data import fetch_stock, fetch_options, fetch_news_headlines
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def watchlist_correlation_matrix_cached(closes_wide: pd.DataFrame):
+    """One-hour memo of Pearson correlations on 90-day log-returns (inner-joined dates)."""
+    if closes_wide is None or getattr(closes_wide, "empty", True):
+        return None
+    try:
+        cols = [str(c).strip().upper() for c in closes_wide.columns]
+        work = closes_wide.copy()
+        work.columns = cols
+        d = {c: work[c] for c in work.columns}
+        mat = TA.get_correlation_matrix(d, lookback_days=90)
+        if mat is None or getattr(mat, "empty", True):
+            return None
+        return mat
+    except Exception:
+        return None
 from .sentiment import Sentiment
 from .streamlit_threading import make_script_ctx_pool, submit_with_script_ctx
 
@@ -645,6 +663,9 @@ def detect_diamonds(
     use_quant=False,
     gamma_flip_price=None,
     gold_zone_price=None,
+    ticker_symbol=None,
+    peer_diamond_symbols=None,
+    cluster_corr_matrix=None,
 ):
     """Blue Diamond (strict): point-in-time **daily** confluence **crosses** to 7+ (was <7 prior bar),
     **daily structure BULLISH**, **weekly trend not BEARISH**, **volume ≥ 90% of 20-day volume SMA**,
@@ -657,7 +678,11 @@ def detect_diamonds(
     if price is above the flip and Gold Zone sits below it, and **−3** if price is below the flip.
 
     ``lookback`` is reserved for future use (unused). Scan window is capped to the last
-    ``_DIAMOND_SCAN_TAIL_BARS`` rows so long histories stay responsive."""
+    ``_DIAMOND_SCAN_TAIL_BARS`` rows so long histories stay responsive.
+
+    Optional **cluster guard** (watchlist path): when ``ticker_symbol``, ``cluster_corr_matrix``,
+    and ``peer_diamond_symbols`` are set, any Blue diamond whose Pearson ρ vs an already-flagged
+    peer exceeds **0.75** takes **−2** on composite score (single −2 per signal bar, not stacked)."""
     diamonds = []
     n = len(df)
     if n < 55:
@@ -768,11 +793,30 @@ def detect_diamonds(
                             gex_adj -= 3
             except (TypeError, ValueError):
                 pass
+            cluster_penalty = 0
+            try:
+                if cluster_corr_matrix is not None and ticker_symbol:
+                    tsym = str(ticker_symbol).strip().upper()
+                    peers = peer_diamond_symbols or set()
+                    if tsym and peers:
+                        for p in peers:
+                            pu = str(p).strip().upper()
+                            if not pu or pu == tsym:
+                                continue
+                            cmat = cluster_corr_matrix
+                            if hasattr(cmat, "index") and hasattr(cmat, "columns"):
+                                if tsym in cmat.index and pu in cmat.columns:
+                                    rho = float(cmat.loc[tsym, pu])
+                                    if np.isfinite(rho) and rho > 0.75:
+                                        cluster_penalty = -2
+                                        break
+            except Exception:
+                cluster_penalty = 0
             diamonds.append({
                 "date": df.index[i],
                 "price": pi,
                 "type": "blue",
-                "score": sc + magnet + gex_adj + whale_bonus,
+                "score": sc + magnet + gex_adj + whale_bonus + cluster_penalty,
                 "rsi": rsi_i,
                 "weekly": wk_bias,
                 "suggested_shares": size_suggestion,
@@ -838,7 +882,7 @@ def latest_diamond_status(diamonds):
 
 
 
-def scan_single_ticker(tkr, correlation_haircut=1.0):
+def scan_single_ticker(tkr, correlation_haircut=1.0, cluster_peers=None, corr_matrix=None):
     """Fetch data and compute all scores for a single ticker (for the scanner)."""
     try:
         df = fetch_stock(tkr, "1y", "1d")
@@ -880,11 +924,15 @@ def scan_single_ticker(tkr, correlation_haircut=1.0):
 
         gold_zone, gz_comp = calc_gold_zone(df, df_wk, gamma_flip_price=gamma_flip_sc)
         cp_score, cp_max, cp_bd, _ = calc_confluence_points(df, df_wk, None, gold_zone_price=gold_zone)
+        _peers = frozenset(cluster_peers) if cluster_peers else None
         diamonds = detect_diamonds(
             df,
             df_wk,
             gamma_flip_price=gamma_flip_sc,
             gold_zone_price=gold_zone,
+            ticker_symbol=tkr,
+            peer_diamond_symbols=_peers,
+            cluster_corr_matrix=corr_matrix,
         )
         latest_d = latest_diamond_status(diamonds)
         dist_gz = (price / gold_zone - 1) * 100 if gold_zone else 0
@@ -1015,6 +1063,7 @@ def scan_single_ticker(tkr, correlation_haircut=1.0):
             "GEX Regime": gex_regime,
             "Flow / Bias": flow_bias,
             "news_bias_score": news_bias_score,
+            "reference_prem_100": float(prem_scan),
         }
     except Exception:
         return None
@@ -1135,6 +1184,58 @@ class Opt:
                 return 0.0 if sz <= 1 else np.zeros_like(np.asarray(price, dtype=float))
             except Exception:
                 return 0.0
+
+    @staticmethod
+    def portfolio_allocation(
+        diamond_list,
+        total_capital=50000,
+        watchlist_tickers=None,
+        log_returns_df=None,
+    ):
+        """Size capital across scanner ``diamond`` rows: weight ∝ (Quant Edge × MC PoP %), then
+        ``_simple_corr_haircut`` on each line’s notional."""
+        if not diamond_list:
+            return []
+        wl = list(watchlist_tickers or [])
+        rows_in = []
+        for d in diamond_list:
+            if not isinstance(d, dict):
+                continue
+            tkr = str(d.get("ticker", "")).strip().upper()
+            qs = float(d.get("quant_edge", d.get("qs", 0)) or 0)
+            pop = float(d.get("mc_pop_pct", d.get("scanner_mc_pop", 0)) or 0)
+            prem = float(d.get("premium_per_contract", d.get("reference_prem_100", 0)) or 0)
+            if prem <= 0:
+                prem = 1.0
+            w = max(0.0, qs) * max(0.0, pop) / 100.0
+            rows_in.append((tkr, w, prem, d))
+        if not rows_in:
+            return []
+        sw = sum(r[1] for r in rows_in)
+        if sw <= 0:
+            rows_in = [(r[0], 1.0, r[2], r[3]) for r in rows_in]
+            sw = float(len(rows_in))
+        out = []
+        cap = float(total_capital)
+        for tkr, wt, prem, _src in rows_in:
+            raw_frac = float(wt) / float(sw)
+            alloc_pre = raw_frac * cap
+            haircut = 1.0
+            if log_returns_df is not None and wl and tkr:
+                haircut = float(Opt._simple_corr_haircut(wl, tkr, log_returns_df))
+            alloc = max(0.0, alloc_pre * haircut)
+            n_contracts = int(alloc // max(prem, 1e-9))
+            out.append(
+                {
+                    "ticker": tkr,
+                    "weight_raw": round(raw_frac, 4),
+                    "correlation_haircut": round(haircut, 4),
+                    "capital_allocation": round(alloc, 2),
+                    "contracts": int(n_contracts),
+                    "premium_per_contract": round(prem, 2),
+                }
+            )
+        return out
 
     @staticmethod
     def _simple_corr_haircut(watchlist_tickers, symbol, returns_df):
@@ -1382,20 +1483,23 @@ def calc_skew_regime(opts_df, spot_price):
 
 class PortfolioRisk:
     @staticmethod
-    def build_correlation_matrix(closes_df, window=60):
+    def build_correlation_matrix(closes_df, window=90):
         """
-        Takes a DataFrame where columns are tickers and rows are daily closing prices.
-        Returns a rolling correlation matrix based on log returns.
+        Pearson correlation on **log-returns** over the last ``window`` **overlapping** daily bars.
+        Delegates to ``TA.get_correlation_matrix`` (inner-joined dates across tickers).
         """
-        if closes_df is None or closes_df.empty or len(closes_df) < window:
+        if closes_df is None or closes_df.empty:
             return None
-
-        # Institutional standard: use log returns for correlation, not absolute price.
-        log_returns = np.log(closes_df / closes_df.shift(1)).dropna()
-        recent_returns = log_returns.tail(window)
-        if recent_returns.empty:
+        try:
+            work = closes_df.copy()
+            work.columns = [str(c).strip().upper() for c in work.columns]
+            d = {c: work[c] for c in work.columns}
+            mat = TA.get_correlation_matrix(d, lookback_days=int(window))
+            if mat is None or getattr(mat, "empty", True):
+                return None
+            return mat
+        except Exception:
             return None
-        return recent_returns.corr()
 
     @staticmethod
     def get_overlap_score(corr_matrix, ticker):
