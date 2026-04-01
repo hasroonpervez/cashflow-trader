@@ -2,7 +2,9 @@
 
 **Single-screen options income desk that grew from a basic multi-ticker scanner into a portfolio-aware command center.**
 
-**v22.0** adds **predictive** layers on top of v21: **`Opt.predict_opex_pin`** (GEX gamma-wall + **Θ/Γ** magnetic blend), **`TA.get_shadow_move`** (70% whale-volume close band vs IV **Expected Move**, purple chart zone), **Bayesian-style news weighting** (forward **guidance / outlook / forecast** phrases outweigh trailing **beat / miss** in `Sentiment.analyze_news_bias`), and **Sentinel Ledger** columns **Dist. to pin %** + **Edge realization %** (Quant Edge vs `qs_at_entry`). **v21** adaptive stack (FFD correlation, adaptive whale Z, HVN GEX) remains. **Data: Yahoo Finance only.**
+**v22.0** adds **predictive** layers on top of v21: **`Opt.predict_opex_pin`** (GEX gamma-wall + **Θ/Γ** magnetic blend), **`TA.get_shadow_move`** (70% whale-volume close band vs IV **Expected Move**, purple chart zone), **Bayesian-style news weighting** (forward **guidance / outlook / forecast** phrases outweigh trailing **beat / miss** in `Sentiment.analyze_news_bias`), **Sentinel Ledger** columns **Dist. to pin %** + **Edge realization %** + **Pin maturity** (✨ **Golden zone**), and **regime calibration**: a **Shadow breakout** callout when spot **exits** the purple whale band but stays **inside** the IV **1σ** rails — an early liquidity-vs-options read. **v21** adaptive stack (FFD correlation, adaptive whale Z, HVN GEX) remains. **Data: Yahoo Finance only.**
+
+**In-app help:** open **Intel → Quick Reference Guide** for a plain-language glossary (synced with the concepts below).
 
 ---
 
@@ -28,12 +30,19 @@ The Market Scanner still ranks the watchlist, but v20+ treats the list as a **po
 - **`TA.get_shadow_move(df, volume_z_score=None, lookback=30, whale_mass=0.70)`** — Sorts whale bars (**Z > 2**) by close; **central 70%** of whale **volume** defines **`low` / `high`**. Chart compares band width to IV **1σ** rails (overlay copy: narrow → vol rich; wide → break risk).
 - **`Sentiment.analyze_news_bias`** — Sorted **phrase lexicon** (longest first), **forward** weight **1.45×** vs **trailing** **0.82×**, neutral **prior**, headline-level evidence then **`tanh`** aggregate (mixed “miss + raised guidance” tilts bullish when forward hits).
 - **Chart** — Purple **`hrect`** shadow band; pink dotted **OpEx pin** line; legend rows in overlay key.
-- **Sentinel Ledger** — **`qs_at_entry`** on **Track Trade**; table columns **Dist. to pin %**, **Edge realization %**; metric **Edge realization (avg)** for active-ticker rows.
+- **Sentinel Ledger** — **`qs_at_entry`** on **Track Trade**; snapshots **`dist_pin_pct_at_entry`** and **`theta_desk_day_entry`** (hidden columns) for calibration; table shows **Dist. to pin %**, **Edge realization %**, **Pin maturity**; metric **Edge realization (avg)** for active-ticker rows.
+- **Regime calibration** — **`_cf_regime_shadow_breakout`**: purple banner on the **Technical Chart** when spot is outside **`get_shadow_move`** but inside **`calc_expected_move`** (BLUF IV/DTE). **Pin maturity ✨ Golden zone** when **≤14 DTE**, **|Dist. to pin %|** shrinks vs entry, and desk **Θ/day** is **≥ ~102%** of entry (pin magnet + rising decay into expiry).
 - **UI** — Caption *Predictive Pinning, Bayesian News Nuance, & Shadow Liquidity Architecture.*; badge **v22.0 · PREDICTIVE ANALYTICS**.
 
 ### Pinning theory (GEX, Θ/Γ, and “magnets”)
 
 Dealers hedge option **gamma** by trading the underlying. Near **expiry**, net **GEX** often concentrates at strikes with heavy **open interest**, creating a **gamma wall**: price can be **pinned** as hedging flow absorbs impulse moves. The **flip** level (zero net GEX) marks where that behavior changes sign. **Theta / gamma** on short-premium structures measures **decay versus convexity** — when **Θ/Γ** is high, daily premium burn dominates localized gamma risk, and the model treats the **wall** as a **stronger attractor** (`predict_opex_pin` raises the weight on the wall strike). This is a **heuristic** desk overlay, not a guarantee of settlement at a strike.
+
+### Regime calibration (Shadow vs IV, pin maturity)
+
+- **Shadow move** — Where **whale bars** (volume **Z > 2**) traded in price: central **70%** of their **volume** defines the purple band. If that band is **narrower** than the IV **1σ** width, the overlay notes that **options may be overpricing** move risk; if **wider**, **break potential** vs implied vol.
+- **Shadow breakout** — If **spot** leaves the purple band but remains **between EM− and EM+**, the desk surfaces a **regime calibration** banner: **liquidity** already moved; **IV** has not fully repriced — useful for monitoring **trend continuation or reversal** before the broad tape catches up.
+- **Golden zone** (ledger) — As **DTE → 0**, pin estimates get sharper. The ledger flags **✨ Golden zone** when you are **close to expiry**, **distance to the predicted pin** is **shrinking** vs the snapshot at **Track Trade**, and **Θ/day** (desk short-leg income) has **expanded** vs entry — the intended “decay + magnet” window for tracked premium sales.
 
 ---
 
@@ -140,7 +149,8 @@ The dashboard answers one question: **"What should I do right now?"**
 - **Skew Regime Tag** — OTM put-IV/call-IV ratio classified as Crash Hedging, Bearish Skew, Balanced Smile, or Upside Mania
 - **Time-Machine Backtester** — vectorized 3y historical proxy with win rate, expectancy, Sharpe, max drawdown, and equity curve
 - **One-Click Backtest Presets** — Conservative, Balanced, and Aggressive slider snaps for instant scenario switching
-- **Options Math Stack** — Black-Scholes Greeks, Corrado-Su skew/kurtosis expansion, Expected Value, discrete/continuous Kelly sizing, Volatility Skew, **Expected Move (1-σ)**, **Θ/Γ**, **GEX / gamma flip**
+- **Options Math Stack** — Black-Scholes Greeks, Corrado-Su skew/kurtosis expansion, Expected Value, discrete/continuous Kelly sizing, Volatility Skew, **Expected Move (1-σ)**, **Θ/Γ**, **GEX / gamma flip**, **predicted OpEx pin**, **shadow move** vs EM
+- **Sentinel Ledger (v22+)** — **Track Trade** snapshots; **Dist. to pin %**, **Edge realization %**, **Pin maturity**; portfolio **Δ**, **Θ/day**, model **P&L**; **Shadow breakout** alert on the chart when conditions align
 - **Multi-Ticker Scanner** — ranks the watchlist by confluence and diamond status; **v20** uses a **sequential** pass with **cluster-aware** Blue scores; **PoP** = historical Diamond win rate; **EM Safety**; **GEX Regime**; **Flow / Bias**; optional **$50k allocator** expander for **Blue** rows
 - **Premium Simulator** — covered call backtest with honest disclaimers
 
@@ -164,8 +174,8 @@ cashflow-trader/
     ├── options.py            # Black-Scholes, Corrado-Su, EV, Kelly, Quant Edge, **GEX / gamma flip / `predict_opex_pin`**, Diamonds, **`Opt.portfolio_allocation`**, **`watchlist_correlation_matrix_cached`**, **MC PoP**, **`PortfolioRisk`**
     ├── sentiment.py          # **Bayesian-style `analyze_news_bias`**, HMM (FFD), CC sim, Alerts, QuantBacktest
     ├── chart.py              # Price / volume / RSI / MACD + **Shadow move (purple)** + **OpEx pin** + HVN / EM / gamma flip / correlation heatmap
-    ├── ui_helpers.py         # Sparklines, glance cards, fragments, mode badge, DataFrame styling, **`sentinel_ledger_metrics`**, **expected_move_safety_html**, **Θ/Γ desk line**
-    ├── pages.py              # Optional page shell + parallel context build (uses threading helper); **options → GEX → fused Gold → confluence → diamonds**
+    ├── ui_helpers.py         # Sparklines, fragments, **`sentinel_ledger_metrics`**, **`sentinel_ledger_table_rows`**, **`ledger_theta_desk_day`**, regime **Shadow breakout** banner, **expected_move_safety_html**, **Θ/Γ desk line**
+    ├── pages.py              # **`build_context`**: options → GEX → **OpEx pin map** → **shadow move** → **shadow breakout** flag → fused Gold → confluence → diamonds
     ├── streamlit_threading.py # Thread pools with ScriptRunContext re-attach per task
     └── css.py                # Full CSS theme + Mini Mode + sidebar toggle JS
 ```
