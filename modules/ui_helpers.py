@@ -912,9 +912,15 @@ def _fragment_technical_zone(
         recent_diamonds = [d for d in diamonds if (df.index[-1] - d["date"]).days <= 30]
         if recent_diamonds:
             st.markdown("#### Recent Diamond Signals")
-            d_cols = st.columns(min(len(recent_diamonds), 4))
-            for idx_d, d in enumerate(recent_diamonds[-4:]):
-                with d_cols[idx_d]:
+            _d_slot = recent_diamonds[-4:]
+            # Always four columns so reruns do not shrink/expand the column row (Streamlit setIn crashes).
+            d_cols = st.columns(4)
+            for j in range(4):
+                with d_cols[j]:
+                    if j >= len(_d_slot):
+                        st.empty()
+                        continue
+                    d = _d_slot[j]
                     cls = "diamond-blue" if d["type"] == "blue" else "diamond-pink"
                     icon = "🔷" if d["type"] == "blue" else "💎"
                     label = "BLUE DIAMOND: Strong Buy" if d["type"] == "blue" else "PINK DIAMOND: Take Profit"

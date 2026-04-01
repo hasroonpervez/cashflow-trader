@@ -436,13 +436,18 @@ def main():
         tape_i = 0
         for row_start in range(0, len(watch_items), _TAPE_CHUNK):
             row_tickers = watch_items[row_start : row_start + _TAPE_CHUNK]
-            tape_cols = st.columns(len(row_tickers))
-            for j, tkr in enumerate(row_tickers):
-                pct = _ticker_pct_change_1d(tkr)
-                pct_str = f"{pct:+.2f}%" if pct is not None else "n/a"
-                c_pct = "#10b981" if (pct is not None and pct >= 0) else ("#ef4444" if pct is not None else "#64748b")
-                is_active = tkr == ticker
+            # Fixed column count per row avoids Streamlit setIn desync when watchlist length changes.
+            tape_cols = st.columns(_TAPE_CHUNK)
+            for j in range(_TAPE_CHUNK):
                 with tape_cols[j]:
+                    if j >= len(row_tickers):
+                        st.empty()
+                        continue
+                    tkr = row_tickers[j]
+                    pct = _ticker_pct_change_1d(tkr)
+                    pct_str = f"{pct:+.2f}%" if pct is not None else "n/a"
+                    c_pct = "#10b981" if (pct is not None and pct >= 0) else ("#ef4444" if pct is not None else "#64748b")
+                    is_active = tkr == ticker
                     st.markdown(
                         f"<div class='cf-tape-cell'><span style='color:{c_pct};font-size:.62rem;font-weight:800'>{_html_mod.escape(pct_str)}</span></div>",
                         unsafe_allow_html=True,
@@ -1629,8 +1634,12 @@ def main():
             obv_divs = TA.detect_divergences(df["Close"], TA.obv(df))
             all_divs = [(d, "RSI") for d in divs_rsi] + [(d, "OBV") for d in obv_divs]
             if all_divs:
+                _div_html = []
                 for d, src in all_divs[-5:]:
-                    st.markdown(f"<div class='ac'>{'🟢' if d['type'] == 'bullish' else '🔴'} <strong>{d['type'].title()} {src} divergence</strong> near ${d['price']:.2f} on {d['idx'].strftime('%Y-%m-%d')}</div>", unsafe_allow_html=True)
+                    _div_html.append(
+                        f"<div class='ac'>{'🟢' if d['type'] == 'bullish' else '🔴'} <strong>{d['type'].title()} {src} divergence</strong> near ${d['price']:.2f} on {d['idx'].strftime('%Y-%m-%d')}</div>"
+                    )
+                st.markdown("\n".join(_div_html), unsafe_allow_html=True)
                 _explain("What is a divergence?", "The price makes a new high or low but the indicator does not agree. Think of a company reporting record revenue but declining profits. The numbers do not match. That is an early warning that the trend might reverse soon.", "neutral")
             else:
                 st.info("No divergences found. All indicators agree with the current trend.")
