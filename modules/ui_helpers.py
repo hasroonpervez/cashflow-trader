@@ -274,9 +274,11 @@ def _fragment_technical_zone(
     struct,
     mini_mode,
     mobile_chart_layout,
-    use_quant=False,
+    **kwargs,
 ):
     """Charts + overlay toggles + diamond cards + gold zone copy. Reruns without refetching Yahoo data."""
+    # Pop from kwargs so callers can pass use_quant=... reliably under @st.fragment / mixed deploy versions.
+    use_quant = bool(kwargs.pop("use_quant", False))
     if mini_mode:
         chg_pct = 0.0
         if len(df) >= 2:
@@ -575,7 +577,7 @@ _PRICE_LEVEL_COLUMN_CONFIG = {
 
 def _options_scan_dataframe(rows: list, *, put_table: bool) -> pd.DataFrame:
     """Normalize CC / CSP rows for display with stable column order."""
-    cols = ["strike", "mid", "delta", "otm_pct", "prem_100", "ann_yield", "iv", "volume", "oi"]
+    cols = ["strike", "mid", "delta", "otm_pct", "prem_100", "ann_yield", "iv", "mc_pop", "volume", "oi"]
     if put_table:
         cols.append("eff_buy")
     cols.append("optimal")
@@ -589,6 +591,7 @@ def _options_scan_dataframe(rows: list, *, put_table: bool) -> pd.DataFrame:
         "prem_100": "$/100 sh",
         "ann_yield": "Ann %",
         "iv": "IV",
+        "mc_pop": "MC PoP %",
         "volume": "Vol",
         "oi": "OI",
         "optimal": "Prop desk",
@@ -607,6 +610,11 @@ def _options_scan_column_config(*, put_table: bool):
         "$/100 sh": st.column_config.NumberColumn("$/100 sh", format="$%.2f"),
         "Ann %": st.column_config.NumberColumn("Ann. yield", format="%.1f%%"),
         "IV": st.column_config.NumberColumn("IV", format="%.1f%%"),
+        "MC PoP %": st.column_config.NumberColumn(
+            "MC PoP %",
+            format="%.1f%%",
+            help="Monte Carlo Probability of Profit (10,000 simulated paths).",
+        ),
         "Vol": st.column_config.NumberColumn("Volume", format="%.0f"),
         "OI": st.column_config.NumberColumn("OI", format="%.0f"),
     }

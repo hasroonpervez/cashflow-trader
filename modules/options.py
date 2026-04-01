@@ -690,11 +690,21 @@ class Opt:
             iv_dec = iv if iv > 0 else 0.5
             greeks = bs_greeks(price, s, T_y, rfr, iv_dec, "call")
             delta = greeks["delta"]
+            mc_pop = MonteCarloEngine.calc_pop(
+                S=price,
+                K=s,
+                T=T_y,
+                r=rfr,
+                sigma=iv_dec,
+                premium=mid,
+                option_type="call",
+                strat="short",
+            )
             rows.append({"strike": s, "bid": b, "ask": a, "mid": mid, "iv": iv * 100 if iv else 0,
                          "volume": vol, "oi": oi, "otm_pct": otm, "prem_yield": py, "ann_yield": ann,
                          "prem_100": mid * 100, "breakeven": price - mid,
                          "delta": round(delta, 3), "optimal": False,
-                         "score": Opt._sc(otm, py, ann, vol, delta)})
+                         "score": Opt._sc(otm, py, ann, vol, delta), "mc_pop": round(mc_pop, 1)})
         # Relax liquidity gates if strict pass returns nothing (common on thin chains / after-hours).
         if not rows:
             for _, r in calls_df.iterrows():
@@ -707,11 +717,21 @@ class Opt:
                 iv_dec = iv if iv > 0 else 0.5
                 greeks = bs_greeks(price, s, T_y, rfr, iv_dec, "call")
                 delta = greeks["delta"]
+                mc_pop = MonteCarloEngine.calc_pop(
+                    S=price,
+                    K=s,
+                    T=T_y,
+                    r=rfr,
+                    sigma=iv_dec,
+                    premium=mid,
+                    option_type="call",
+                    strat="short",
+                )
                 rows.append({"strike": s, "bid": b, "ask": a, "mid": mid, "iv": iv * 100 if iv else 0,
                              "volume": vol, "oi": oi, "otm_pct": otm, "prem_yield": py, "ann_yield": ann,
                              "prem_100": mid * 100, "breakeven": price - mid,
                              "delta": round(delta, 3), "optimal": False,
-                             "score": Opt._sc(otm, py, ann, vol, delta)})
+                             "score": Opt._sc(otm, py, ann, vol, delta), "mc_pop": round(mc_pop, 1)})
         rows.sort(key=lambda x: x["score"], reverse=True)
         if rows:
             best = min(range(len(rows)), key=lambda i: abs(rows[i]["delta"] - Opt.DELTA_TARGET))
@@ -732,11 +752,21 @@ class Opt:
             iv_dec = iv if iv > 0 else 0.5
             greeks = bs_greeks(price, s, T_y, rfr, iv_dec, "put")
             delta = greeks["delta"]
+            mc_pop = MonteCarloEngine.calc_pop(
+                S=price,
+                K=s,
+                T=T_y,
+                r=rfr,
+                sigma=iv_dec,
+                premium=mid,
+                option_type="put",
+                strat="short",
+            )
             rows.append({"strike": s, "bid": b, "ask": a, "mid": mid, "iv": iv * 100 if iv else 0,
                          "volume": vol, "oi": oi, "otm_pct": otm, "prem_yield": py, "ann_yield": ann,
                          "prem_100": mid * 100, "eff_buy": s - mid, "cash_req": s * 100,
                          "delta": round(delta, 3), "optimal": False,
-                         "score": Opt._sc(otm, py, ann, vol, delta)})
+                         "score": Opt._sc(otm, py, ann, vol, delta), "mc_pop": round(mc_pop, 1)})
         if not rows:
             for _, r in puts_df.iterrows():
                 s, b, a = r.get("strike", 0), r.get("bid", 0), r.get("ask", 0)
@@ -748,11 +778,21 @@ class Opt:
                 iv_dec = iv if iv > 0 else 0.5
                 greeks = bs_greeks(price, s, T_y, rfr, iv_dec, "put")
                 delta = greeks["delta"]
+                mc_pop = MonteCarloEngine.calc_pop(
+                    S=price,
+                    K=s,
+                    T=T_y,
+                    r=rfr,
+                    sigma=iv_dec,
+                    premium=mid,
+                    option_type="put",
+                    strat="short",
+                )
                 rows.append({"strike": s, "bid": b, "ask": a, "mid": mid, "iv": iv * 100 if iv else 0,
                              "volume": vol, "oi": oi, "otm_pct": otm, "prem_yield": py, "ann_yield": ann,
                              "prem_100": mid * 100, "eff_buy": s - mid, "cash_req": s * 100,
                              "delta": round(delta, 3), "optimal": False,
-                             "score": Opt._sc(otm, py, ann, vol, delta)})
+                             "score": Opt._sc(otm, py, ann, vol, delta), "mc_pop": round(mc_pop, 1)})
         rows.sort(key=lambda x: x["score"], reverse=True)
         if rows:
             best = min(range(len(rows)), key=lambda i: abs(abs(rows[i]["delta"]) - Opt.DELTA_TARGET))
@@ -868,4 +908,43 @@ class PortfolioRisk:
         if overlap_score <= 0.0:
             return 1.20
         return 1.0
+
+
+class MonteCarloEngine:
+    @staticmethod
+    def calc_pop(S, K, T, r, sigma, premium, option_type="put", strat="short", simulations=10000):
+        """
+        Runs a vectorized Monte Carlo simulation using Geometric Brownian Motion
+        to calculate the Probability of Profit (PoP).
+
+        S: Spot Price
+        K: Strike Price
+        T: Time to Expiration (in years)
+        r: Risk-free rate
+        sigma: Implied Volatility
+        premium: Option premium collected/paid
+        """
+        if T <= 0 or sigma <= 0 or S <= 0:
+            return 0.0
+
+        sims = int(max(100, simulations))
+        Z = np.random.standard_normal(sims)
+        S_T = S * np.exp((r - 0.5 * sigma**2) * T + sigma * np.sqrt(T) * Z)
+
+        if option_type == "put":
+            breakeven = K - premium
+            if strat == "short":
+                winning_paths = np.sum(S_T >= breakeven)
+            else:
+                winning_paths = np.sum(S_T < breakeven)
+        elif option_type == "call":
+            breakeven = K + premium
+            if strat == "short":
+                winning_paths = np.sum(S_T <= breakeven)
+            else:
+                winning_paths = np.sum(S_T > breakeven)
+        else:
+            return 0.0
+
+        return float((winning_paths / sims) * 100.0)
 

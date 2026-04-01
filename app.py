@@ -81,7 +81,7 @@ from modules.options import (
     bs_price, bs_greeks, calc_ev, kelly_criterion, calc_vol_skew,
     quant_edge_score, weekly_trend_label, calc_gold_zone,
     calc_confluence_points, detect_diamonds, latest_diamond_status,
-    diamond_win_rate, scan_single_ticker, Opt, calc_skew_regime, PortfolioRisk,
+    diamond_win_rate, scan_single_ticker, Opt, calc_skew_regime, PortfolioRisk, MonteCarloEngine,
 )
 from modules.sentiment import Sentiment, Backtest, Alerts, run_cc_sim_cached, QuantBacktest
 from modules.chart import build_chart, _chart_hoverlabel, build_skew_chart, build_correlation_heatmap
@@ -626,13 +626,22 @@ def main():
         )
         strike_s = f"{_mstrike:.0f}"
         iv_line = f"IV {_miv:.1f}% · " if _miv > 0 else ""
+        _mc_pop_seg = ""
+        _mc_pop_raw = master_b.get("mc_pop", None)
+        if _mc_pop_raw is not None:
+            try:
+                _mc_pop_v = float(_mc_pop_raw)
+                if math.isfinite(_mc_pop_v):
+                    _mc_pop_seg = f" · MC PoP: {_mc_pop_v:.1f}%"
+            except (TypeError, ValueError):
+                pass
         master_html = (
             f"<div class='trade-master'>"
             f"{trade_hdr_html}"
             f"{iv_badge_html}"
             f"<p style='color:#e2e8f0;font-size:1.05rem;line-height:1.55;margin:0 0 14px 0;font-weight:600'>{headline}</p>"
             f"<div class='strike-big' style='margin:8px 0 6px 0'>${_html_mod.escape(strike_s)}</div>"
-            f"<div style='color:#94a3b8;font-size:.88rem;margin-bottom:12px'>Desk optimal strike · {iv_line}DTE {dte_m}</div>"
+            f"<div style='color:#94a3b8;font-size:.88rem;margin-bottom:12px'>Desk optimal strike · {iv_line}DTE {dte_m}{_mc_pop_seg}</div>"
             f"<div style='font-size:.75rem;font-weight:700;color:#a5f3fc;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px'>Broker checklist</div>"
             f"<div class='rh-stepper'>{stepper}</div>"
             f"<p style='color:#64748b;font-size:.78rem;margin:14px 0 0 0'>Quotes can lag. Confirm credit in the app before you send the order.</p>"
@@ -1457,7 +1466,16 @@ def main():
                             opt_html = '<div style="font-size:.7rem;font-weight:700;color:#06b6d4;margin-bottom:6px">\U0001f3af OPTIMAL PROP-DESK STRIKE</div>' if b.get("optimal") else ""
                             in_zone = Opt.DELTA_LOW <= abs(b["delta"]) <= Opt.DELTA_HIGH
                             delta_color = "#10b981" if in_zone else "#f59e0b"
-                            st.markdown(f"<div class='sb'>{opt_html}<strong>SELL {nc_s}x ${b['strike']:.0f}C @ ${b['mid']:.2f}</strong><br><span style='font-size:.85rem;color:#94a3b8'>Exp: {sel_exp} ({dte}DTE) | IV: {b['iv']:.1f}% | <strong style='color:{delta_color}'>\u0394 {b['delta']:.2f}</strong><br>Premium: <strong style='color:#10b981'>${b['prem_100'] * nc_s:,.0f}</strong> | OTM: {b['otm_pct']:.1f}% | Ann: {b['ann_yield']:.1f}% | OI: {b['oi']:,}</span></div>", unsafe_allow_html=True)
+                            cc_mc_pop = b.get("mc_pop", None)
+                            cc_mc_pop_txt = ""
+                            if cc_mc_pop is not None:
+                                try:
+                                    _v = float(cc_mc_pop)
+                                    if math.isfinite(_v):
+                                        cc_mc_pop_txt = f" | MC PoP: {_v:.1f}%"
+                                except (TypeError, ValueError):
+                                    pass
+                            st.markdown(f"<div class='sb'>{opt_html}<strong>SELL {nc_s}x ${b['strike']:.0f}C @ ${b['mid']:.2f}</strong><br><span style='font-size:.85rem;color:#94a3b8'>Exp: {sel_exp} ({dte}DTE) | IV: {b['iv']:.1f}% | <strong style='color:{delta_color}'>\u0394 {b['delta']:.2f}</strong>{cc_mc_pop_txt}<br>Premium: <strong style='color:#10b981'>${b['prem_100'] * nc_s:,.0f}</strong> | OTM: {b['otm_pct']:.1f}% | Ann: {b['ann_yield']:.1f}% | OI: {b['oi']:,}</span></div>", unsafe_allow_html=True)
                             if st.checkbox("All CC strikes", key="exp_5"):
                                 _cc_df = _options_scan_dataframe(cc, put_table=False)
                                 st.dataframe(
@@ -1477,7 +1495,16 @@ def main():
                             opt_html_p = '<div style="font-size:.7rem;font-weight:700;color:#06b6d4;margin-bottom:6px">\U0001f3af OPTIMAL PROP-DESK STRIKE</div>' if b.get("optimal") else ""
                             in_zone_p = Opt.DELTA_LOW <= abs(b["delta"]) <= Opt.DELTA_HIGH
                             delta_color_p = "#10b981" if in_zone_p else "#f59e0b"
-                            st.markdown(f"<div class='sb'>{opt_html_p}<strong>SELL 1x ${b['strike']:.0f}P @ ${b['mid']:.2f}</strong><br><span style='font-size:.85rem;color:#94a3b8'>Exp: {sel_exp} ({dte}DTE) | IV: {b['iv']:.1f}% | <strong style='color:{delta_color_p}'>\u0394 {b['delta']:.2f}</strong><br>Premium: <strong style='color:#10b981'>${b['prem_100']:,.0f}</strong> | OTM: {b['otm_pct']:.1f}% | Eff buy: ${b['eff_buy']:.2f} | OI: {b['oi']:,}</span></div>", unsafe_allow_html=True)
+                            csp_mc_pop = b.get("mc_pop", None)
+                            csp_mc_pop_txt = ""
+                            if csp_mc_pop is not None:
+                                try:
+                                    _v = float(csp_mc_pop)
+                                    if math.isfinite(_v):
+                                        csp_mc_pop_txt = f" | MC PoP: {_v:.1f}%"
+                                except (TypeError, ValueError):
+                                    pass
+                            st.markdown(f"<div class='sb'>{opt_html_p}<strong>SELL 1x ${b['strike']:.0f}P @ ${b['mid']:.2f}</strong><br><span style='font-size:.85rem;color:#94a3b8'>Exp: {sel_exp} ({dte}DTE) | IV: {b['iv']:.1f}% | <strong style='color:{delta_color_p}'>\u0394 {b['delta']:.2f}</strong>{csp_mc_pop_txt}<br>Premium: <strong style='color:#10b981'>${b['prem_100']:,.0f}</strong> | OTM: {b['otm_pct']:.1f}% | Eff buy: ${b['eff_buy']:.2f} | OI: {b['oi']:,}</span></div>", unsafe_allow_html=True)
                             if st.checkbox("All CSP strikes", key="exp_6"):
                                 _csp_df = _options_scan_dataframe(csp, put_table=True)
                                 st.dataframe(
