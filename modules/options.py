@@ -199,7 +199,7 @@ def quant_edge_score(df, vix_val=None, options_data=None, use_quant=False):
             edge = float(max(0.0, min(100.0, edge)))
             breakdown = {
                 "regime_prob_high_vol": round(high_vol_regime, 4),
-                "ffd_last": round(ffd_last, 6),
+                "ffd_last": round(ffd_last, 4),
                 "model": "institutional",
             }
             return round(edge, 1), breakdown
@@ -228,14 +228,18 @@ def quant_edge_score(df, vix_val=None, options_data=None, use_quant=False):
         if vix_val and vix_val > 0:
             vix_score = min(100, max(20, 30 + (vix_val - 12) * 3))
             vol_score = (vol_score + vix_score) / 2
-        sc["volatility"] = vol_score
+        sc["volatility"] = round(float(vol_score), 1)
     else:
-        sc["volatility"] = 50
+        sc["volatility"] = 50.0
     # 5. STRUCTURE (BOS/CHOCH — pattern-based, not derived from moving averages)
     struct, _, _ = TA.market_structure(df)
-    sc["structure"] = 90 if struct == "BULLISH" else (50 if struct == "RANGING" else 20)
+    sc["structure"] = 90.0 if struct == "BULLISH" else (50.0 if struct == "RANGING" else 20.0)
 
-    composite = round(np.mean(list(sc.values())), 1)
+    for _k in ("trend", "momentum", "volume"):
+        if _k in sc and isinstance(sc[_k], (int, float)):
+            sc[_k] = round(float(sc[_k]), 1)
+    composite = round(float(np.mean(list(sc.values()))), 1)
+    sc["model"] = "retail"
     return composite, sc
 
 

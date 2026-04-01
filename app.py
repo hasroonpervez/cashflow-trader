@@ -1066,10 +1066,19 @@ def main():
                         "Big moves tend to reverse quickly. This is perfect for selling options at extremes. "
                         "You collect the premium and the stock comes back to you. Time decay works in your favor.", "bull")
 
-                st.markdown(f"""<div class='qe'>
+                _qe_blurb = (
+                    "Institutional mode: headline score blends <strong>FFD</strong> and <strong>HMM regime</strong> "
+                    "(open A/B diagnostics for the retail five pillars)."
+                    if use_quant_models and isinstance(qb, dict) and qb.get("model") == "institutional"
+                    else "Composite from five checks: trend, momentum, volume, volatility, structure."
+                )
+                st.markdown(
+                    f"""<div class='qe'>
                     <div style='font-size:.75rem;color:#8b5cf6;text-transform:uppercase;letter-spacing:.1em'>QUANT EDGE SCORE</div>
                     <div style='font-size:3rem;font-weight:800;color:{qs_color};font-family:JetBrains Mono,monospace'>{qs:.0f}</div>
-                    <div style='font-size:.85rem;color:#94a3b8'>Your overall score from 5 independent checks</div></div>""", unsafe_allow_html=True)
+                    <div style='font-size:.85rem;color:#94a3b8'>{_qe_blurb}</div></div>""",
+                    unsafe_allow_html=True,
+                )
                 if use_quant_models:
                     retail_score, retail_breakdown = quant_edge_score(df, vix_val=vix_v, use_quant=False)
                     inst_score, inst_breakdown = qs, qb
@@ -1098,8 +1107,60 @@ def main():
                         st.caption("Comparing standard RSI/MA logic against FFD/HMM models.")
                         col1, col2 = st.columns(2)
                         col1.metric("Retail Engine", f"{retail_score:.0f}")
-                        col2.metric("Quant Engine", f"{inst_score:.0f}")
-                        st.json(inst_breakdown)
+                        col2.metric("Quant Engine", f"{inst_score:.0f}", delta=f"{delta_q:+.0f} vs retail")
+                        _is_inst = isinstance(inst_breakdown, dict) and inst_breakdown.get("model") == "institutional"
+                        if _is_inst:
+                            st.success(
+                                "Institutional path active: headline **Quant** score blends **FFD momentum** and **HMM regime** "
+                                "(not the simple average of the five retail pillars)."
+                            )
+                            i1, i2, i3 = st.columns(3)
+                            _rp = float(inst_breakdown.get("regime_prob_high_vol") or 0.0)
+                            _ffd = float(inst_breakdown.get("ffd_last") or 0.0)
+                            i1.metric("High-vol regime (HMM)", f"{_rp * 100:.1f}%", help="Probability mass in the high-volatility state.")
+                            i2.metric("FFD residual", f"{_ffd:.4f}", help="Fractional differentiation signal (stationary momentum memory).")
+                            i3.metric("Composite", f"{inst_score:.1f}", help="Capped blend used for the main Quant Edge gauge.")
+                            st.markdown("##### Retail — five pillars (20% each)")
+                            _pillars = {k: retail_breakdown.get(k) for k in ("trend", "momentum", "volume", "volatility", "structure") if k in retail_breakdown}
+                            st.dataframe(
+                                pd.DataFrame([{"Dimension": k.title(), "Score": round(float(v), 1)} for k, v in _pillars.items()]),
+                                use_container_width=True,
+                                hide_index=True,
+                                column_config={"Score": st.column_config.NumberColumn("Score", format="%.1f")},
+                            )
+                        else:
+                            st.warning(
+                                "**Quant engine matched Retail** — the FFD/HMM institutional branch did not run "
+                                "(missing `hmmlearn`, insufficient history, or an internal error). "
+                                "Both numbers use the same five-factor model below."
+                            )
+                            pc1, pc2 = st.columns(2)
+                            _dims = ("trend", "momentum", "volume", "volatility", "structure")
+
+                            def _pillar_df(bd):
+                                rows = [
+                                    {"Dimension": k.title(), "Score": round(float(bd[k]), 1)}
+                                    for k in _dims
+                                    if isinstance(bd, dict) and k in bd and isinstance(bd[k], (int, float))
+                                ]
+                                return pd.DataFrame(rows)
+
+                            with pc1:
+                                st.markdown("**Retail**")
+                                st.dataframe(
+                                    _pillar_df(retail_breakdown),
+                                    use_container_width=True,
+                                    hide_index=True,
+                                    column_config={"Score": st.column_config.NumberColumn(format="%.1f")},
+                                )
+                            with pc2:
+                                st.markdown("**Quant (fallback)**")
+                                st.dataframe(
+                                    _pillar_df(inst_breakdown),
+                                    use_container_width=True,
+                                    hide_index=True,
+                                    column_config={"Score": st.column_config.NumberColumn(format="%.1f")},
+                                )
                     with st.expander("📝 Rolling Edge Capture Log", expanded=False):
                         st.caption("Live tracking of Institutional vs Retail score deltas across your session.")
                         if not st.session_state.edge_log.empty:
