@@ -2597,10 +2597,25 @@ def main():
                                 st.plotly_chart(corr_fig, use_container_width=True, config=_PLOTLY_UI_CONFIG)
 
                         spy_df = None
+                        _spy_fetch_err = None
                         try:
                             spy_df = fetch_stock("SPY", "1y", "1d")
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            _spy_fetch_err = e
+                        if _spy_fetch_err is not None:
+                            print(
+                                f"[cashflow-trader] SPY benchmark fetch failed ({type(_spy_fetch_err).__name__}): "
+                                f"{_spy_fetch_err}. RS vs SPY disabled for this scan.",
+                                file=sys.stderr,
+                                flush=True,
+                            )
+                        elif spy_df is None or getattr(spy_df, "empty", True):
+                            print(
+                                "[cashflow-trader] SPY benchmark skipped (empty or Yahoo timeout). "
+                                "RS vs SPY disabled for this scan.",
+                                file=sys.stderr,
+                                flush=True,
+                            )
 
                         scanner_results = []
                         n_scan = len(watchlist_tickers)

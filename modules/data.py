@@ -16,11 +16,14 @@ from datetime import datetime, timedelta
 # session for all Tickers, ``yf.download``, and direct JSON calls — connection reuse and
 # consistent cookies. Community Cloud empty bars + “possibly delisted” are usually
 # throttling on shared egress, not actual delistings.
+#
+# ``impersonate="safari15_5"`` + short default timeout: Yahoo sometimes “tar-pits” (slow
+# hang → curl 28 at ~30s). A 5s cap fails fast so the scanner thread stays responsive.
 _YAHOO_BROWSER_UA = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
+    "(KHTML, like Gecko) Version/15.5 Safari/605.1.15"
 )
-_YAHOO_SESSION = curl_requests.Session(impersonate="chrome")
+_YAHOO_SESSION = curl_requests.Session(impersonate="safari15_5", timeout=5.0)
 _YAHOO_SESSION.headers.update({"Accept-Language": "en-US,en;q=0.9"})
 
 # Yahoo JSON API (same family yfinance uses) — fallback when Ticker.options is transiently empty.
@@ -32,24 +35,37 @@ _YAHOO_OPTIONS_HEADERS = {
 # ─────────────────────────────────────────────────────────────────────────
 # RETRY WRAPPER — handles yfinance throttling gracefully
 # ─────────────────────────────────────────────────────────────────────────
+def _is_yahoo_timeout_error(exc: BaseException) -> bool:
+    """True for curl tar-pit / read timeouts — do not burn extra retries + sleeps."""
+    if type(exc).__name__ == "Timeout":
+        return True
+    msg = str(exc)
+    return "curl: (28)" in msg or "Operation timed out" in msg
+
+
 def retry_fetch(fn, retries=3, delay=2):
     """Call fn() up to `retries` times with exponential backoff on *exceptions* only.
 
     A normal return value (including ``None``) is returned immediately. Retrying on
     ``None`` would triple-call Yahoo for empty history (rate limits / Cloud blocks)
     and can push script runs past Streamlit health-check timeouts.
+
+    Timeout / curl (28) returns immediately (no retries) so one slow Yahoo response
+    cannot stack into tens of seconds per ticker.
     """
     for attempt in range(retries):
         try:
             return fn()
-        except Exception:
+        except Exception as e:
+            if _is_yahoo_timeout_error(e):
+                return None
             if attempt < retries - 1:
                 time.sleep(delay * (attempt + 1))
     return None
 
 
 def _yfinance_ticker(symbol: str):
-    """New ``yf.Ticker`` per symbol; HTTP uses ``_YAHOO_SESSION`` (Chrome impersonation, reuse)."""
+    """New ``yf.Ticker`` per symbol; HTTP uses ``_YAHOO_SESSION`` (TLS impersonation, reuse)."""
     return yf.Ticker(str(symbol).upper().strip(), session=_YAHOO_SESSION)
 
 
@@ -60,7 +76,7 @@ def _option_expirations_yahoo_http(symbol: str) -> list[str]:
         return []
     url = f"https://query2.finance.yahoo.com/v7/finance/options/{sym}"
     try:
-        r = _YAHOO_SESSION.get(url, headers=_YAHOO_OPTIONS_HEADERS, timeout=14)
+        r = _YAHOO_SESSION.get(url, headers=_YAHOO_OPTIONS_HEADERS)
         if r.status_code != 200:
             return []
         payload = r.json()
@@ -562,7 +578,7 @@ def _earnings_next_from_yahoo_quotesummary(symbol: str) -> str | None:
         "?modules=calendarEvents"
     )
     try:
-        r = _YAHOO_SESSION.get(url, headers=_YAHOO_OPTIONS_HEADERS, timeout=16)
+        r = _YAHOO_SESSION.get(url, headers=_YAHOO_OPTIONS_HEADERS)
         if r.status_code != 200:
             return None
         js = r.json()
