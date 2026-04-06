@@ -16,6 +16,7 @@ DEFAULT_CONFIG = {
         "DNA,ABSI,SRFM,BYND,SOFI,SPY,QQQ,BTC,ETH"
     ),
     "scanner_sort_mode": "Custom watchlist order",
+    "scanner_mode": "📈 Options Yield",
     "strat_focus": "Hybrid",
     "strat_horizon": "30 DTE",
     "mini_mode": False,

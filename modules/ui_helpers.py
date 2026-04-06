@@ -625,12 +625,29 @@ def _parse_watchlist_string(s):
 @st.fragment(run_every=90.0)
 def _fragment_rolling_edge_capture():
     """Full-watchlist quant vs retail edge log + matrix; reruns on a timer without blocking the rest of the app."""
+    _scan_mode = st.session_state.get(
+        "_cf_scanner_mode",
+        st.session_state.get(
+            "sb_scanner_mode",
+            st.session_state.get("sb_scanner_mode_radio", "📈 Options Yield"),
+        ),
+    )
     st.caption(
         "Full watchlist scan about every **90 seconds**. **Highest Quant** sorts to the top. "
-        "**Edge gap** is Quant score minus Retail score (each 0 to 100). "
-        "This desk targets **premium income** (covered calls, cash secured puts): stronger Quant usually means a better "
-        "environment for that style, **not** a simple buy list. Use confluence, diamonds, and your own rules."
+        "**Edge gap** is Quant score minus Retail score (each 0 to 100)."
     )
+    if _scan_mode == "📈 Options Yield":
+        st.markdown(
+            "This desk targets **premium income (covered calls, cash secured puts)**: "
+            "stronger Quant usually means a better environment for selling options, "
+            "**not** a simple buy list. Use confluence, diamonds, and your own rules."
+        )
+    else:
+        st.markdown(
+            "This desk scans for **stocks to BUY**. We look for institutional accumulation, "
+            "volatility coils, and relative strength. A 🔥 **IMMINENT BREAKOUT** signal means "
+            "the stock is compressed at support and ready to move up. This is a direct **BUY** list."
+        )
     wl = _parse_watchlist_string(st.session_state.get("sb_scanner", ""))
     use_q = bool(st.session_state.get("_cf_use_quant_models", False))
     vx = st.session_state.get("_cf_vix_snapshot")

@@ -158,6 +158,8 @@ def main():
     # Hydrate HUD + chart overlay keys from config **before** any widget reads them (fixes first-load defaults).
     _hydrate_sidebar_prefs(cfg)
 
+    saved_scanner_mode = cfg.get("scanner_mode", "📈 Options Yield")
+
     # ── Watchlist editor (must run before Mission Control so sb_scanner is committed same run)
     _wl_expanded = bool(st.session_state.pop("_open_watchlist_editor", False))
     st.caption("Predictive Pinning, Bayesian News Nuance, & Shadow Liquidity Architecture.")
@@ -414,6 +416,13 @@ def main():
 
         st.markdown("### 🎛️ Command Center")
         with st.container(border=True):
+            if hasattr(st, "segmented_control"):
+                if "sb_scanner_mode" not in st.session_state:
+                    st.session_state["sb_scanner_mode"] = saved_scanner_mode
+            else:
+                if "sb_scanner_mode_radio" not in st.session_state:
+                    st.session_state["sb_scanner_mode_radio"] = saved_scanner_mode
+
             col_mode, col_cap = st.columns([1, 1])
             with col_mode:
                 if hasattr(st, "segmented_control"):
@@ -421,7 +430,7 @@ def main():
                         "Trading Hemisphere",
                         ["📈 Options Yield", "🎯 Equity Radar"],
                         key="sb_scanner_mode",
-                        default="📈 Options Yield",
+                        default=saved_scanner_mode,
                         help="Switch between premium harvesting (Options) and Delta-One breakout hunting (Equity).",
                     )
                 else:
@@ -430,7 +439,6 @@ def main():
                         ["📈 Options Yield", "🎯 Equity Radar"],
                         horizontal=True,
                         key="sb_scanner_mode_radio",
-                        index=0,
                         help="Switch between premium harvesting (Options) and Delta-One breakout hunting (Equity).",
                     )
             with col_cap:
@@ -442,6 +450,11 @@ def main():
                         value=10000,
                         help="Scales Suggested Shares dynamically.",
                     )
+
+            st.session_state["_cf_scanner_mode"] = scanner_mode
+            if scanner_mode != saved_scanner_mode:
+                b = load_config()
+                save_config({**b, "scanner_mode": scanner_mode})
 
         def _persist_use_quant_models():
             b = load_config()
