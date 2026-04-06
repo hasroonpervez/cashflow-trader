@@ -130,6 +130,108 @@ for _import_try in range(_IMPORT_KEYERROR_RETRIES):
             raise
         time.sleep(0.08 * (2**_import_try))
 
+def _render_equity_setup_desk(scanner_results, selectbox_key: str, prefer_ticker=None) -> None:
+    """Delta-One equity drill-down from cached scanner rows (no extra data fetches)."""
+    if not scanner_results:
+        st.warning("Run **Scan Watchlist** in **Risk, scanner & intel** (Equity Radar), then pick a symbol below.")
+        return
+    tickers = [r["ticker"] for r in scanner_results]
+    pick = prefer_ticker if prefer_ticker in tickers else tickers[0]
+    if selectbox_key not in st.session_state or st.session_state.get(selectbox_key) not in tickers:
+        st.session_state[selectbox_key] = pick
+    selected_ticker = st.selectbox(
+        "Equity desk — focus ticker",
+        tickers,
+        key=selectbox_key,
+        help="Drill into breakout, risk, and support using the last scan payload.",
+    )
+    ticker_data = next((item for item in scanner_results if item["ticker"] == selected_ticker), None)
+    if not ticker_data:
+        st.warning("Select a ticker from the Equity Radar scanner above to view the setup.")
+        return
+    pre_diamond = ticker_data.get("pre_diamond_status") or {}
+    signal = pre_diamond.get("signal_strength", "—")
+    stop_loss = ticker_data.get("stock_stop_price", "—")
+    price = float(ticker_data.get("price") or 0)
+    qs_raw = ticker_data.get("qs", "—")
+    cp_score = ticker_data.get("cp_score", "—")
+    cp_max = ticker_data.get("cp_max", "—")
+    confluence_disp = f"{cp_score}/{cp_max}" if isinstance(cp_score, (int, float)) and isinstance(cp_max, (int, float)) else "—"
+    st.markdown(f"## 🎯 Equity Setup: {_html_mod.escape(str(selected_ticker))}")
+    st.info(f"**Current Signal:** {signal}")
+    eq_tab1, eq_tab2 = st.tabs(["🚀 Breakout Metrics", "🛡️ Risk & Support"])
+    with eq_tab1:
+        st.markdown("### Accumulation Engine")
+        st.caption("Pre-diamond logic already folds in a **volume ramp** vs its short baseline; 🔥 / 🟡 rows are the live accumulation pulse.")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric(
+                "Volatility State",
+                pre_diamond.get("volatility_state", "NORMAL"),
+                help="SQUEEZED means bottom 25% of 60-day ATR (or BBW) range when pre-diamond fired.",
+            )
+        with col2:
+            st.metric(
+                "Confluence Score",
+                confluence_disp,
+                help="Pre-diamond targets the 5–6 band; 7+ is Blue Diamond territory on the options path.",
+            )
+        with col3:
+            st.metric(
+                "Relative Strength",
+                "Strong vs SPY" if "🔥" in str(signal) else "Neutral/Weak",
+                help="3-day return vs SPY when the pre-diamond stack triggered.",
+            )
+        qe_disp = f"{float(qs_raw):.0f}/100" if isinstance(qs_raw, (int, float)) else str(qs_raw)
+        st.metric("Quant Edge (QE)", qe_disp, help="Same QE score as the scanner row.")
+    with eq_tab2:
+        st.markdown("### Trade Management")
+        r_col1, r_col2, r_col3 = st.columns(3)
+        with r_col1:
+            st.metric(
+                "Suggested Entry",
+                f"${price:,.2f}" if price else "—",
+                help="Spot from the scan bar.",
+            )
+        with r_col2:
+            sl_txt = f"${float(stop_loss):,.2f}" if isinstance(stop_loss, (int, float)) else stop_loss
+            st.metric(
+                "ATR Trailing Stop",
+                sl_txt,
+                help="Scan uses price − 1.5× ATR when ATR is available; else a 5% floor.",
+            )
+        sup = pre_diamond.get("support_proximity", "—")
+        sup_txt = f"{float(sup):.1f}%" if isinstance(sup, (int, float)) else sup
+        if sup_txt != "—" and not str(sup_txt).endswith("%"):
+            sup_txt = f"{sup_txt}%"
+        with r_col3:
+            st.metric(
+                "Distance to Support",
+                sup_txt,
+                help="Proximity to Shadow Low or Gold Zone floor when pre-diamond is active.",
+            )
+        gz = ticker_data.get("gold_zone")
+        rr_txt = "—"
+        try:
+            if (
+                isinstance(stop_loss, (int, float))
+                and float(stop_loss) > 0
+                and price > 0
+                and gz is not None
+                and float(gz) > 0
+            ):
+                risk_px = max(price - float(stop_loss), 1e-9)
+                reward_px = max(float(gz) - price, 0.0)
+                rr_txt = f"{reward_px / risk_px:.2f} : 1" if risk_px else "—"
+        except (TypeError, ValueError):
+            rr_txt = "—"
+        st.metric(
+            "Risk / Reward (to Gold Zone)",
+            rr_txt,
+            help="(Gold Zone − spot) ÷ (spot − stop) per share when all inputs exist; illustrative target only.",
+        )
+
+
 # Migrate legacy edge_log sessions (added Preview column for watchlist matrix).
 _el = st.session_state.get("edge_log")
 if isinstance(_el, pd.DataFrame) and not _el.empty and "Preview" not in _el.columns and "Quant" in _el.columns:
@@ -1760,413 +1862,425 @@ def main():
             # ══════════════════════════════════════════════════════════════════
 
     with dash_tab_cashflow:
-            #  SECTION 4 \u2014 CASH-FLOW STRATEGIES
-            # ══════════════════════════════════════════════════════════════════
-            st.markdown('<div id="strategies" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
-            _cfs_subtitle = (
-                f"Concrete strikes for {ticker} at ${price:.2f}. Lift them straight into your ticket."
-                if opt_exps
-                else (
-                    f"Spot ${price:.2f}. The options feed returned no expirations yet. Use Refresh during market hours, "
-                    f"or mirror the desk rules in your broker (about 3% to 7% OTM, standard monthly cycle)."
+            _cf_trading_mode_cf = st.session_state.get("_cf_scanner_mode", cfg.get("scanner_mode", "📈 Options Yield"))
+            if _cf_trading_mode_cf != "📈 Options Yield":
+                st.markdown('<div id="strategies" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
+                _section(
+                    "Delta-One workspace",
+                    f"Equity Radar hides premium-selling strikes for {_html_mod.escape(ticker)}. Use the desk below with your last **Scan Watchlist** run.",
+                    tip_plain="Open **Risk, scanner & intel → Market Scanner** to refresh rows. Metrics reuse scanner output only.",
                 )
-            )
-            _section(
-                "Cash Flow Strategies",
-                _cfs_subtitle,
-                tip_plain="Start with the optimal line the desk highlights. Covered calls need stock on hand. Cash secured puts monetize patience. Spreads are for when you want a hard loss ceiling.",
-            )
-            if opt_exps:
-                st.markdown(
-                    f"<div class='tc'><div style='text-align:center'><span style='color:#64748b;font-size:.8rem'>ANALYZING</span><br>"
-                    f"<span style='font-size:1.4rem;font-weight:700;color:#e2e8f0'>{_html_mod.escape(ticker)} @ ${price:.2f}</span></div></div>",
-                    unsafe_allow_html=True,
+                _bundle_cf = st.session_state.get("_cf_scanner_bundle")
+                _rows_cf = _bundle_cf.get("results") if isinstance(_bundle_cf, dict) else None
+                _render_equity_setup_desk(_rows_cf or [], "cf_equity_desk_cashflow", prefer_ticker=ticker)
+            if _cf_trading_mode_cf == "📈 Options Yield":
+                #  SECTION 4 \u2014 CASH-FLOW STRATEGIES
+                # ══════════════════════════════════════════════════════════════════
+                st.markdown('<div id="strategies" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
+                _cfs_subtitle = (
+                    f"Concrete strikes for {ticker} at ${price:.2f}. Lift them straight into your ticket."
+                    if opt_exps
+                    else (
+                        f"Spot ${price:.2f}. The options feed returned no expirations yet. Use Refresh during market hours, "
+                        f"or mirror the desk rules in your broker (about 3% to 7% OTM, standard monthly cycle)."
+                    )
                 )
-                sel_exp = st.selectbox("Expiration", opt_exps[:10], index=min(2, len(opt_exps) - 1), key="sel_exp")
-                dte = max(1, (datetime.strptime(sel_exp, "%Y-%m-%d") - datetime.now()).days)
-                try:
-                    result_sel, _ = fetch_options(ticker, sel_exp)
-                except Exception as e:
-                    st.warning(f"Could not load the option chain for expiration {sel_exp}. ({type(e).__name__})")
-                    result_sel = (pd.DataFrame(), pd.DataFrame())
-                calls, puts = result_sel if isinstance(result_sel, (tuple, list)) and len(result_sel) == 2 else (pd.DataFrame(), pd.DataFrame())
-                calls = calls if isinstance(calls, pd.DataFrame) else pd.DataFrame()
-                puts = puts if isinstance(puts, pd.DataFrame) else pd.DataFrame()
-                opts_df = pd.DataFrame()
-                try:
-                    _calls_t = calls.copy()
-                    _puts_t = puts.copy()
-                    if not _calls_t.empty:
-                        _calls_t["type"] = "call"
-                    if not _puts_t.empty:
-                        _puts_t["type"] = "put"
-                    opts_df = pd.concat([_calls_t, _puts_t], ignore_index=True)
-                except Exception:
+                _section(
+                    "Cash Flow Strategies",
+                    _cfs_subtitle,
+                    tip_plain="Start with the optimal line the desk highlights. Covered calls need stock on hand. Cash secured puts monetize patience. Spreads are for when you want a hard loss ceiling.",
+                )
+                if opt_exps:
+                    st.markdown(
+                        f"<div class='tc'><div style='text-align:center'><span style='color:#64748b;font-size:.8rem'>ANALYZING</span><br>"
+                        f"<span style='font-size:1.4rem;font-weight:700;color:#e2e8f0'>{_html_mod.escape(ticker)} @ ${price:.2f}</span></div></div>",
+                        unsafe_allow_html=True,
+                    )
+                    sel_exp = st.selectbox("Expiration", opt_exps[:10], index=min(2, len(opt_exps) - 1), key="sel_exp")
+                    dte = max(1, (datetime.strptime(sel_exp, "%Y-%m-%d") - datetime.now()).days)
+                    try:
+                        result_sel, _ = fetch_options(ticker, sel_exp)
+                    except Exception as e:
+                        st.warning(f"Could not load the option chain for expiration {sel_exp}. ({type(e).__name__})")
+                        result_sel = (pd.DataFrame(), pd.DataFrame())
+                    calls, puts = result_sel if isinstance(result_sel, (tuple, list)) and len(result_sel) == 2 else (pd.DataFrame(), pd.DataFrame())
+                    calls = calls if isinstance(calls, pd.DataFrame) else pd.DataFrame()
+                    puts = puts if isinstance(puts, pd.DataFrame) else pd.DataFrame()
                     opts_df = pd.DataFrame()
-                if not calls.empty or not puts.empty:
-                    with st.expander("Full option chain — MC PoP % (every strike)", expanded=False):
-                        try:
-                            _chain_mc = build_chain_mc_dataframe(price, calls, puts, dte, rfr)
-                            if _chain_mc is not None and not _chain_mc.empty:
-                                streamlit_show_dataframe(
-                                    _chain_mc,
-                                    use_container_width=True,
-                                    hide_index=True,
-                                    height=min(520, 36 + min(len(_chain_mc), 100) * 28),
-                                    key=streamlit_df_widget_key(f"cf_opt_mc_{sel_exp}", _chain_mc),
-                                    on_select="ignore",
-                                    selection_mode=[],
-                                    column_config={
-                                        "Type": st.column_config.TextColumn("Type", width="small"),
-                                        "Strike": st.column_config.NumberColumn("Strike", format="$%.2f"),
-                                        "Bid": st.column_config.NumberColumn("Bid", format="$%.2f"),
-                                        "Ask": st.column_config.NumberColumn("Ask", format="$%.2f"),
-                                        "Mid": st.column_config.NumberColumn("Mid", format="$%.4f"),
-                                        "IV %": st.column_config.NumberColumn("IV", format="%.2f%%"),
-                                        "\u0398/\u0393": st.column_config.NumberColumn(
-                                            "\u0398/\u0393",
-                                            format="%.4f",
-                                            help="Theta / Gamma (vectorized chain greeks).",
-                                        ),
-                                        "MC PoP %": st.column_config.NumberColumn(
-                                            "MC PoP %",
-                                            format="%.1f%%",
-                                            help="10k antithetic simulations — v22.0 Predictive Analytics",
-                                        ),
-                                    },
-                                )
-                            else:
-                                st.caption("No strikes with usable bid/ask for MC PoP in this snapshot.")
-                        except Exception:
-                            st.caption("MC PoP chain table unavailable for this expiration.")
-                    _desk_poc = gold_zone_components.get("POC") if isinstance(gold_zone_components, dict) else None
-                    _desk_hvn = gold_zone_components.get("HVN") if isinstance(gold_zone_components, dict) else None
-                    s1, s2 = st.columns(2)
-                    with s1:
-                        st.markdown("#### Covered Calls")
-                        cc = Opt.covered_calls(price, calls, dte, rfr, poc=_desk_poc, hvn_anchor=_desk_hvn)
-                        if cc:
-                            opt_cc = next((c for c in cc if c.get("optimal")), cc[0])
-                            b = opt_cc; nc_s = 1
-                            opt_html = '<div style="font-size:.7rem;font-weight:700;color:#06b6d4;margin-bottom:6px">\U0001f3af OPTIMAL PROP-DESK STRIKE</div>' if b.get("optimal") else ""
-                            in_zone = Opt.DELTA_LOW <= abs(b["delta"]) <= Opt.DELTA_HIGH
-                            delta_color = "#10b981" if in_zone else "#f59e0b"
-                            cc_mc_pop = b.get("mc_pop", None)
-                            cc_mc_pop_txt = ""
-                            if cc_mc_pop is not None:
-                                try:
-                                    _v = float(cc_mc_pop)
-                                    if math.isfinite(_v):
-                                        cc_mc_pop_txt = f" | MC PoP: {_v:.1f}%"
-                                except (TypeError, ValueError):
-                                    pass
-                            st.markdown(f"<div class='sb'>{opt_html}<strong>SELL {nc_s}x ${b['strike']:.0f}C @ ${b['mid']:.2f}</strong><br><span style='font-size:.85rem;color:#94a3b8'>Exp: {sel_exp} ({dte}DTE) | IV: {b['iv']:.1f}% | <strong style='color:{delta_color}'>\u0394 {b['delta']:.2f}</strong>{cc_mc_pop_txt}<br>Premium: <strong style='color:#10b981'>${b['prem_100'] * nc_s:,.0f}</strong> | OTM: {b['otm_pct']:.1f}% | Ann: {b['ann_yield']:.1f}% | OI: {b['oi']:,}</span>{_theta_gamma_desk_line(b.get('theta_gamma_ratio'))}</div>", unsafe_allow_html=True)
-                            _cc_track_key = re.sub(
-                                r"[^a-zA-Z0-9_]",
-                                "_",
-                                f"cf_track_cc_{ticker}_{sel_exp}_{b['strike']}",
-                            )[:110]
-                            if st.button("Track Trade", key=_cc_track_key, help="Append this optimal covered-call line to the Sentinel Ledger (session only)."):
-                                _pin_e = st.session_state.get("_cf_opex_pin")
-                                _dist_pin_e = None
-                                try:
-                                    if _pin_e is not None:
-                                        _pf = float(_pin_e)
-                                        if np.isfinite(_pf) and _pf > 0:
-                                            _dist_pin_e = round((float(price) / _pf - 1.0) * 100.0, 2)
-                                except (TypeError, ValueError):
-                                    pass
-                                _th_day_e = None
-                                try:
-                                    _th_day_e = round(
-                                        ledger_theta_desk_day(
-                                            float(price),
-                                            float(b["strike"]),
-                                            int(dte),
-                                            float(rfr),
-                                            float(b.get("iv") or 30),
-                                            "call",
-                                            int(nc_s),
-                                        ),
-                                        4,
+                    try:
+                        _calls_t = calls.copy()
+                        _puts_t = puts.copy()
+                        if not _calls_t.empty:
+                            _calls_t["type"] = "call"
+                        if not _puts_t.empty:
+                            _puts_t["type"] = "put"
+                        opts_df = pd.concat([_calls_t, _puts_t], ignore_index=True)
+                    except Exception:
+                        opts_df = pd.DataFrame()
+                    if not calls.empty or not puts.empty:
+                        with st.expander("Full option chain — MC PoP % (every strike)", expanded=False):
+                            try:
+                                _chain_mc = build_chain_mc_dataframe(price, calls, puts, dte, rfr)
+                                if _chain_mc is not None and not _chain_mc.empty:
+                                    streamlit_show_dataframe(
+                                        _chain_mc,
+                                        use_container_width=True,
+                                        hide_index=True,
+                                        height=min(520, 36 + min(len(_chain_mc), 100) * 28),
+                                        key=streamlit_df_widget_key(f"cf_opt_mc_{sel_exp}", _chain_mc),
+                                        on_select="ignore",
+                                        selection_mode=[],
+                                        column_config={
+                                            "Type": st.column_config.TextColumn("Type", width="small"),
+                                            "Strike": st.column_config.NumberColumn("Strike", format="$%.2f"),
+                                            "Bid": st.column_config.NumberColumn("Bid", format="$%.2f"),
+                                            "Ask": st.column_config.NumberColumn("Ask", format="$%.2f"),
+                                            "Mid": st.column_config.NumberColumn("Mid", format="$%.4f"),
+                                            "IV %": st.column_config.NumberColumn("IV", format="%.2f%%"),
+                                            "\u0398/\u0393": st.column_config.NumberColumn(
+                                                "\u0398/\u0393",
+                                                format="%.4f",
+                                                help="Theta / Gamma (vectorized chain greeks).",
+                                            ),
+                                            "MC PoP %": st.column_config.NumberColumn(
+                                                "MC PoP %",
+                                                format="%.1f%%",
+                                                help="10k antithetic simulations — v22.0 Predictive Analytics",
+                                            ),
+                                        },
                                     )
-                                except Exception:
-                                    pass
-                                st.session_state.setdefault("_cf_ledger", []).append(
-                                    {
-                                        "ticker": str(ticker).upper(),
-                                        "strike": float(b["strike"]),
-                                        "premium_100": float(b["prem_100"]),
-                                        "entry_date": datetime.now().strftime("%Y-%m-%d"),
-                                        "leg": "CC",
-                                        "option_type": "call",
-                                        "iv": float(b.get("iv") or 0),
-                                        "expiry": str(sel_exp)[:10],
-                                        "dte_at_entry": int(dte),
-                                        "contracts": int(nc_s),
-                                        "qs_at_entry": float(qs),
-                                        "dist_pin_pct_at_entry": _dist_pin_e,
-                                        "theta_desk_day_entry": _th_day_e,
-                                    }
-                                )
-                                st.rerun()
-                            if st.checkbox("All CC strikes", key="exp_5"):
-                                _cc_df = _options_scan_dataframe(cc, put_table=False)
-                                streamlit_show_dataframe(
-                                    _cc_df,
-                                    column_config=_options_scan_column_config(put_table=False),
-                                    use_container_width=True,
-                                    hide_index=True,
-                                    key=streamlit_df_widget_key(f"cf_cc_{sel_exp}", _cc_df),
-                                    on_select="ignore",
-                                    selection_mode=[],
-                                )
-                        else:
-                            st.info("No covered call strikes met pricing/liquidity checks in this snapshot. Try a nearby expiry or refresh.")
-                    with s2:
-                        st.markdown("#### Cash Secured Puts")
-                        csp = Opt.cash_secured_puts(price, puts, dte, rfr, poc=_desk_poc, hvn_anchor=_desk_hvn)
-                        if csp:
-                            opt_csp = next((c for c in csp if c.get("optimal")), csp[0])
-                            b = opt_csp
-                            opt_html_p = '<div style="font-size:.7rem;font-weight:700;color:#06b6d4;margin-bottom:6px">\U0001f3af OPTIMAL PROP-DESK STRIKE</div>' if b.get("optimal") else ""
-                            in_zone_p = Opt.DELTA_LOW <= abs(b["delta"]) <= Opt.DELTA_HIGH
-                            delta_color_p = "#10b981" if in_zone_p else "#f59e0b"
-                            csp_mc_pop = b.get("mc_pop", None)
-                            csp_mc_pop_txt = ""
-                            if csp_mc_pop is not None:
-                                try:
-                                    _v = float(csp_mc_pop)
-                                    if math.isfinite(_v):
-                                        csp_mc_pop_txt = f" | MC PoP: {_v:.1f}%"
-                                except (TypeError, ValueError):
-                                    pass
-                            st.markdown(f"<div class='sb'>{opt_html_p}<strong>SELL 1x ${b['strike']:.0f}P @ ${b['mid']:.2f}</strong><br><span style='font-size:.85rem;color:#94a3b8'>Exp: {sel_exp} ({dte}DTE) | IV: {b['iv']:.1f}% | <strong style='color:{delta_color_p}'>\u0394 {b['delta']:.2f}</strong>{csp_mc_pop_txt}<br>Premium: <strong style='color:#10b981'>${b['prem_100']:,.0f}</strong> | OTM: {b['otm_pct']:.1f}% | Eff buy: ${b['eff_buy']:.2f} | OI: {b['oi']:,}</span>{_theta_gamma_desk_line(b.get('theta_gamma_ratio'))}</div>", unsafe_allow_html=True)
-                            _csp_track_key = re.sub(
-                                r"[^a-zA-Z0-9_]",
-                                "_",
-                                f"cf_track_csp_{ticker}_{sel_exp}_{b['strike']}",
-                            )[:110]
-                            if st.button("Track Trade", key=_csp_track_key, help="Append this optimal cash-secured put to the Sentinel Ledger (session only)."):
-                                _pin_e2 = st.session_state.get("_cf_opex_pin")
-                                _dist_pin_e2 = None
-                                try:
-                                    if _pin_e2 is not None:
-                                        _pf2 = float(_pin_e2)
-                                        if np.isfinite(_pf2) and _pf2 > 0:
-                                            _dist_pin_e2 = round((float(price) / _pf2 - 1.0) * 100.0, 2)
-                                except (TypeError, ValueError):
-                                    pass
-                                _th_day_e2 = None
-                                try:
-                                    _th_day_e2 = round(
-                                        ledger_theta_desk_day(
-                                            float(price),
-                                            float(b["strike"]),
-                                            int(dte),
-                                            float(rfr),
-                                            float(b.get("iv") or 30),
-                                            "put",
-                                            1,
-                                        ),
-                                        4,
-                                    )
-                                except Exception:
-                                    pass
-                                st.session_state.setdefault("_cf_ledger", []).append(
-                                    {
-                                        "ticker": str(ticker).upper(),
-                                        "strike": float(b["strike"]),
-                                        "premium_100": float(b["prem_100"]),
-                                        "entry_date": datetime.now().strftime("%Y-%m-%d"),
-                                        "leg": "CSP",
-                                        "option_type": "put",
-                                        "iv": float(b.get("iv") or 0),
-                                        "expiry": str(sel_exp)[:10],
-                                        "dte_at_entry": int(dte),
-                                        "contracts": 1,
-                                        "qs_at_entry": float(qs),
-                                        "dist_pin_pct_at_entry": _dist_pin_e2,
-                                        "theta_desk_day_entry": _th_day_e2,
-                                    }
-                                )
-                                st.rerun()
-                            if st.checkbox("All CSP strikes", key="exp_6"):
-                                _csp_df = _options_scan_dataframe(csp, put_table=True)
-                                streamlit_show_dataframe(
-                                    _csp_df,
-                                    column_config=_options_scan_column_config(put_table=True),
-                                    use_container_width=True,
-                                    hide_index=True,
-                                    key=streamlit_df_widget_key(f"cf_csp_{sel_exp}", _csp_df),
-                                    on_select="ignore",
-                                    selection_mode=[],
-                                )
-                        else:
-                            st.info("No put strikes met pricing/liquidity checks in this snapshot. Try a nearby expiry or refresh.")
-
-                    _explain("\U0001f9e0 What are Delta and Theta?",
-                        "<strong>Delta is your win probability.</strong> A Delta of 0.16 means you have an 84 percent chance to keep all the cash and keep your shares. Lower Delta means safer. "
-                        "<strong>Theta is your daily paycheck.</strong> Every day that passes, the option loses value. That lost value goes straight into your pocket. Time is literally paying you. "
-                        "<strong>OI is how busy the market is.</strong> Higher OI means more traders are active. That means you get better prices when you sell. We filter out anything below 100 OI to protect you.", "neutral")
-
-                    with st.expander("📈 Volatility Skew Surface (Tail Risk)", expanded=False):
-                        st.caption("Visualizing the 'Smile': Higher IV on puts indicates the market is pricing in heavy downside fear.")
-                        try:
-                            regime_label, regime_color, regime_desc = calc_skew_regime(opts_df, price)
-                            st.markdown(
-                                f"""
-                                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 15px; padding: 10px; background: rgba(15, 23, 42, 0.6); border: 1px solid #334155; border-radius: 8px;">
-                                    <span style="background: {regime_color}; color: #ffffff; padding: 4px 10px; border-radius: 4px; font-size: 0.8rem; font-weight: 700; letter-spacing: 0.05em;">
-                                        {regime_label}
-                                    </span>
-                                    <span style="color: #cbd5e1; font-size: 0.85rem;">{regime_desc}</span>
-                                </div>
-                                """,
-                                unsafe_allow_html=True,
-                            )
-                            skew_fig = build_skew_chart(opts_df, price)
-                            if skew_fig:
-                                st.plotly_chart(skew_fig, use_container_width=True, config=_PLOTLY_UI_CONFIG)
-                            else:
-                                st.warning("Insufficient liquidity to plot the volatility skew.")
-                        except Exception:
-                            pass
-
-                    st.divider()
-                    sp1, sp2 = st.columns(2)
-                    with sp1:
-                        st.markdown("#### Bull Put Spread")
-                        ps = Opt.credit_spreads(price, puts, "put_credit")
-                        if ps:
-                            b = ps[0]
-                            st.markdown(f"<div class='sb'><strong>${b['short']:.0f}P/${b['long']:.0f}P</strong> | Cr: ${b['credit_100']:.0f} | ML: ${b['max_loss']:.0f} | POP: {b['pop']:.0f}%</div>", unsafe_allow_html=True)
-                    with sp2:
-                        st.markdown("#### Bear Call Spread")
-                        cs = Opt.credit_spreads(price, calls, "call_credit")
-                        if cs:
-                            b = cs[0]
-                            st.markdown(f"<div class='sr'><strong>${b['short']:.0f}C/${b['long']:.0f}C</strong> | Cr: ${b['credit_100']:.0f} | ML: ${b['max_loss']:.0f} | POP: {b['pop']:.0f}%</div>", unsafe_allow_html=True)
-
-                    _explain("\U0001f9e0 What is a credit spread?",
-                        "A credit spread is like selling insurance with a cap on your worst case. You sell one option and collect cash. Then you buy a cheaper one further away to limit your risk. "
-                        "<strong>POP</strong> is your Probability of Profit. <strong>ML</strong> is your Max Loss, the absolute worst case. <strong>Cr</strong> is the cash you receive today. "
-                        "A 75% POP means you win roughly 3 out of every 4 times you make this trade.", "neutral")
-
-                    if latest_d and (df.index[-1] - latest_d["date"]).days <= 5:
-                        st.divider()
-                        if latest_d["type"] == "blue":
-                            st.markdown(f"""<div class='diamond-blue'>
-                                <div style='font-size:1rem;font-weight:700;margin-bottom:8px'>🔷 BLUE DIAMOND AUTO SUGGESTIONS</div>
-                                <div style='color:#94a3b8;font-size:.85rem;margin-bottom:10px'>
-                                    A Blue Diamond fired {(df.index[-1] - latest_d['date']).days} day(s) ago at ${latest_d['price']:.2f} with composite score {latest_d['score']}.
-                                    Historical probability of profit: <strong style='color:#10b981'>{d_wr:.0f}%</strong> ({d_n} signals backtested).
-                                </div>
-                                <div style='color:#e2e8f0;font-size:.9rem;line-height:1.8'>""", unsafe_allow_html=True)
-                            suggestions = []
+                                else:
+                                    st.caption("No strikes with usable bid/ask for MC PoP in this snapshot.")
+                            except Exception:
+                                st.caption("MC PoP chain table unavailable for this expiration.")
+                        _desk_poc = gold_zone_components.get("POC") if isinstance(gold_zone_components, dict) else None
+                        _desk_hvn = gold_zone_components.get("HVN") if isinstance(gold_zone_components, dict) else None
+                        s1, s2 = st.columns(2)
+                        with s1:
+                            st.markdown("#### Covered Calls")
+                            cc = Opt.covered_calls(price, calls, dte, rfr, poc=_desk_poc, hvn_anchor=_desk_hvn)
                             if cc:
-                                b = cc[0]
-                                suggestions.append(f"<strong>Covered Call:</strong> Sell {nc}x ${b['strike']:.0f}C exp {sel_exp} @ ${b['mid']:.2f} (collect ${b['prem_100']*nc:,.0f})")
+                                opt_cc = next((c for c in cc if c.get("optimal")), cc[0])
+                                b = opt_cc; nc_s = 1
+                                opt_html = '<div style="font-size:.7rem;font-weight:700;color:#06b6d4;margin-bottom:6px">\U0001f3af OPTIMAL PROP-DESK STRIKE</div>' if b.get("optimal") else ""
+                                in_zone = Opt.DELTA_LOW <= abs(b["delta"]) <= Opt.DELTA_HIGH
+                                delta_color = "#10b981" if in_zone else "#f59e0b"
+                                cc_mc_pop = b.get("mc_pop", None)
+                                cc_mc_pop_txt = ""
+                                if cc_mc_pop is not None:
+                                    try:
+                                        _v = float(cc_mc_pop)
+                                        if math.isfinite(_v):
+                                            cc_mc_pop_txt = f" | MC PoP: {_v:.1f}%"
+                                    except (TypeError, ValueError):
+                                        pass
+                                st.markdown(f"<div class='sb'>{opt_html}<strong>SELL {nc_s}x ${b['strike']:.0f}C @ ${b['mid']:.2f}</strong><br><span style='font-size:.85rem;color:#94a3b8'>Exp: {sel_exp} ({dte}DTE) | IV: {b['iv']:.1f}% | <strong style='color:{delta_color}'>\u0394 {b['delta']:.2f}</strong>{cc_mc_pop_txt}<br>Premium: <strong style='color:#10b981'>${b['prem_100'] * nc_s:,.0f}</strong> | OTM: {b['otm_pct']:.1f}% | Ann: {b['ann_yield']:.1f}% | OI: {b['oi']:,}</span>{_theta_gamma_desk_line(b.get('theta_gamma_ratio'))}</div>", unsafe_allow_html=True)
+                                _cc_track_key = re.sub(
+                                    r"[^a-zA-Z0-9_]",
+                                    "_",
+                                    f"cf_track_cc_{ticker}_{sel_exp}_{b['strike']}",
+                                )[:110]
+                                if st.button("Track Trade", key=_cc_track_key, help="Append this optimal covered-call line to the Sentinel Ledger (session only)."):
+                                    _pin_e = st.session_state.get("_cf_opex_pin")
+                                    _dist_pin_e = None
+                                    try:
+                                        if _pin_e is not None:
+                                            _pf = float(_pin_e)
+                                            if np.isfinite(_pf) and _pf > 0:
+                                                _dist_pin_e = round((float(price) / _pf - 1.0) * 100.0, 2)
+                                    except (TypeError, ValueError):
+                                        pass
+                                    _th_day_e = None
+                                    try:
+                                        _th_day_e = round(
+                                            ledger_theta_desk_day(
+                                                float(price),
+                                                float(b["strike"]),
+                                                int(dte),
+                                                float(rfr),
+                                                float(b.get("iv") or 30),
+                                                "call",
+                                                int(nc_s),
+                                            ),
+                                            4,
+                                        )
+                                    except Exception:
+                                        pass
+                                    st.session_state.setdefault("_cf_ledger", []).append(
+                                        {
+                                            "ticker": str(ticker).upper(),
+                                            "strike": float(b["strike"]),
+                                            "premium_100": float(b["prem_100"]),
+                                            "entry_date": datetime.now().strftime("%Y-%m-%d"),
+                                            "leg": "CC",
+                                            "option_type": "call",
+                                            "iv": float(b.get("iv") or 0),
+                                            "expiry": str(sel_exp)[:10],
+                                            "dte_at_entry": int(dte),
+                                            "contracts": int(nc_s),
+                                            "qs_at_entry": float(qs),
+                                            "dist_pin_pct_at_entry": _dist_pin_e,
+                                            "theta_desk_day_entry": _th_day_e,
+                                        }
+                                    )
+                                    st.rerun()
+                                if st.checkbox("All CC strikes", key="exp_5"):
+                                    _cc_df = _options_scan_dataframe(cc, put_table=False)
+                                    streamlit_show_dataframe(
+                                        _cc_df,
+                                        column_config=_options_scan_column_config(put_table=False),
+                                        use_container_width=True,
+                                        hide_index=True,
+                                        key=streamlit_df_widget_key(f"cf_cc_{sel_exp}", _cc_df),
+                                        on_select="ignore",
+                                        selection_mode=[],
+                                    )
+                            else:
+                                st.info("No covered call strikes met pricing/liquidity checks in this snapshot. Try a nearby expiry or refresh.")
+                        with s2:
+                            st.markdown("#### Cash Secured Puts")
+                            csp = Opt.cash_secured_puts(price, puts, dte, rfr, poc=_desk_poc, hvn_anchor=_desk_hvn)
                             if csp:
-                                b = csp[0]
-                                suggestions.append(f"<strong>Cash Secured Put:</strong> Sell 1x ${b['strike']:.0f}P exp {sel_exp} @ ${b['mid']:.2f} (collect ${b['prem_100']:,.0f})")
+                                opt_csp = next((c for c in csp if c.get("optimal")), csp[0])
+                                b = opt_csp
+                                opt_html_p = '<div style="font-size:.7rem;font-weight:700;color:#06b6d4;margin-bottom:6px">\U0001f3af OPTIMAL PROP-DESK STRIKE</div>' if b.get("optimal") else ""
+                                in_zone_p = Opt.DELTA_LOW <= abs(b["delta"]) <= Opt.DELTA_HIGH
+                                delta_color_p = "#10b981" if in_zone_p else "#f59e0b"
+                                csp_mc_pop = b.get("mc_pop", None)
+                                csp_mc_pop_txt = ""
+                                if csp_mc_pop is not None:
+                                    try:
+                                        _v = float(csp_mc_pop)
+                                        if math.isfinite(_v):
+                                            csp_mc_pop_txt = f" | MC PoP: {_v:.1f}%"
+                                    except (TypeError, ValueError):
+                                        pass
+                                st.markdown(f"<div class='sb'>{opt_html_p}<strong>SELL 1x ${b['strike']:.0f}P @ ${b['mid']:.2f}</strong><br><span style='font-size:.85rem;color:#94a3b8'>Exp: {sel_exp} ({dte}DTE) | IV: {b['iv']:.1f}% | <strong style='color:{delta_color_p}'>\u0394 {b['delta']:.2f}</strong>{csp_mc_pop_txt}<br>Premium: <strong style='color:#10b981'>${b['prem_100']:,.0f}</strong> | OTM: {b['otm_pct']:.1f}% | Eff buy: ${b['eff_buy']:.2f} | OI: {b['oi']:,}</span>{_theta_gamma_desk_line(b.get('theta_gamma_ratio'))}</div>", unsafe_allow_html=True)
+                                _csp_track_key = re.sub(
+                                    r"[^a-zA-Z0-9_]",
+                                    "_",
+                                    f"cf_track_csp_{ticker}_{sel_exp}_{b['strike']}",
+                                )[:110]
+                                if st.button("Track Trade", key=_csp_track_key, help="Append this optimal cash-secured put to the Sentinel Ledger (session only)."):
+                                    _pin_e2 = st.session_state.get("_cf_opex_pin")
+                                    _dist_pin_e2 = None
+                                    try:
+                                        if _pin_e2 is not None:
+                                            _pf2 = float(_pin_e2)
+                                            if np.isfinite(_pf2) and _pf2 > 0:
+                                                _dist_pin_e2 = round((float(price) / _pf2 - 1.0) * 100.0, 2)
+                                    except (TypeError, ValueError):
+                                        pass
+                                    _th_day_e2 = None
+                                    try:
+                                        _th_day_e2 = round(
+                                            ledger_theta_desk_day(
+                                                float(price),
+                                                float(b["strike"]),
+                                                int(dte),
+                                                float(rfr),
+                                                float(b.get("iv") or 30),
+                                                "put",
+                                                1,
+                                            ),
+                                            4,
+                                        )
+                                    except Exception:
+                                        pass
+                                    st.session_state.setdefault("_cf_ledger", []).append(
+                                        {
+                                            "ticker": str(ticker).upper(),
+                                            "strike": float(b["strike"]),
+                                            "premium_100": float(b["prem_100"]),
+                                            "entry_date": datetime.now().strftime("%Y-%m-%d"),
+                                            "leg": "CSP",
+                                            "option_type": "put",
+                                            "iv": float(b.get("iv") or 0),
+                                            "expiry": str(sel_exp)[:10],
+                                            "dte_at_entry": int(dte),
+                                            "contracts": 1,
+                                            "qs_at_entry": float(qs),
+                                            "dist_pin_pct_at_entry": _dist_pin_e2,
+                                            "theta_desk_day_entry": _th_day_e2,
+                                        }
+                                    )
+                                    st.rerun()
+                                if st.checkbox("All CSP strikes", key="exp_6"):
+                                    _csp_df = _options_scan_dataframe(csp, put_table=True)
+                                    streamlit_show_dataframe(
+                                        _csp_df,
+                                        column_config=_options_scan_column_config(put_table=True),
+                                        use_container_width=True,
+                                        hide_index=True,
+                                        key=streamlit_df_widget_key(f"cf_csp_{sel_exp}", _csp_df),
+                                        on_select="ignore",
+                                        selection_mode=[],
+                                    )
+                            else:
+                                st.info("No put strikes met pricing/liquidity checks in this snapshot. Try a nearby expiry or refresh.")
+
+                        _explain("\U0001f9e0 What are Delta and Theta?",
+                            "<strong>Delta is your win probability.</strong> A Delta of 0.16 means you have an 84 percent chance to keep all the cash and keep your shares. Lower Delta means safer. "
+                            "<strong>Theta is your daily paycheck.</strong> Every day that passes, the option loses value. That lost value goes straight into your pocket. Time is literally paying you. "
+                            "<strong>OI is how busy the market is.</strong> Higher OI means more traders are active. That means you get better prices when you sell. We filter out anything below 100 OI to protect you.", "neutral")
+
+                        with st.expander("📈 Volatility Skew Surface (Tail Risk)", expanded=False):
+                            st.caption("Visualizing the 'Smile': Higher IV on puts indicates the market is pricing in heavy downside fear.")
+                            try:
+                                regime_label, regime_color, regime_desc = calc_skew_regime(opts_df, price)
+                                st.markdown(
+                                    f"""
+                                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 15px; padding: 10px; background: rgba(15, 23, 42, 0.6); border: 1px solid #334155; border-radius: 8px;">
+                                        <span style="background: {regime_color}; color: #ffffff; padding: 4px 10px; border-radius: 4px; font-size: 0.8rem; font-weight: 700; letter-spacing: 0.05em;">
+                                            {regime_label}
+                                        </span>
+                                        <span style="color: #cbd5e1; font-size: 0.85rem;">{regime_desc}</span>
+                                    </div>
+                                    """,
+                                    unsafe_allow_html=True,
+                                )
+                                skew_fig = build_skew_chart(opts_df, price)
+                                if skew_fig:
+                                    st.plotly_chart(skew_fig, use_container_width=True, config=_PLOTLY_UI_CONFIG)
+                                else:
+                                    st.warning("Insufficient liquidity to plot the volatility skew.")
+                            except Exception:
+                                pass
+
+                        st.divider()
+                        sp1, sp2 = st.columns(2)
+                        with sp1:
+                            st.markdown("#### Bull Put Spread")
+                            ps = Opt.credit_spreads(price, puts, "put_credit")
                             if ps:
                                 b = ps[0]
-                                suggestions.append(f"<strong>Bull Put Spread:</strong> ${b['short']:.0f}/${b['long']:.0f}P exp {sel_exp} credit ${b['credit_100']:,.0f} POP {b['pop']:.0f}%")
-                            for sug in suggestions:
-                                st.markdown(f"<div style='margin:4px 0'>• {sug}</div>", unsafe_allow_html=True)
-                            st.markdown("</div></div>", unsafe_allow_html=True)
-                            _explain("Why these trades on a Blue Diamond?",
-                                f"The Blue Diamond means {latest_d['score']} out of 9 confluence factors aligned bullish. "
-                                "Historically, similar setups have a strong track record. "
-                                "Covered Calls collect premium while riding the trend. "
-                                "Cash Secured Puts let you buy the dip if it comes. "
-                                "Bull Put Spreads give you bullish exposure with capped risk. "
-                                "Pick the strategy that matches your capital and conviction.", "bull")
-                        else:
-                            st.markdown(f"""<div class='diamond-pink'>
-                                <div style='font-size:1rem;font-weight:700;margin-bottom:8px'>💎 PINK DIAMOND: DEFENSIVE POSTURE</div>
-                                <div style='color:#94a3b8;font-size:.85rem;margin-bottom:10px'>
-                                    A Pink Diamond fired {(df.index[-1] - latest_d['date']).days} day(s) ago at ${latest_d['price']:.2f}.
-                                    Confluence composite dropped to {latest_d['score']}. Momentum is exhausting.
-                                </div>
-                                <div style='color:#e2e8f0;font-size:.9rem;line-height:1.8'>""", unsafe_allow_html=True)
+                                st.markdown(f"<div class='sb'><strong>${b['short']:.0f}P/${b['long']:.0f}P</strong> | Cr: ${b['credit_100']:.0f} | ML: ${b['max_loss']:.0f} | POP: {b['pop']:.0f}%</div>", unsafe_allow_html=True)
+                        with sp2:
+                            st.markdown("#### Bear Call Spread")
+                            cs = Opt.credit_spreads(price, calls, "call_credit")
                             if cs:
                                 b = cs[0]
-                                st.markdown(f"<div style='margin:4px 0'>• <strong>Bear Call Spread:</strong> ${b['short']:.0f}/${b['long']:.0f}C credit ${b['credit_100']:,.0f} POP {b['pop']:.0f}%</div>", unsafe_allow_html=True)
+                                st.markdown(f"<div class='sr'><strong>${b['short']:.0f}C/${b['long']:.0f}C</strong> | Cr: ${b['credit_100']:.0f} | ML: ${b['max_loss']:.0f} | POP: {b['pop']:.0f}%</div>", unsafe_allow_html=True)
+
+                        _explain("\U0001f9e0 What is a credit spread?",
+                            "A credit spread is like selling insurance with a cap on your worst case. You sell one option and collect cash. Then you buy a cheaper one further away to limit your risk. "
+                            "<strong>POP</strong> is your Probability of Profit. <strong>ML</strong> is your Max Loss, the absolute worst case. <strong>Cr</strong> is the cash you receive today. "
+                            "A 75% POP means you win roughly 3 out of every 4 times you make this trade.", "neutral")
+
+                        if latest_d and (df.index[-1] - latest_d["date"]).days <= 5:
+                            st.divider()
+                            if latest_d["type"] == "blue":
+                                st.markdown(f"""<div class='diamond-blue'>
+                                    <div style='font-size:1rem;font-weight:700;margin-bottom:8px'>🔷 BLUE DIAMOND AUTO SUGGESTIONS</div>
+                                    <div style='color:#94a3b8;font-size:.85rem;margin-bottom:10px'>
+                                        A Blue Diamond fired {(df.index[-1] - latest_d['date']).days} day(s) ago at ${latest_d['price']:.2f} with composite score {latest_d['score']}.
+                                        Historical probability of profit: <strong style='color:#10b981'>{d_wr:.0f}%</strong> ({d_n} signals backtested).
+                                    </div>
+                                    <div style='color:#e2e8f0;font-size:.9rem;line-height:1.8'>""", unsafe_allow_html=True)
+                                suggestions = []
+                                if cc:
+                                    b = cc[0]
+                                    suggestions.append(f"<strong>Covered Call:</strong> Sell {nc}x ${b['strike']:.0f}C exp {sel_exp} @ ${b['mid']:.2f} (collect ${b['prem_100']*nc:,.0f})")
+                                if csp:
+                                    b = csp[0]
+                                    suggestions.append(f"<strong>Cash Secured Put:</strong> Sell 1x ${b['strike']:.0f}P exp {sel_exp} @ ${b['mid']:.2f} (collect ${b['prem_100']:,.0f})")
+                                if ps:
+                                    b = ps[0]
+                                    suggestions.append(f"<strong>Bull Put Spread:</strong> ${b['short']:.0f}/${b['long']:.0f}P exp {sel_exp} credit ${b['credit_100']:,.0f} POP {b['pop']:.0f}%")
+                                for sug in suggestions:
+                                    st.markdown(f"<div style='margin:4px 0'>• {sug}</div>", unsafe_allow_html=True)
+                                st.markdown("</div></div>", unsafe_allow_html=True)
+                                _explain("Why these trades on a Blue Diamond?",
+                                    f"The Blue Diamond means {latest_d['score']} out of 9 confluence factors aligned bullish. "
+                                    "Historically, similar setups have a strong track record. "
+                                    "Covered Calls collect premium while riding the trend. "
+                                    "Cash Secured Puts let you buy the dip if it comes. "
+                                    "Bull Put Spreads give you bullish exposure with capped risk. "
+                                    "Pick the strategy that matches your capital and conviction.", "bull")
+                            else:
+                                st.markdown(f"""<div class='diamond-pink'>
+                                    <div style='font-size:1rem;font-weight:700;margin-bottom:8px'>💎 PINK DIAMOND: DEFENSIVE POSTURE</div>
+                                    <div style='color:#94a3b8;font-size:.85rem;margin-bottom:10px'>
+                                        A Pink Diamond fired {(df.index[-1] - latest_d['date']).days} day(s) ago at ${latest_d['price']:.2f}.
+                                        Confluence composite dropped to {latest_d['score']}. Momentum is exhausting.
+                                    </div>
+                                    <div style='color:#e2e8f0;font-size:.9rem;line-height:1.8'>""", unsafe_allow_html=True)
+                                if cs:
+                                    b = cs[0]
+                                    st.markdown(f"<div style='margin:4px 0'>• <strong>Bear Call Spread:</strong> ${b['short']:.0f}/${b['long']:.0f}C credit ${b['credit_100']:,.0f} POP {b['pop']:.0f}%</div>", unsafe_allow_html=True)
+                                if cc:
+                                    b = cc[0]
+                                    st.markdown(f"<div style='margin:4px 0'>• <strong>Aggressive Covered Call:</strong> Sell ATM or near-ATM ${b['strike']:.0f}C to maximize premium capture</div>", unsafe_allow_html=True)
+                                st.markdown(f"<div style='margin:4px 0'>• <strong>Tighten Stops:</strong> If below Gold Zone ${gold_zone_price:.2f}, consider reducing exposure</div>", unsafe_allow_html=True)
+                                st.markdown("</div></div>", unsafe_allow_html=True)
+                                _explain("Why go defensive on a Pink Diamond?",
+                                    "The Pink Diamond means bullish momentum has exhausted or confluence collapsed. "
+                                    "This does not mean crash. It means the easy money in the current leg is done. "
+                                    "Bear Call Spreads profit from a pullback. Aggressive CCs lock in premium at the top. "
+                                    "Wait for the next Blue Diamond before entering again aggressively.", "bear")
+
+                        # Greeks, EV & Vol Skew
+                        st.divider()
+                        st.markdown("#### Greeks, Expected Value & Volatility Skew")
+                        gk1, gk2, gk3 = st.columns(3)
+                        with gk1:
                             if cc:
-                                b = cc[0]
-                                st.markdown(f"<div style='margin:4px 0'>• <strong>Aggressive Covered Call:</strong> Sell ATM or near-ATM ${b['strike']:.0f}C to maximize premium capture</div>", unsafe_allow_html=True)
-                            st.markdown(f"<div style='margin:4px 0'>• <strong>Tighten Stops:</strong> If below Gold Zone ${gold_zone_price:.2f}, consider reducing exposure</div>", unsafe_allow_html=True)
-                            st.markdown("</div></div>", unsafe_allow_html=True)
-                            _explain("Why go defensive on a Pink Diamond?",
-                                "The Pink Diamond means bullish momentum has exhausted or confluence collapsed. "
-                                "This does not mean crash. It means the easy money in the current leg is done. "
-                                "Bear Call Spreads profit from a pullback. Aggressive CCs lock in premium at the top. "
-                                "Wait for the next Blue Diamond before entering again aggressively.", "bear")
+                                b0 = cc[0]; iv_d = b0["iv"] / 100 if b0["iv"] > 0 else 0.5; T_y = dte / 365
+                                gr = bs_greeks(price, b0["strike"], T_y, rfr, iv_d, "call")
+                                fv = bs_price(price, b0["strike"], T_y, rfr, iv_d, "call")
+                                edge = b0["mid"] - fv
+                                edge_c = "#10b981" if edge > 0 else "#ef4444"
+                                st.markdown(f"<div class='tc'><div style='font-size:.7rem;color:#64748b;text-transform:uppercase'>TOP CC GREEKS (r={rfr * 100:.2f}%)</div><div style='margin-top:8px;color:#94a3b8;font-size:.85rem'>Delta: <strong style='color:#e2e8f0'>{gr['delta']:.3f}</strong><br>Theta: <strong style='color:#10b981'>${gr['theta']:.3f}/day</strong><br>Vega: <strong style='color:#e2e8f0'>${gr['vega']:.3f}/1%IV</strong><br>Fair: <strong style='color:#e2e8f0'>${fv:.2f}</strong> | Edge: <strong style='color:{edge_c}'>${edge:+.2f}</strong></div></div>", unsafe_allow_html=True)
+                            else:
+                                st.markdown("<div class='tc'><span style='color:#64748b'>No CC data for Greeks</span></div>", unsafe_allow_html=True)
+                        with gk2:
+                            ev_lines = []
+                            if cc:
+                                b0 = cc[0]; pop_cc = min(85, max(50, 100 - b0["otm_pct"] * 5))
+                                ev_cc = calc_ev(b0["prem_100"], b0["prem_100"] * 3, pop_cc)
+                                ec = "#10b981" if ev_cc > 0 else "#ef4444"
+                                ev_lines.append(f"CC ${b0['strike']:.0f}: <strong style='color:{ec}'>${ev_cc:+.0f}</strong> (POP ~{pop_cc:.0f}%)")
+                            if ps:
+                                b0 = ps[0]; ev_ps = calc_ev(b0["credit_100"], b0["max_loss"], b0["pop"])
+                                ec = "#10b981" if ev_ps > 0 else "#ef4444"
+                                ev_lines.append(f"Put Spread: <strong style='color:{ec}'>${ev_ps:+.0f}</strong> (POP {b0['pop']:.0f}%)")
+                            joined = "<br>".join(ev_lines) if ev_lines else "N/A"
+                            st.markdown(f"<div class='tc'><div style='font-size:.7rem;color:#64748b;text-transform:uppercase'>EXPECTED VALUE</div><div style='margin-top:8px;color:#94a3b8;font-size:.85rem'>{joined}</div><div style='color:#64748b;font-size:.75rem;margin-top:6px'>Positive means edge. Negative means walk away.</div></div>", unsafe_allow_html=True)
+                        with gk3:
+                            skew, p_iv, c_iv = calc_vol_skew(price, calls, puts)
+                            if skew is not None:
+                                sc = "#ef4444" if skew > 10 else ("#f59e0b" if skew > 5 else "#10b981")
+                                sm = "Institutions hedging heavily" if skew > 10 else ("Mild put skew" if skew > 5 else "Balanced")
+                                st.markdown(f"<div class='tc'><div style='font-size:.7rem;color:#64748b;text-transform:uppercase'>VOL SKEW</div><div class='mono' style='font-size:1.3rem;color:{sc};margin-top:8px'>{skew:+.1f}%</div><div style='color:#94a3b8;font-size:.85rem;margin-top:4px'>Put IV: {p_iv:.1f}% | Call IV: {c_iv:.1f}%</div><div style='color:#64748b;font-size:.75rem;margin-top:6px'>{sm}</div></div>", unsafe_allow_html=True)
+                            else:
+                                st.markdown("<div class='tc'><div style='font-size:.7rem;color:#64748b'>VOL SKEW</div><div style='color:#94a3b8;margin-top:8px'>Insufficient IV data</div></div>", unsafe_allow_html=True)
 
-                    # Greeks, EV & Vol Skew
-                    st.divider()
-                    st.markdown("#### Greeks, Expected Value & Volatility Skew")
-                    gk1, gk2, gk3 = st.columns(3)
-                    with gk1:
-                        if cc:
-                            b0 = cc[0]; iv_d = b0["iv"] / 100 if b0["iv"] > 0 else 0.5; T_y = dte / 365
-                            gr = bs_greeks(price, b0["strike"], T_y, rfr, iv_d, "call")
-                            fv = bs_price(price, b0["strike"], T_y, rfr, iv_d, "call")
-                            edge = b0["mid"] - fv
-                            edge_c = "#10b981" if edge > 0 else "#ef4444"
-                            st.markdown(f"<div class='tc'><div style='font-size:.7rem;color:#64748b;text-transform:uppercase'>TOP CC GREEKS (r={rfr * 100:.2f}%)</div><div style='margin-top:8px;color:#94a3b8;font-size:.85rem'>Delta: <strong style='color:#e2e8f0'>{gr['delta']:.3f}</strong><br>Theta: <strong style='color:#10b981'>${gr['theta']:.3f}/day</strong><br>Vega: <strong style='color:#e2e8f0'>${gr['vega']:.3f}/1%IV</strong><br>Fair: <strong style='color:#e2e8f0'>${fv:.2f}</strong> | Edge: <strong style='color:{edge_c}'>${edge:+.2f}</strong></div></div>", unsafe_allow_html=True)
-                        else:
-                            st.markdown("<div class='tc'><span style='color:#64748b'>No CC data for Greeks</span></div>", unsafe_allow_html=True)
-                    with gk2:
-                        ev_lines = []
-                        if cc:
-                            b0 = cc[0]; pop_cc = min(85, max(50, 100 - b0["otm_pct"] * 5))
-                            ev_cc = calc_ev(b0["prem_100"], b0["prem_100"] * 3, pop_cc)
-                            ec = "#10b981" if ev_cc > 0 else "#ef4444"
-                            ev_lines.append(f"CC ${b0['strike']:.0f}: <strong style='color:{ec}'>${ev_cc:+.0f}</strong> (POP ~{pop_cc:.0f}%)")
-                        if ps:
-                            b0 = ps[0]; ev_ps = calc_ev(b0["credit_100"], b0["max_loss"], b0["pop"])
-                            ec = "#10b981" if ev_ps > 0 else "#ef4444"
-                            ev_lines.append(f"Put Spread: <strong style='color:{ec}'>${ev_ps:+.0f}</strong> (POP {b0['pop']:.0f}%)")
-                        joined = "<br>".join(ev_lines) if ev_lines else "N/A"
-                        st.markdown(f"<div class='tc'><div style='font-size:.7rem;color:#64748b;text-transform:uppercase'>EXPECTED VALUE</div><div style='margin-top:8px;color:#94a3b8;font-size:.85rem'>{joined}</div><div style='color:#64748b;font-size:.75rem;margin-top:6px'>Positive means edge. Negative means walk away.</div></div>", unsafe_allow_html=True)
-                    with gk3:
-                        skew, p_iv, c_iv = calc_vol_skew(price, calls, puts)
-                        if skew is not None:
-                            sc = "#ef4444" if skew > 10 else ("#f59e0b" if skew > 5 else "#10b981")
-                            sm = "Institutions hedging heavily" if skew > 10 else ("Mild put skew" if skew > 5 else "Balanced")
-                            st.markdown(f"<div class='tc'><div style='font-size:.7rem;color:#64748b;text-transform:uppercase'>VOL SKEW</div><div class='mono' style='font-size:1.3rem;color:{sc};margin-top:8px'>{skew:+.1f}%</div><div style='color:#94a3b8;font-size:.85rem;margin-top:4px'>Put IV: {p_iv:.1f}% | Call IV: {c_iv:.1f}%</div><div style='color:#64748b;font-size:.75rem;margin-top:6px'>{sm}</div></div>", unsafe_allow_html=True)
-                        else:
-                            st.markdown("<div class='tc'><div style='font-size:.7rem;color:#64748b'>VOL SKEW</div><div style='color:#94a3b8;margin-top:8px'>Insufficient IV data</div></div>", unsafe_allow_html=True)
-
-                    _explain("\U0001f9e0 What do these numbers mean for me?",
-                        "<strong>Expected Value (EV)</strong> is your long term profit margin. Think of it like calculating net profit per product after returns. Positive EV means you have a real edge. Negative means avoid the trade. "
-                        "<strong>Volatility Skew</strong> tells you if big institutions are buying crash insurance. When put prices are much higher than call prices, fear is elevated. You get fatter premiums but the risk is also higher. "
-                        "<strong>Edge</strong> is the difference between the market price and the mathematically fair price. Positive Edge means the market is overpaying you. That is exactly what you want.", "neutral")
+                        _explain("\U0001f9e0 What do these numbers mean for me?",
+                            "<strong>Expected Value (EV)</strong> is your long term profit margin. Think of it like calculating net profit per product after returns. Positive EV means you have a real edge. Negative means avoid the trade. "
+                            "<strong>Volatility Skew</strong> tells you if big institutions are buying crash insurance. When put prices are much higher than call prices, fear is elevated. You get fatter premiums but the risk is also higher. "
+                            "<strong>Edge</strong> is the difference between the market price and the mathematically fair price. Positive Edge means the market is overpaying you. That is exactly what you want.", "neutral")
+                    else:
+                        st.warning(
+                            "This expiration returned an empty chain from the feed after walking nearby dates. "
+                            "Pick another expiry or retry when the options pit is live."
+                        )
                 else:
-                    st.warning(
-                        "This expiration returned an empty chain from the feed after walking nearby dates. "
-                        "Pick another expiry or retry when the options pit is live."
+                    st.markdown(
+                        f"<div class='tc'><div style='text-align:center'><span style='color:#f59e0b;font-size:.75rem;font-weight:700;letter-spacing:.12em'>OPTIONS FEED</span><br>"
+                        f"<span style='font-size:1.25rem;font-weight:700;color:#e2e8f0'>{_html_mod.escape(ticker)} @ ${price:.2f}</span>"
+                        f"<br><span style='color:#94a3b8;font-size:.82rem'>No expirations returned. Not necessarily illiquid; often a data gap.</span></div></div>",
+                        unsafe_allow_html=True,
                     )
-            else:
-                st.markdown(
-                    f"<div class='tc'><div style='text-align:center'><span style='color:#f59e0b;font-size:.75rem;font-weight:700;letter-spacing:.12em'>OPTIONS FEED</span><br>"
-                    f"<span style='font-size:1.25rem;font-weight:700;color:#e2e8f0'>{_html_mod.escape(ticker)} @ ${price:.2f}</span>"
-                    f"<br><span style='color:#94a3b8;font-size:.82rem'>No expirations returned. Not necessarily illiquid; often a data gap.</span></div></div>",
-                    unsafe_allow_html=True,
-                )
-                st.info(
-                    "Yahoo Finance sometimes omits option chains off-hours, under load, or on Streamlit Cloud. "
-                    "Use **Refresh** to bust the cache and pull again. If it persists, open your broker’s chain for the same symbol."
-                )
-                if st.button("Refresh options data", key="retry_opts_chain", help="Clears cached option expirations and reloads"):
-                    list_option_expiration_dates.clear()
-                    fetch_options.clear()
-                    st.rerun()
+                    st.info(
+                        "Yahoo Finance sometimes omits option chains off-hours, under load, or on Streamlit Cloud. "
+                        "Use **Refresh** to bust the cache and pull again. If it persists, open your broker’s chain for the same symbol."
+                    )
+                    if st.button("Refresh options data", key="retry_opts_chain", help="Clears cached option expirations and reloads"):
+                        list_option_expiration_dates.clear()
+                        fetch_options.clear()
+                        st.rerun()
 
-            # ══════════════════════════════════════════════════════════════════
+                # ══════════════════════════════════════════════════════════════════
 
     with dash_tab_intel:
             #  SECTION 5 \u2014 PSYCHOLOGY & RISK MANAGEMENT
@@ -2459,16 +2573,32 @@ def main():
                         except Exception as e:
                             scan_failed.append((tkr, type(e).__name__))
                     scan_progress.empty()
-                    if scan_failed:
-                        failed_line = ", ".join(f"{_html_mod.escape(t)} ({err})" for t, err in scan_failed[:12])
-                        more = f" (+{len(scan_failed) - 12} more)" if len(scan_failed) > 12 else ""
+                    st.session_state["_cf_scanner_bundle"] = {
+                        "results": list(scanner_results),
+                        "failed": list(scan_failed),
+                        "watchlist_tickers": list(watchlist_tickers),
+                        "log_returns_df": log_returns_df,
+                    }
+
+                _scan_bundle = st.session_state.get("_cf_scanner_bundle")
+                if _scan_bundle:
+                    _scan_failed = _scan_bundle.get("failed") or []
+                    if _scan_failed:
+                        failed_line = ", ".join(f"{_html_mod.escape(t)} ({err})" for t, err in _scan_failed[:12])
+                        more = f" (+{len(_scan_failed) - 12} more)" if len(_scan_failed) > 12 else ""
                         st.warning(f"Some symbols could not be scanned: {failed_line}{more}")
+
+                    scanner_results = list(_scan_bundle.get("results") or [])
+                    watchlist_tickers_scn = _scan_bundle.get("watchlist_tickers") or watchlist_tickers
+                    log_returns_df = _scan_bundle.get("log_returns_df")
+                    if log_returns_df is None:
+                        log_returns_df = pd.DataFrame()
 
                     if scanner_results:
                         if scanner_sort_mode == "Highest confluence first":
                             scanner_results.sort(key=lambda x: x["cp_score"], reverse=True)
                         else:
-                            order = {t: i for i, t in enumerate(watchlist_tickers)}
+                            order = {t: i for i, t in enumerate(watchlist_tickers_scn)}
                             scanner_results.sort(key=lambda x: order.get(x["ticker"], 10_000))
 
                         def _render_scanner_options_data_table():
@@ -2553,7 +2683,7 @@ def main():
                                         for r in _blues_alloc
                                     ],
                                     total_capital=50000,
-                                    watchlist_tickers=watchlist_tickers,
+                                    watchlist_tickers=watchlist_tickers_scn,
                                     log_returns_df=log_returns_df,
                                 )
                                 if _alloc_rows:
@@ -2678,7 +2808,7 @@ def main():
                                             for r in _pre_signal
                                         ],
                                         total_capital=float(equity_capital),
-                                        watchlist_tickers=watchlist_tickers,
+                                        watchlist_tickers=watchlist_tickers_scn,
                                         log_returns_df=log_returns_df,
                                     )
                                     for row in _eq_alloc:
@@ -2775,6 +2905,10 @@ def main():
                                 st.caption(
                                     "🔥 **IMMINENT BREAKOUT** = Volatility coil + RS vs SPY + accumulation near Gold/Shadow floor. "
                                     "Suggested shares respect full Kelly + correlation haircut."
+                                )
+                                st.divider()
+                                _render_equity_setup_desk(
+                                    scanner_results, "cf_equity_desk_scanner", prefer_ticker=ticker
                                 )
                             except Exception:
                                 st.caption(
