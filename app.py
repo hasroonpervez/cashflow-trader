@@ -83,9 +83,10 @@ for _import_try in range(_IMPORT_KEYERROR_RETRIES):
             )
             from modules.data import (
                 retry_fetch, _yfinance_ticker, _client_suggests_mobile_chart,
-                fetch_stock, watchlist_tape_pct_changes, fetch_intraday_series,
+                fetch_stock, fetch_intraday_series,
                 fetch_info, fetch_options, list_option_expiration_dates, compute_iv_rank_proxy, fetch_news_headlines,
-                fetch_earnings_date, fetch_earnings_calendar_display, fetch_macro,
+                fetch_earnings_date, fetch_earnings_calendar_display,
+                fetch_desk_market_snapshot, fetch_equity_daily_closes_wide,
                 _PLOTLY_UI_CONFIG, _PLOTLY_PAPER_BG, _PLOTLY_PLOT_BG,
                 _PLOTLY_CASH_UP, _PLOTLY_CASH_DOWN, _PLOTLY_GRID, _PLOTLY_FONT_MAIN, _PLOTLY_BLUE, _PLOTLY_AXIS_TITLE,
             )
@@ -635,11 +636,14 @@ def main():
             on_change=_persist_use_quant_models,
         )
 
+    # One Yahoo batch for tape + macro (``build_context`` reuses the same snapshot).
+    _desk_snap = fetch_desk_market_snapshot(tuple(watch_items))
+
     # Clickable ticker tape (chunk rows on wide lists so columns stay usable on mobile)
     if watch_items:
         st.markdown('<p class="cf-tape-title">Watchlist tape</p>', unsafe_allow_html=True)
         st.caption("Tap a symbol to promote it to the active ticker. Daily move is versus the prior session close (cached).")
-        _tape_pcts = watchlist_tape_pct_changes(tuple(watch_items))
+        _tape_pcts = _desk_snap.tape_pcts
         _TAPE_CHUNK = 8
         tape_i = 0
         for row_start in range(0, len(watch_items), _TAPE_CHUNK):
@@ -706,7 +710,7 @@ def main():
 
     # ── BUILD CONTEXT (all fetches + computations in one shot) ──
     from modules.pages import build_context
-    ctx = build_context(ticker, cfg)
+    ctx = build_context(ticker, cfg, desk_snapshot=_desk_snap)
     if ctx is None:
         _sym_e = _html_mod.escape(str(ticker))
         st.error(
@@ -722,7 +726,11 @@ def main():
             except Exception:
                 pass
             try:
-                watchlist_tape_pct_changes.clear()
+                fetch_desk_market_snapshot.clear()
+            except Exception:
+                pass
+            try:
+                fetch_equity_daily_closes_wide.clear()
             except Exception:
                 pass
             st.rerun()
@@ -787,12 +795,7 @@ def main():
         _tku = str(ticker).strip().upper()
         if _tku not in _risk_syms:
             _risk_syms.append(_tku)
-        _cm = {}
-        for _rt in _risk_syms:
-            _rdf = fetch_stock(_rt, "1y", "1d")
-            if _rdf is not None and not _rdf.empty and "Close" in _rdf.columns:
-                _cm[_rt] = pd.to_numeric(_rdf["Close"], errors="coerce")
-        _risk_closes_df = pd.DataFrame(_cm).dropna(how="all")
+        _risk_closes_df = fetch_equity_daily_closes_wide(tuple(_risk_syms), "1y")
         if len(_risk_closes_df.columns) >= 2 and len(_risk_closes_df) >= 5:
             _portfolio_lr_df = TA.ffd_returns_from_closes(_risk_closes_df, d=0.4)
             if _portfolio_lr_df.empty:

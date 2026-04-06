@@ -11,6 +11,7 @@ import yfinance as yf
 import time
 from curl_cffi import requests as curl_requests
 from datetime import datetime, timedelta
+from typing import NamedTuple, Optional
 
 # yfinance 0.2+ requires curl_cffi sessions for Yahoo (TLS fingerprinting). One shared
 # session for all Tickers, ``yf.download``, and direct JSON calls — connection reuse and
@@ -302,17 +303,97 @@ def fetch_stock(ticker, period="1y", interval="1d"):
         return None
 
 
-@st.cache_data(ttl=120)
-def watchlist_tape_pct_changes(symbols: tuple) -> dict:
-    """One Yahoo batch download for the whole tape — never raises; missing symbols stay ``None``."""
-    syms = tuple(str(s).upper().strip() for s in symbols if str(s).strip())
-    out = {s: None for s in syms}
-    if not syms:
-        return out
+# Macro strip symbols (unioned with the watchlist for a single desk snapshot download).
+_MACRO_PANEL_TICKERS = ("^VIX", "^TNX", "UUP", "SPY", "QQQ")
+_MACRO_TICKER_TO_LABEL = {
+    "^VIX": "VIX",
+    "^TNX": "10Y Yield",
+    "UUP": "DXY (UUP)",
+    "SPY": "SPY",
+    "QQQ": "QQQ",
+}
+
+
+def _macro_defaults_tuple() -> tuple[dict, Optional[pd.DataFrame]]:
+    d = {
+        "10Y Yield": {"price": 4.5, "chg": 0.0},
+        "VIX": {"price": 20.0, "chg": 0.0},
+    }
+    return d, None
+
+
+def _yf_close_matrix_from_raw(raw, download_syms: list) -> Optional[pd.DataFrame]:
+    if raw is None or getattr(raw, "empty", True):
+        return None
     try:
-        df = yf.download(
-            list(syms),
-            period="12d",
+        close = raw["Close"]
+    except (KeyError, TypeError, ValueError):
+        return None
+    if isinstance(close, pd.Series):
+        name = download_syms[0] if len(download_syms) == 1 else "Close"
+        close = close.to_frame(name=name)
+    return close if isinstance(close, pd.DataFrame) else None
+
+
+def _tape_pcts_from_close_matrix(close: pd.DataFrame, syms: tuple) -> dict:
+    out = {s: None for s in syms}
+    for sym in syms:
+        if sym not in close.columns:
+            continue
+        c = pd.to_numeric(close[sym], errors="coerce").dropna()
+        if len(c) >= 2 and float(c.iloc[-2]) != 0:
+            out[sym] = float((float(c.iloc[-1]) / float(c.iloc[-2]) - 1.0) * 100.0)
+    return out
+
+
+def _macro_bundle_from_close_matrix(close: pd.DataFrame) -> tuple[dict, Optional[pd.DataFrame]]:
+    data: dict = {}
+    vix_hist = None
+    syms = list(_MACRO_PANEL_TICKERS)
+    for sym in syms:
+        label = _MACRO_TICKER_TO_LABEL.get(sym)
+        if not label or sym not in close.columns:
+            continue
+        s = pd.to_numeric(close[sym], errors="coerce").dropna()
+        if len(s) < 1:
+            continue
+        last = float(s.iloc[-1])
+        prev = float(s.iloc[-2]) if len(s) >= 2 else last
+        prev_f = float(prev) if prev else 0.0
+        chg = (last / prev_f - 1.0) * 100.0 if prev_f else 0.0
+        data[label] = {"price": last, "chg": chg}
+    if "^VIX" in close.columns:
+        vx = pd.to_numeric(close["^VIX"], errors="coerce").dropna()
+        if len(vx) >= 1:
+            vix_hist = pd.DataFrame({"Close": vx.astype(float)})
+    if "10Y Yield" not in data:
+        data["10Y Yield"] = {"price": 4.5, "chg": 0.0}
+    if "VIX" not in data:
+        data["VIX"] = {"price": 20.0, "chg": 0.0}
+    return data, vix_hist
+
+
+class DeskMarketSnapshot(NamedTuple):
+    """Single ``yf.download`` worth of sidebar tape + macro/VIX glance data."""
+
+    tape_pcts: dict
+    macro: dict
+    vix_1mo_df: Optional[pd.DataFrame]
+
+
+@st.cache_data(ttl=120)
+def fetch_desk_market_snapshot(watch_syms: tuple) -> DeskMarketSnapshot:
+    """One Yahoo batch for **watchlist ∪ macro panel** — sidebar tape + macro strip share one timeout.
+
+    Replaces separate tape + ``fetch_macro`` downloads on the main desk run (~2× → 1× Yahoo calls).
+    """
+    wl = tuple(str(s).upper().strip() for s in watch_syms if str(s).strip())
+    all_syms = sorted(set(wl) | set(_MACRO_PANEL_TICKERS))
+    out_tape = {s: None for s in wl}
+    try:
+        raw = yf.download(
+            all_syms,
+            period="1mo",
             interval="1d",
             threads=False,
             progress=False,
@@ -321,20 +402,54 @@ def watchlist_tape_pct_changes(symbols: tuple) -> dict:
             timeout=_YAHOO_YF_TIMEOUT,
         )
     except Exception:
-        return out
-    if df is None or df.empty:
-        return out
+        m, v = _macro_defaults_tuple()
+        return DeskMarketSnapshot(out_tape, m, v)
+    close = _yf_close_matrix_from_raw(raw, all_syms)
+    if close is None:
+        m, v = _macro_defaults_tuple()
+        return DeskMarketSnapshot(out_tape, m, v)
+    tape = _tape_pcts_from_close_matrix(close, wl)
+    macro, vix_df = _macro_bundle_from_close_matrix(close)
+    return DeskMarketSnapshot(tape, macro, vix_df)
+
+
+@st.cache_data(ttl=300)
+def fetch_equity_daily_closes_wide(symbols: tuple, period: str = "1y") -> pd.DataFrame:
+    """Multi-ticker daily closes in **one** ``yf.download`` (portfolio risk / correlation block)."""
+    syms = tuple(str(s).upper().strip() for s in symbols if str(s).strip())
+    if not syms:
+        return pd.DataFrame()
     try:
-        close = df["Close"]
-    except (KeyError, TypeError, ValueError):
-        return out
+        raw = yf.download(
+            list(syms),
+            period=period,
+            interval="1d",
+            threads=False,
+            progress=False,
+            auto_adjust=True,
+            session=_YAHOO_SESSION,
+            timeout=_YAHOO_YF_TIMEOUT,
+        )
+    except Exception:
+        return pd.DataFrame()
+    close = _yf_close_matrix_from_raw(raw, list(syms))
+    if close is None:
+        return pd.DataFrame()
+    out: dict = {}
     for sym in syms:
         if sym not in close.columns:
             continue
-        c = pd.to_numeric(close[sym], errors="coerce").dropna()
-        if len(c) >= 2 and float(c.iloc[-2]) != 0:
-            out[sym] = float((float(c.iloc[-1]) / float(c.iloc[-2]) - 1.0) * 100.0)
-    return out
+        s = pd.to_numeric(close[sym], errors="coerce").dropna()
+        if len(s) >= 1:
+            out[sym] = s
+    if not out:
+        return pd.DataFrame()
+    return pd.DataFrame(out).dropna(how="all")
+
+
+def watchlist_tape_pct_changes(symbols: tuple) -> dict:
+    """Tape % changes; uses ``fetch_desk_market_snapshot`` (same batch as macro when watchlist non-empty)."""
+    return fetch_desk_market_snapshot(symbols).tape_pcts
 
 
 @st.cache_data(ttl=120)
@@ -991,75 +1106,8 @@ def fetch_earnings_calendar_display(ticker: str):
         return pd.DataFrame(), None
 
 
-_MACRO_PANEL_TICKERS = ("^VIX", "^TNX", "UUP", "SPY", "QQQ")
-_MACRO_TICKER_TO_LABEL = {
-    "^VIX": "VIX",
-    "^TNX": "10Y Yield",
-    "UUP": "DXY (UUP)",
-    "SPY": "SPY",
-    "QQQ": "QQQ",
-}
-
-
-@st.cache_data(ttl=300)
 def fetch_macro():
-    """Macro strip + ^VIX daily history for the glance spark in **one** ``yf.download`` batch.
-
-    Sequential per-symbol ``history()`` calls were up to ~5s each (~25s on a tar-pitted IP) and
-    often dominated ``build_context`` wall time alongside a separate ^VIX monthly fetch.
-    """
-    data: dict = {}
-    vix_hist = None
-    syms = list(_MACRO_PANEL_TICKERS)
-    try:
-        raw = yf.download(
-            syms,
-            period="1mo",
-            interval="1d",
-            threads=False,
-            progress=False,
-            auto_adjust=True,
-            session=_YAHOO_SESSION,
-            timeout=_YAHOO_YF_TIMEOUT,
-        )
-    except Exception:
-        raw = None
-    if raw is None or raw.empty:
-        data["10Y Yield"] = {"price": 4.5, "chg": 0.0}
-        data["VIX"] = {"price": 20.0, "chg": 0.0}
-        return data, None
-    try:
-        close = raw["Close"]
-    except (KeyError, TypeError, ValueError):
-        data["10Y Yield"] = {"price": 4.5, "chg": 0.0}
-        data["VIX"] = {"price": 20.0, "chg": 0.0}
-        return data, None
-
-    # Multi-ticker download → DataFrame of closes; rare single-column edge case → Series
-    if isinstance(close, pd.Series):
-        close = close.to_frame(name=syms[0] if syms else "Close")
-
-    for sym in syms:
-        label = _MACRO_TICKER_TO_LABEL.get(sym)
-        if not label or sym not in close.columns:
-            continue
-        s = pd.to_numeric(close[sym], errors="coerce").dropna()
-        if len(s) < 1:
-            continue
-        last = float(s.iloc[-1])
-        prev = float(s.iloc[-2]) if len(s) >= 2 else last
-        prev_f = float(prev) if prev else 0.0
-        chg = (last / prev_f - 1.0) * 100.0 if prev_f else 0.0
-        data[label] = {"price": last, "chg": chg}
-
-    if "^VIX" in close.columns:
-        vx = pd.to_numeric(close["^VIX"], errors="coerce").dropna()
-        if len(vx) >= 1:
-            vix_hist = pd.DataFrame({"Close": vx.astype(float)})
-
-    if "10Y Yield" not in data:
-        data["10Y Yield"] = {"price": 4.5, "chg": 0.0}
-    if "VIX" not in data:
-        data["VIX"] = {"price": 20.0, "chg": 0.0}
-    return data, vix_hist
+    """Macro strip + VIX glance history via the macro-only desk snapshot (watchlist empty)."""
+    s = fetch_desk_market_snapshot(tuple())
+    return s.macro, s.vix_1mo_df
 
