@@ -189,7 +189,7 @@ Integer differentiation (**d = 1**, e.g. simple log-returns) pushes series towar
 
 - **HMM regimes (FFD)** — Gaussian HMM trains on **FFD-level differences** plus short rolling volatility (stationary features with memory); `fit` / `predict_proba` stay inside `try/except` so singular covariance cases do not crash the app.
 - **Scanner threading** — Rolling Edge Capture and other modules still use a **bounded** pool with `submit_with_script_ctx`. **v20.0** runs the **full watchlist Diamond scan sequentially** so **cluster penalties** see a deterministic **peer-Blue** ordering (correlation context is shared across tickers in one pass).
-- **Data layer** — `fetch_stock` is wrapped with `@st.cache_data(ttl=300)`; an **empty** Yahoo history prints a **stderr** warning (visible in Streamlit Cloud logs) instead of failing silently.
+- **Data layer** — `fetch_stock` uses `@st.cache_data(ttl=300)` (5 minutes). **`modules/data.py`** routes **yfinance** and direct Yahoo JSON fallbacks through a **single shared `curl_cffi` session** (`Session(impersonate="chrome")`), which **yfinance 0.2+ requires** (a stdlib `requests.Session` is rejected). **`retry_fetch`** retries **only on exceptions**, not on **empty** history, so throttled IPs do not trigger triple Yahoo calls and long sleeps (helps avoid **`/script-health-check` 503** timeouts on Cloud). The **watchlist tape** uses **one** `yf.download` batch per list (`watchlist_tape_pct_changes`, **120s** cache) instead of **N** per-symbol `history` calls. Empty bars still log a **stderr** warning; **`yfinance`** may print **`possibly delisted`** for liquid tickers when Yahoo returns an empty payload — that is usually **egress throttling / bot scoring**, not a real delisting.
 - **Diamond detection** — **Hurst exponent** on `Close` adapts **RSI** length (8 if `H < 0.45`, 21 if `H > 0.55`, else 14) and **MACD** fast/slow/signal by the same scale; when `H > 0.55`, **Blue** diamonds also require **MACD line > signal** (when both are defined). **v18** layers **GEX regime** bonuses/penalties on Blue scores when a gamma flip resolves. **v19** adds a **scaled Whale bonus** on Blue from **volume Z-score**: **+1** if **Z > 2.0**, **+2** if **Z > 3.0**. **v20** adds optional **cluster guard** (−2 composite when ρ **> 0.75** vs another **Blue** in the same scanner pass). **v22** adds **`Opt.detect_pre_diamond`** on the scanner path (three-bar **Hurst-aligned** confluence slice, **shadow** low from **`TA.get_shadow_move`**, optional **SPY** dataframe for **3d** relative strength).
 - **Skew-aware BLUF** — If **OTM put IV ≥ 120% of OTM call IV** (when call IV is positive) and daily structure is **not BEARISH**, routing prioritizes **SELL CASH SECURED PUTS** even when the tape is only neutral (after covered-call and fear-score rules).
 - **Walk-up limit** — The **Recommended Trade** card shows **(bid + mid) / 2** per share for **short premium** as a passive fill anchor (e.g. Robinhood-style limit sells), including the strict-filter **fallback** strike path when present.
@@ -235,7 +235,7 @@ cashflow-trader/
 └── modules/
     ├── __init__.py
     ├── config.py             # Config persistence, defaults, st.secrets overlay
-    ├── data.py               # yfinance fetchers, retry/backoff, fetch_stock cache (300s), macro
+    ├── data.py               # yfinance + Yahoo HTTP (shared curl_cffi session), fetch_stock cache (300s), batched tape, macro
     ├── ta.py                 # TA class — indicators, **`apply_ffd`**, **adaptive `get_dark_pool_proxy`**, **`get_shadow_move` (whale band)**, **`get_correlation_matrix`**, HVN / volume profile
     ├── options.py            # Black-Scholes, Corrado-Su, EV, Kelly, Quant Edge, **GEX / gamma flip / `predict_opex_pin`**, Diamonds, **`Opt.detect_pre_diamond`**, **`Opt.portfolio_allocation`**, **`scan_single_ticker`** (optional **`spy_df`**), **`watchlist_correlation_matrix_cached`**, **MC PoP**, **`PortfolioRisk`**
     ├── sentiment.py          # **Bayesian-style `analyze_news_bias`**, HMM (FFD), CC sim, Alerts, QuantBacktest
@@ -288,6 +288,18 @@ Covers `TA.get_correlation_matrix` (FFD-return path), earnings runway spark seri
 5. (Optional) Add secrets in Streamlit Cloud dashboard under Settings → Secrets
 
 If the app fails to import, check Cloud logs: mismatched commits (e.g. `app.py` importing a symbol removed from `modules/ui_helpers.py`) cause immediate `ImportError` on boot.
+
+### Yahoo data and shared IPs (scanner “goes dark”)
+
+Community Cloud apps often **share egress IPs**. Heavy watchlists plus frequent reruns can cause Yahoo to **throttle or block** responses. **`yfinance`** then returns **empty** history and may log **`$TICKER: possibly delisted; no price data found`** even for major symbols — that message is a **false flag** when the real issue is **rate limiting**, not delisting.
+
+**What to do:**
+
+- **Reboot the app** in the Streamlit dashboard (**⋯ → Reboot app**) to get a **fresh container** and often a **new IP**.
+- Rely on **caching** already in the repo (`fetch_stock` **300s**, tape batch **120s**); avoid hammering **Scan Watchlist** unnecessarily.
+- Prefer a **shorter watchlist** for 24/7 Cloud use if problems recur; mega-caps and indices add traffic without always helping a focused radar.
+
+If Cloud logs show **`503 GET /script-health-check`** around **60s**, the script was taking too long to become healthy — the data-layer changes above reduce redundant Yahoo work; a reboot still helps after a bad IP day.
 
 ---
 
@@ -366,7 +378,7 @@ If the earnings calendar endpoint returns no rows, the app falls back to the pri
 
 ## Known Limitations
 
-- Yahoo Finance may throttle or block symbols on Streamlit Cloud (more liberal locally)
+- **Yahoo Finance** may **throttle or block** requests from **Streamlit Community Cloud** (shared IPs, bot heuristics). Symptoms: **empty** price data, scanner rows with **n/a**, and **`possibly delisted`** stderr from **`yfinance`** for symbols that still trade. **Reboot** the app for a new IP; reduce watchlist size and rerun frequency. The app uses **curl_cffi** (browser impersonation), **caching**, **batched tape downloads**, and **no retry-on-empty** to stay within practical limits — not a paid data feed.
 - Config persistence is local-only; Cloud deploys reset the filesystem
 - You may still see occasional `missing ScriptRunContext` lines in Cloud logs from threads outside the app’s pool (Streamlit labels many as ignorable in bare mode); parallel cached fetches use `submit_with_script_ctx` to minimize this
 - Micro-cap tickers (e.g. BMNR) may lack options chains; the desk falls back gracefully
