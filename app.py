@@ -708,10 +708,24 @@ def main():
     from modules.pages import build_context
     ctx = build_context(ticker, cfg)
     if ctx is None:
+        _sym_e = _html_mod.escape(str(ticker))
         st.error(
-            f"Data feed unavailable for {ticker}. Yahoo Finance may be throttling or the tape may be quiet. "
-            "We will try again the moment you refresh."
+            f"**Price data unavailable** for `{_sym_e}`. "
+            "Yahoo Finance often **rate-limits** shared servers (Streamlit Community Cloud shares IPs), "
+            "so liquid names like this can still fail—it is usually throttling, not a bad symbol.\n\n"
+            "**Try:** another ticker from the watchlist tape; **⋯ → Reboot app** in Streamlit Cloud for a fresh IP; "
+            "or clear the cached fetch below and retry (otherwise a miss can stay cached up to **5 minutes**)."
         )
+        if st.button("Clear price cache & retry", key="cf_clear_price_cache_retry", use_container_width=True):
+            try:
+                fetch_stock.clear()
+            except Exception:
+                pass
+            try:
+                watchlist_tape_pct_changes.clear()
+            except Exception:
+                pass
+            st.rerun()
         st.stop()
 
     # Unpack context into locals; rendering code below uses these directly.
