@@ -17,14 +17,17 @@ from datetime import datetime, timedelta
 # consistent cookies. Community Cloud empty bars + “possibly delisted” are usually
 # throttling on shared egress, not actual delistings.
 #
-# ``impersonate="safari15_5"`` + short default timeout: Yahoo sometimes “tar-pits” (slow
-# hang → curl 28 at ~30s). A 5s cap fails fast so the scanner thread stays responsive.
+# ``impersonate="safari15_5"`` + 5s session timeout, plus ``timeout=`` on every
+# ``Ticker.history`` / ``yf.download`` — yfinance’s own HTTP layer can ignore session
+# defaults and wait ~30s unless the call passes an explicit cap.
 _YAHOO_BROWSER_UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
     "(KHTML, like Gecko) Version/15.5 Safari/605.1.15"
 )
 _YAHOO_SESSION = curl_requests.Session(impersonate="safari15_5", timeout=5.0)
 _YAHOO_SESSION.headers.update({"Accept-Language": "en-US,en;q=0.9"})
+# yfinance uses its own per-call timeout for chart/price HTTP (often ~10–30s if omitted).
+_YAHOO_YF_TIMEOUT = 5.0
 
 # Yahoo JSON API (same family yfinance uses) — fallback when Ticker.options is transiently empty.
 _YAHOO_OPTIONS_HEADERS = {
@@ -113,7 +116,7 @@ def _option_expirations_yfinance(symbol: str, attempts: int = 5) -> list[str]:
             t = _yfinance_ticker(sym)
             if attempt == 0:
                 try:
-                    t.history(period="5d", interval="1d")
+                    t.history(period="5d", interval="1d", timeout=_YAHOO_YF_TIMEOUT)
                 except Exception:
                     pass
             raw = getattr(t, "options", None)
@@ -183,7 +186,9 @@ _PLOTLY_SLATE = "#64748b"
 @st.cache_data(ttl=300)
 def fetch_stock(ticker, period="1y", interval="1d"):
     def _fetch():
-        df = _yfinance_ticker(ticker).history(period=period, interval=interval)
+        df = _yfinance_ticker(ticker).history(
+            period=period, interval=interval, timeout=_YAHOO_YF_TIMEOUT
+        )
         if df.empty:
             print(
                 f"[cashflow-trader] WARNING: fetch_stock empty DataFrame "
@@ -215,6 +220,7 @@ def watchlist_tape_pct_changes(symbols: tuple) -> dict:
             progress=False,
             auto_adjust=True,
             session=_YAHOO_SESSION,
+            timeout=_YAHOO_YF_TIMEOUT,
         )
     except Exception:
         return out
@@ -247,7 +253,9 @@ def _ticker_pct_change_1d(symbol: str):
 def fetch_intraday_series(symbol, period="5d", interval="1h"):
     """Cached intraday close series for compact UI sparklines."""
     try:
-        hist = _yfinance_ticker(symbol).history(period=period, interval=interval)
+        hist = _yfinance_ticker(symbol).history(
+            period=period, interval=interval, timeout=_YAHOO_YF_TIMEOUT
+        )
         if hist is None or hist.empty or "Close" not in hist.columns:
             return pd.Series(dtype=float)
         s = pd.to_numeric(hist["Close"], errors="coerce").dropna()
@@ -870,7 +878,7 @@ def fetch_macro():
     data = {}
     for label, sym in {"VIX": "^VIX", "10Y Yield": "^TNX", "DXY (UUP)": "UUP", "SPY": "SPY", "QQQ": "QQQ"}.items():
         try:
-            df = _yfinance_ticker(sym).history(period="5d")
+            df = _yfinance_ticker(sym).history(period="5d", timeout=_YAHOO_YF_TIMEOUT)
             if not df.empty:
                 last = df["Close"].iloc[-1]
                 prev = df["Close"].iloc[-2] if len(df) >= 2 else last
