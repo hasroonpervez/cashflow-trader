@@ -47,6 +47,68 @@ Dealers hedge option **gamma** by trading the underlying. Near **expiry**, net *
 - **Shadow breakout** — If **spot** leaves the purple band but remains **between EM− and EM+**, the desk surfaces a **regime calibration** banner: **liquidity** already moved; **IV** has not fully repriced — useful for monitoring **trend continuation or reversal** before the broad tape catches up.
 - **Golden zone** (ledger) — As **DTE → 0**, pin estimates get sharper. The ledger flags **✨ Golden zone** when you are **close to expiry**, **distance to the predicted pin** is **shrinking** vs the snapshot at **Track Trade**, and **Θ/day** (desk short-leg income) has **expanded** vs entry — the intended “decay + magnet” window for tracked premium sales.
 
+## Venture-style volatility hunting: **Asymmetric Convexity Sieve** (research spec)
+
+**v22.0** is optimized for **institutional swing** and **premium harvesting** (confluence, Diamonds, GEX regime, pre-diamond coils). A different game—**venture-style “10x” hunting**—looks for **fat-tail** candidates where **liquidity scarcity**, **volatility compression**, **abnormal volume**, and **dealer/short positioning** can align. That lens is **not** the default CashFlow scanner; this section documents the **quantitative sieve** so you can implement, backtest, or sanity-check it elsewhere.
+
+**Idea:** Large moves are **rare**; a strict AND-of-filters should usually return **zero** names. That is a feature—noise elimination—not a bug.
+
+### Four simultaneous filters
+
+| Pillar | Role | Example threshold (tunable) |
+|--------|------|----------------------------|
+| **1. Float rotation (fuel)** | Capital required to move price; micro-float can **turn over** quickly when flow hits. | **Free float under ~30M shares** (scarcity). |
+| **2. Volatility coil (spring)** | Cheap vol → more **convexity** per dollar if a break happens. | **BBW** (Bollinger Band Width) in the **bottom ~5th percentile** of a **1y** lookback (or Hurst / range metrics as alternatives). |
+| **3. Volume Z-score (footprint)** | Extreme today’s volume vs its own baseline. | **Z-score above 4.0** vs **90-day** volume mean and std on the last bar (tail event under Gaussian noise). |
+| **4. Gamma pinch / skew (match)** | Shorts + **call-heavy** dealer hedging can reinforce a squeeze narrative. | **Short interest above ~20%** (of float or shares) **and** **call IV above put IV** at comparable OTM (e.g. skew ratio **call IV / put IV** at least ~**1.1** on your chosen strikes). |
+
+**Caveats:** Yahoo **`info`** fields for **float** and **short interest** are often **missing, stale, or rounded**; options **IV** requires a **liquid chain**. Any live implementation must handle **`None`** gracefully and **never** treat this as a guaranteed “10x” signal.
+
+### Reference sieve (pseudocode)
+
+Below is a compact boolean sieve matching the story above. **`skew_ratio`** means **OTM call IV ÷ OTM put IV** (or your desk’s analogue from `calc_vol_skew` / chain mids)—values **above** 1 mean calls are **richer** than puts.
+
+```python
+def detect_10x_convexity(df, float_shares, short_interest, skew_ratio):
+    # 1. Scarcity & squeeze potential
+    if float_shares is None or float_shares > 30_000_000:
+        return False
+    if short_interest is None or short_interest < 0.20:
+        return False
+
+    # 2. Extreme volatility compression (coil) — requires BBW column on df
+    if "BBW" not in df.columns or len(df) < 252:
+        return False
+    bbw_pct = df["BBW"].tail(252).rank(pct=True).iloc[-1]
+    if bbw_pct > 0.05:
+        return False
+
+    # 3. Institutional footprint (1-bar volume anomaly)
+    tail = df["Volume"].tail(90)
+    if len(tail) < 30 or tail.std() == 0:
+        return False
+    vol_mean, vol_std = tail.mean(), tail.std()
+    z_score = (df["Volume"].iloc[-1] - vol_mean) / vol_std
+    if z_score < 4.0:
+        return False
+
+    # 4. Dealer / skew: calls bid up vs puts
+    if skew_ratio is None or skew_ratio < 1.1:
+        return False
+
+    return True  # All four gates passed — still not investment advice
+```
+
+### Relationship to this repo
+
+- **Pre-diamond** (`Opt.detect_pre_diamond`) already uses **BBW/ATR squeeze** on a **shorter** window and **volume ramp** vs a **5-day** mean—not the same as a **90d Z &gt; 4** bar.
+- **Scanner GEX** and **gamma flip** speak to **dealer gamma**, but not automatically **short interest** or **float**.
+- **Dark-pool proxy** (`TA.get_dark_pool_proxy`) uses an **adaptive** window and **Z &gt; 2** whales—different threshold and intent than the **90d / Z &gt; 4** “break the door” rule above.
+
+### How to use this as a trader
+
+When you run strict versions of this logic, **most** days you should see **no** names. Treat any survivor as a **hypothesis**: size from a defined risk level (e.g. the **low of the high-Z volume session**), assume the feed can be wrong on **float/short**, and treat **convexity** as **asymmetric payoff**, not a promise of **10x**.
+
 ---
 
 ## What’s new in v21.0 (Adaptive Intelligence)
