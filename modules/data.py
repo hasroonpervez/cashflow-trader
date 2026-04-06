@@ -25,16 +25,18 @@ _YAHOO_OPTIONS_HEADERS = {
 # RETRY WRAPPER — handles yfinance throttling gracefully
 # ─────────────────────────────────────────────────────────────────────────
 def retry_fetch(fn, retries=3, delay=2):
-    """Call fn() up to `retries` times with exponential backoff."""
+    """Call fn() up to `retries` times with exponential backoff on *exceptions* only.
+
+    A normal return value (including ``None``) is returned immediately. Retrying on
+    ``None`` would triple-call Yahoo for empty history (rate limits / Cloud blocks)
+    and can push script runs past Streamlit health-check timeouts.
+    """
     for attempt in range(retries):
         try:
-            result = fn()
-            if result is not None:
-                return result
+            return fn()
         except Exception:
-            pass
-        if attempt < retries - 1:
-            time.sleep(delay * (attempt + 1))
+            if attempt < retries - 1:
+                time.sleep(delay * (attempt + 1))
     return None
 
 
@@ -174,17 +176,46 @@ def fetch_stock(ticker, period="1y", interval="1d"):
 
 
 @st.cache_data(ttl=120)
-def _ticker_pct_change_1d(symbol: str):
-    """Approximate last session % change for watchlist tape (cached per symbol)."""
+def watchlist_tape_pct_changes(symbols: tuple) -> dict:
+    """One Yahoo batch download for the whole tape — fewer round-trips than per-symbol history."""
+    syms = tuple(str(s).upper().strip() for s in symbols if str(s).strip())
+    out = {s: None for s in syms}
+    if not syms:
+        return out
     try:
-        sym = str(symbol).upper().strip()
-        df = _yfinance_ticker(sym).history(period="10d", interval="1d")
-        if df is None or df.empty or len(df) < 2:
-            return None
-        c = df["Close"]
-        return float((c.iloc[-1] / c.iloc[-2] - 1.0) * 100.0)
+        df = yf.download(
+            list(syms),
+            period="12d",
+            interval="1d",
+            threads=False,
+            progress=False,
+            auto_adjust=True,
+        )
     except Exception:
+        return out
+    if df is None or df.empty:
+        return out
+    try:
+        close = df["Close"]
+    except (KeyError, TypeError, ValueError):
+        return out
+    for sym in syms:
+        if sym not in close.columns:
+            continue
+        c = pd.to_numeric(close[sym], errors="coerce").dropna()
+        if len(c) >= 2 and float(c.iloc[-2]) != 0:
+            out[sym] = float((float(c.iloc[-1]) / float(c.iloc[-2]) - 1.0) * 100.0)
+    return out
+
+
+@st.cache_data(ttl=120)
+def _ticker_pct_change_1d(symbol: str):
+    """Approximate last session % change (cached). Prefer ``watchlist_tape_pct_changes`` for lists."""
+    sym = str(symbol).upper().strip()
+    if not sym:
         return None
+    batch = watchlist_tape_pct_changes((sym,))
+    return batch.get(sym)
 
 
 @st.cache_data(ttl=300)

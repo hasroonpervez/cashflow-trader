@@ -12,7 +12,7 @@ from datetime import datetime
 
 from .ta import TA
 from .data import (
-    fetch_stock, _ticker_pct_change_1d, fetch_options, fetch_macro,
+    fetch_stock, fetch_options, fetch_macro,
     fetch_news_headlines, fetch_earnings_date, fetch_earnings_calendar_display,
     _PLOTLY_UI_CONFIG, _PLOTLY_GRID, _PLOTLY_FONT_MAIN,
     _PLOTLY_PAPER_BG, _PLOTLY_PLOT_BG, _PLOTLY_CASH_UP, _PLOTLY_CASH_DOWN,

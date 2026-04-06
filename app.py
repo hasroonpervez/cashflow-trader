@@ -83,7 +83,7 @@ for _import_try in range(_IMPORT_KEYERROR_RETRIES):
             )
             from modules.data import (
                 retry_fetch, _yfinance_ticker, _client_suggests_mobile_chart,
-                fetch_stock, _ticker_pct_change_1d, fetch_intraday_series,
+                fetch_stock, watchlist_tape_pct_changes, fetch_intraday_series,
                 fetch_info, fetch_options, list_option_expiration_dates, compute_iv_rank_proxy, fetch_news_headlines,
                 fetch_earnings_date, fetch_earnings_calendar_display, fetch_macro,
                 _PLOTLY_UI_CONFIG, _PLOTLY_PAPER_BG, _PLOTLY_PLOT_BG,
@@ -639,6 +639,7 @@ def main():
     if watch_items:
         st.markdown('<p class="cf-tape-title">Watchlist tape</p>', unsafe_allow_html=True)
         st.caption("Tap a symbol to promote it to the active ticker. Daily move is versus the prior session close (cached).")
+        _tape_pcts = watchlist_tape_pct_changes(tuple(watch_items))
         _TAPE_CHUNK = 8
         tape_i = 0
         for row_start in range(0, len(watch_items), _TAPE_CHUNK):
@@ -651,7 +652,7 @@ def main():
                         st.empty()
                         continue
                     tkr = row_tickers[j]
-                    pct = _ticker_pct_change_1d(tkr)
+                    pct = _tape_pcts.get(tkr)
                     pct_str = f"{pct:+.2f}%" if pct is not None else "n/a"
                     c_pct = "#10b981" if (pct is not None and pct >= 0) else ("#ef4444" if pct is not None else "#64748b")
                     is_active = tkr == ticker
