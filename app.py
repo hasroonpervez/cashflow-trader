@@ -2454,6 +2454,74 @@ def main():
                             order = {t: i for i, t in enumerate(watchlist_tickers)}
                             scanner_results.sort(key=lambda x: order.get(x["ticker"], 10_000))
 
+                        def _render_scanner_options_data_table():
+                            scanner_df = pd.DataFrame(
+                                [
+                                    {
+                                        "Ticker": r["ticker"],
+                                        "Price": float(r["price"]),
+                                        "Change %": float(r["chg_pct"]),
+                                        "QE Score": float(r["qs"]),
+                                        "Adj. Kelly %": float(r.get("Adj. Kelly %", 0.0)),
+                                        "Confluence": int(r["cp_score"]),
+                                        "Diamond": r["d_status"],
+                                        "PoP": (
+                                            f"{float(r.get('diamond_pop', 0)):.0f}%"
+                                            if int(r.get("diamond_n") or 0) > 0
+                                            else "—"
+                                        ),
+                                        "EM Safety": r.get("EM Safety", "—"),
+                                        "GEX Regime": r.get("GEX Regime", "—"),
+                                        "Flow / Bias": r.get("Flow / Bias", "—"),
+                                        "Gold Zone Dist %": float(r["dist_gz"]),
+                                        "Daily": r["struct"],
+                                        "Summary": r["summary"],
+                                    }
+                                    for r in scanner_results
+                                ]
+                            )
+                            with st.expander("Scanner Data Table", expanded=False):
+                                streamlit_show_dataframe(
+                                    scanner_df,
+                                    use_container_width=True,
+                                    hide_index=True,
+                                    key="cf_scanner_tbl_df",
+                                    on_select="ignore",
+                                    selection_mode=[],
+                                    column_config={
+                                        "Ticker": st.column_config.TextColumn("Ticker", width="small"),
+                                        "Price": st.column_config.NumberColumn("Price", format="$%.2f"),
+                                        "Change %": st.column_config.NumberColumn("Change", format="%+.1f%%"),
+                                        "QE Score": st.column_config.NumberColumn("QE Score", format="%.0f"),
+                                        "Adj. Kelly %": st.column_config.NumberColumn(
+                                            "Adj. Kelly",
+                                            format="%.1f%%",
+                                            help="Kelly Criterion sizing after applying the Portfolio Correlation Haircut.",
+                                        ),
+                                        "Confluence": st.column_config.NumberColumn("Confluence", format="%d"),
+                                        "Diamond": st.column_config.TextColumn("Diamond"),
+                                        "PoP": st.column_config.TextColumn(
+                                            "PoP",
+                                            help="Historical win rate for Diamond signals (same methodology as the main dashboard backtest).",
+                                        ),
+                                        "EM Safety": st.column_config.TextColumn(
+                                            "EM Safety",
+                                            help="1-σ implied move vs scanner short-put strike: SAFE if strike < spot − EM (else MONITOR).",
+                                        ),
+                                        "GEX Regime": st.column_config.TextColumn(
+                                            "GEX Regime",
+                                            help="Gamma Flip: the price level where market maker hedging accelerates volatility. 🛡️ STABLE = spot above flip; ⚠️ TURBULENT = spot below flip.",
+                                        ),
+                                        "Flow / Bias": st.column_config.TextColumn(
+                                            "Flow / Bias",
+                                            help=SCANNER_WHALE_FLOW_BIAS_HELP,
+                                        ),
+                                        "Gold Zone Dist %": st.column_config.NumberColumn("Gold Zone Dist", format="%+.1f%%"),
+                                        "Daily": st.column_config.TextColumn("Daily"),
+                                        "Summary": st.column_config.TextColumn("Summary", width="large"),
+                                    },
+                                )
+
                         if scanner_mode == "📈 Options Yield":
                             _blues_alloc = [r for r in scanner_results if "BLUE" in str(r.get("d_status", ""))]
                             if _blues_alloc:
@@ -2566,72 +2634,7 @@ def main():
                             if _scan_chunks:
                                 st.markdown("\n".join(_scan_chunks), unsafe_allow_html=True)
 
-                            scanner_df = pd.DataFrame(
-                                [
-                                    {
-                                        "Ticker": r["ticker"],
-                                        "Price": float(r["price"]),
-                                        "Change %": float(r["chg_pct"]),
-                                        "QE Score": float(r["qs"]),
-                                        "Adj. Kelly %": float(r.get("Adj. Kelly %", 0.0)),
-                                        "Confluence": int(r["cp_score"]),
-                                        "Diamond": r["d_status"],
-                                        "PoP": (
-                                            f"{float(r.get('diamond_pop', 0)):.0f}%"
-                                            if int(r.get("diamond_n") or 0) > 0
-                                            else "—"
-                                        ),
-                                        "EM Safety": r.get("EM Safety", "—"),
-                                        "GEX Regime": r.get("GEX Regime", "—"),
-                                        "Flow / Bias": r.get("Flow / Bias", "—"),
-                                        "Gold Zone Dist %": float(r["dist_gz"]),
-                                        "Daily": r["struct"],
-                                        "Summary": r["summary"],
-                                    }
-                                    for r in scanner_results
-                                ]
-                            )
-                            with st.expander("Scanner Data Table", expanded=False):
-                                streamlit_show_dataframe(
-                                    scanner_df,
-                                    use_container_width=True,
-                                    hide_index=True,
-                                    key="cf_scanner_tbl_df",
-                                    on_select="ignore",
-                                    selection_mode=[],
-                                    column_config={
-                                        "Ticker": st.column_config.TextColumn("Ticker", width="small"),
-                                        "Price": st.column_config.NumberColumn("Price", format="$%.2f"),
-                                        "Change %": st.column_config.NumberColumn("Change", format="%+.1f%%"),
-                                        "QE Score": st.column_config.NumberColumn("QE Score", format="%.0f"),
-                                        "Adj. Kelly %": st.column_config.NumberColumn(
-                                            "Adj. Kelly",
-                                            format="%.1f%%",
-                                            help="Kelly Criterion sizing after applying the Portfolio Correlation Haircut.",
-                                        ),
-                                        "Confluence": st.column_config.NumberColumn("Confluence", format="%d"),
-                                        "Diamond": st.column_config.TextColumn("Diamond"),
-                                        "PoP": st.column_config.TextColumn(
-                                            "PoP",
-                                            help="Historical win rate for Diamond signals (same methodology as the main dashboard backtest).",
-                                        ),
-                                        "EM Safety": st.column_config.TextColumn(
-                                            "EM Safety",
-                                            help="1-σ implied move vs scanner short-put strike: SAFE if strike < spot − EM (else MONITOR).",
-                                        ),
-                                        "GEX Regime": st.column_config.TextColumn(
-                                            "GEX Regime",
-                                            help="Gamma Flip: the price level where market maker hedging accelerates volatility. 🛡️ STABLE = spot above flip; ⚠️ TURBULENT = spot below flip.",
-                                        ),
-                                        "Flow / Bias": st.column_config.TextColumn(
-                                            "Flow / Bias",
-                                            help=SCANNER_WHALE_FLOW_BIAS_HELP,
-                                        ),
-                                        "Gold Zone Dist %": st.column_config.NumberColumn("Gold Zone Dist", format="%+.1f%%"),
-                                        "Daily": st.column_config.TextColumn("Daily"),
-                                        "Summary": st.column_config.TextColumn("Summary", width="large"),
-                                    },
-                                )
+                            _render_scanner_options_data_table()
 
                             _explain("🔎 How to use the Scanner",
                                 "Look for tickers with <strong>7+ confluence points</strong> and an active <strong>Blue Diamond</strong>. "
@@ -2701,7 +2704,10 @@ def main():
                                     "Suggested shares respect full Kelly + correlation haircut."
                                 )
                             except Exception:
-                                st.info("Equity Radar temporarily unavailable — falling back to normal scanner.")
+                                st.caption(
+                                    "Equity Radar temporarily unavailable — showing Options Yield table instead."
+                                )
+                                _render_scanner_options_data_table()
                     else:
                         st.info("No scanner results. Check your ticker symbols.")
             else:
