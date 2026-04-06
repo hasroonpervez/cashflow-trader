@@ -1,0 +1,8 @@
+# Default Streamlit theme for CashFlow Command Center (institutional dark terminal feel).
+[theme]
+base = "dark"
+primaryColor = "#3b82f6"
+backgroundColor = "#0e1117"
+secondaryBackgroundColor = "#1e293b"
+textColor = "#f8fafc"
+font = "sans serif"

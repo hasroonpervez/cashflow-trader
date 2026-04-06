@@ -6,6 +6,8 @@
 
 **In-app help:** open **Intel → Quick Reference Guide** for a plain-language glossary (synced with the concepts below).
 
+**Streamlit UX polish (institutional dark + feedback):** repo **`.streamlit/config.toml`** sets a default **dark theme** (deep background, slate secondary surfaces, institutional blue primary). Changing **Trading Hemisphere** shows a **`st.toast`** on successful **`config.json`** write (or a warning toast if the host is read-only). **Scan Watchlist** runs inside **`st.spinner`** (plus the existing per-ticker **`st.progress`**). The **Delta-One Equity Setup** desk uses **`st.container(border=True)`** around metrics (bento-style grouping) and a **Structure visualizer**: last **60** daily closes via **`st.line_chart`** for the focused ticker (one Yahoo fetch per drill-down).
+
 ---
 
 ## Evolution: v14 Basic Scanner → v22 Predictive Analytics
@@ -219,7 +221,8 @@ Covers `TA.get_correlation_matrix` (FFD-return path), earnings runway spark seri
 1. Push to GitHub (app and `modules/` must stay in sync on the same branch the app tracks)
 2. Connect at [share.streamlit.io](https://share.streamlit.io)
 3. Set `app.py` as the main file
-4. (Optional) Add secrets in Streamlit Cloud dashboard under Settings → Secrets
+4. Theme: **`.streamlit/config.toml`** in the repo is picked up automatically (dark terminal palette); only **`.streamlit/secrets.toml`** stays local/gitignored.
+5. (Optional) Add secrets in Streamlit Cloud dashboard under Settings → Secrets
 
 If the app fails to import, check Cloud logs: mismatched commits (e.g. `app.py` importing a symbol removed from `modules/ui_helpers.py`) cause immediate `ImportError` on boot.
 
@@ -235,7 +238,7 @@ Keys: `watchlist`, `scanner_sort_mode`, **`scanner_mode`** (**`📈 Options Yiel
 
 ### Trading mode (`scanner_mode`)
 
-The **Trading Hemisphere** control writes **`scanner_mode`** to **`config.json`** on change (via **`modules.config.save_config`**). On startup, the app hydrates the widget from disk so you do not need to re-toggle after a restart. On Streamlit Cloud, if the filesystem is read-only, the mode still applies for the session (same pattern as other config keys). Each rerun also mirrors the active value into **`st.session_state["_cf_scanner_mode"]`** (used by helpers that need the resolved mode after widget hydration).
+The **Trading Hemisphere** control writes **`scanner_mode`** to **`config.json`** on change (via **`modules.config.save_config`**). A successful write triggers a short **`st.toast`**; a failed write (read-only host) still keeps the mode for the session and toasts a warning. On startup, the app hydrates the widget from disk so you do not need to re-toggle after a restart. On Streamlit Cloud, if the filesystem is read-only, the mode still applies for the session (same pattern as other config keys). Each rerun also mirrors the active value into **`st.session_state["_cf_scanner_mode"]`** (used by helpers that need the resolved mode after widget hydration).
 
 **Intel → Risk, scanner & intel → Market Scanner:** toggling **📈 Options Yield** vs **🎯 Equity Radar** switches the **scanner results presentation** (options desk vs equity radar table) using the same cached **`_cf_scanner_bundle`** rows when available. **Cashflow & strikes** follows the same mode: **Options Yield** shows the full chain and prop-desk blocks; **Equity Radar** shows only the **Delta-One workspace** + equity desk until you flip back.
 

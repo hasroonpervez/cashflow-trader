@@ -131,7 +131,7 @@ for _import_try in range(_IMPORT_KEYERROR_RETRIES):
         time.sleep(0.08 * (2**_import_try))
 
 def _render_equity_setup_desk(scanner_results, selectbox_key: str, prefer_ticker=None) -> None:
-    """Delta-One equity drill-down from cached scanner rows (no extra data fetches)."""
+    """Delta-One equity drill-down from cached scanner rows; optional 60D close chart (one fetch per focus ticker)."""
     if not scanner_results:
         st.warning("Run **Scan Watchlist** in **Risk, scanner & intel** (Equity Radar), then pick a symbol below.")
         return
@@ -165,51 +165,58 @@ def _render_equity_setup_desk(scanner_results, selectbox_key: str, prefer_ticker
         st.caption("Pre-diamond logic already folds in a **volume ramp** vs its short baseline; 🔥 / 🟡 rows are the live accumulation pulse.")
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.metric(
-                "Volatility State",
-                pre_diamond.get("volatility_state", "NORMAL"),
-                help="SQUEEZED means bottom 25% of 60-day ATR (or BBW) range when pre-diamond fired.",
-            )
+            with st.container(border=True):
+                st.metric(
+                    "Volatility State",
+                    pre_diamond.get("volatility_state", "NORMAL"),
+                    help="SQUEEZED means bottom 25% of 60-day ATR (or BBW) range when pre-diamond fired.",
+                )
         with col2:
-            st.metric(
-                "Confluence Score",
-                confluence_disp,
-                help="Pre-diamond targets the 5–6 band; 7+ is Blue Diamond territory on the options path.",
-            )
+            with st.container(border=True):
+                st.metric(
+                    "Confluence Score",
+                    confluence_disp,
+                    help="Pre-diamond targets the 5–6 band; 7+ is Blue Diamond territory on the options path.",
+                )
         with col3:
-            st.metric(
-                "Relative Strength",
-                "Strong vs SPY" if "🔥" in str(signal) else "Neutral/Weak",
-                help="3-day return vs SPY when the pre-diamond stack triggered.",
-            )
+            with st.container(border=True):
+                st.metric(
+                    "Relative Strength",
+                    "Strong vs SPY" if "🔥" in str(signal) else "Neutral/Weak",
+                    help="3-day return vs SPY when the pre-diamond stack triggered.",
+                )
         qe_disp = f"{float(qs_raw):.0f}/100" if isinstance(qs_raw, (int, float)) else str(qs_raw)
-        st.metric("Quant Edge (QE)", qe_disp, help="Same QE score as the scanner row.")
+        with st.container(border=True):
+            st.metric("Quant Edge (QE)", qe_disp, help="Same QE score as the scanner row.")
     with eq_tab2:
         st.markdown("### Trade Management")
         r_col1, r_col2, r_col3 = st.columns(3)
         with r_col1:
-            st.metric(
-                "Suggested Entry",
-                f"${price:,.2f}" if price else "—",
-                help="Spot from the scan bar.",
-            )
+            with st.container(border=True):
+                st.metric(
+                    "Suggested Entry",
+                    f"${price:,.2f}" if price else "—",
+                    help="Spot from the scan bar.",
+                )
         with r_col2:
-            sl_txt = f"${float(stop_loss):,.2f}" if isinstance(stop_loss, (int, float)) else stop_loss
-            st.metric(
-                "ATR Trailing Stop",
-                sl_txt,
-                help="Scan uses price − 1.5× ATR when ATR is available; else a 5% floor.",
-            )
+            with st.container(border=True):
+                sl_txt = f"${float(stop_loss):,.2f}" if isinstance(stop_loss, (int, float)) else stop_loss
+                st.metric(
+                    "ATR Trailing Stop",
+                    sl_txt,
+                    help="Scan uses price − 1.5× ATR when ATR is available; else a 5% floor.",
+                )
         sup = pre_diamond.get("support_proximity", "—")
         sup_txt = f"{float(sup):.1f}%" if isinstance(sup, (int, float)) else sup
         if sup_txt != "—" and not str(sup_txt).endswith("%"):
             sup_txt = f"{sup_txt}%"
         with r_col3:
-            st.metric(
-                "Distance to Support",
-                sup_txt,
-                help="Proximity to Shadow Low or Gold Zone floor when pre-diamond is active.",
-            )
+            with st.container(border=True):
+                st.metric(
+                    "Distance to Support",
+                    sup_txt,
+                    help="Proximity to Shadow Low or Gold Zone floor when pre-diamond is active.",
+                )
         gz = ticker_data.get("gold_zone")
         rr_txt = "—"
         try:
@@ -225,11 +232,40 @@ def _render_equity_setup_desk(scanner_results, selectbox_key: str, prefer_ticker
                 rr_txt = f"{reward_px / risk_px:.2f} : 1" if risk_px else "—"
         except (TypeError, ValueError):
             rr_txt = "—"
-        st.metric(
-            "Risk / Reward (to Gold Zone)",
-            rr_txt,
-            help="(Gold Zone − spot) ÷ (spot − stop) per share when all inputs exist; illustrative target only.",
-        )
+        with st.container(border=True):
+            st.metric(
+                "Risk / Reward (to Gold Zone)",
+                rr_txt,
+                help="(Gold Zone − spot) ÷ (spot − stop) per share when all inputs exist; illustrative target only.",
+            )
+
+    st.divider()
+    st.markdown("### 📊 Structure visualizer")
+    st.caption("Last **60** daily closes — context for volatility coil / drift (Yahoo daily bars).")
+    try:
+        from modules.data import fetch_stock as _eq_fetch
+
+        _eq_df = _eq_fetch(str(selected_ticker).upper(), "1y", "1d")
+    except Exception:
+        _eq_df = None
+    if _eq_df is not None and not _eq_df.empty and "Close" in _eq_df.columns:
+        _chart_data = pd.DataFrame({"Close": pd.to_numeric(_eq_df["Close"], errors="coerce")}).dropna().tail(60)
+        if not _chart_data.empty:
+            with st.container(border=True):
+                try:
+                    st.line_chart(
+                        _chart_data,
+                        y="Close",
+                        color="#3b82f6",
+                        height=200,
+                        use_container_width=True,
+                    )
+                except TypeError:
+                    st.line_chart(_chart_data, height=200, use_container_width=True)
+        else:
+            st.caption("Not enough clean close data for a spark window.")
+    else:
+        st.caption("Price history unavailable for this symbol right now.")
 
 
 # Migrate legacy edge_log sessions (added Preview column for watchlist matrix).
@@ -556,7 +592,13 @@ def main():
             st.session_state["_cf_scanner_mode"] = scanner_mode
             if scanner_mode != saved_scanner_mode:
                 b = load_config()
-                save_config({**b, "scanner_mode": scanner_mode})
+                if save_config({**b, "scanner_mode": scanner_mode}):
+                    st.toast(f"Switched to {scanner_mode}.", icon="✅")
+                else:
+                    st.toast(
+                        f"{scanner_mode} is active for this session; config could not be written to disk.",
+                        icon="⚠️",
+                    )
 
         def _persist_use_quant_models():
             b = load_config()
@@ -2513,72 +2555,73 @@ def main():
             watchlist_tickers = [t.strip().upper() for t in scanner_watchlist.split(",") if t.strip()]
             if watchlist_tickers:
                 if st.button("Scan Watchlist", key="run_scanner"):
-                    closes_map = {}
-                    for tkr in watchlist_tickers:
+                    with st.spinner("📡 Radar active. Scanning institutional order flow…"):
+                        closes_map = {}
+                        for tkr in watchlist_tickers:
+                            try:
+                                cdf = fetch_stock(tkr, "1y", "1d")
+                                if cdf is not None and not cdf.empty and "Close" in cdf.columns:
+                                    closes_map[tkr] = pd.to_numeric(cdf["Close"], errors="coerce")
+                            except Exception:
+                                pass
+                        closes_df = pd.DataFrame(closes_map).dropna(how="all")
+                        log_returns_df = TA.ffd_returns_from_closes(closes_df, d=0.4)
+                        if log_returns_df.empty:
+                            log_returns_df = np.log(closes_df / closes_df.shift(1)).dropna()
+                        corr_matrix = watchlist_correlation_matrix_cached(closes_df)
+                        if corr_matrix is None:
+                            corr_matrix = PortfolioRisk.build_correlation_matrix(closes_df)
+                        overlap_map = {tkr: PortfolioRisk.get_overlap_score(corr_matrix, tkr) for tkr in watchlist_tickers}
+                        haircut_map = {tkr: PortfolioRisk.calc_kelly_haircut(overlap_map.get(tkr, 0.0)) for tkr in watchlist_tickers}
+                        corr_fig = build_correlation_heatmap(corr_matrix)
+                        if corr_fig is not None:
+                            with st.expander("🕸️ Dynamic Correlation Matrix", expanded=False):
+                                st.plotly_chart(corr_fig, use_container_width=True, config=_PLOTLY_UI_CONFIG)
+
+                        spy_df = None
                         try:
-                            cdf = fetch_stock(tkr, "1y", "1d")
-                            if cdf is not None and not cdf.empty and "Close" in cdf.columns:
-                                closes_map[tkr] = pd.to_numeric(cdf["Close"], errors="coerce")
+                            spy_df = fetch_stock("SPY", "1y", "1d")
                         except Exception:
                             pass
-                    closes_df = pd.DataFrame(closes_map).dropna(how="all")
-                    log_returns_df = TA.ffd_returns_from_closes(closes_df, d=0.4)
-                    if log_returns_df.empty:
-                        log_returns_df = np.log(closes_df / closes_df.shift(1)).dropna()
-                    corr_matrix = watchlist_correlation_matrix_cached(closes_df)
-                    if corr_matrix is None:
-                        corr_matrix = PortfolioRisk.build_correlation_matrix(closes_df)
-                    overlap_map = {tkr: PortfolioRisk.get_overlap_score(corr_matrix, tkr) for tkr in watchlist_tickers}
-                    haircut_map = {tkr: PortfolioRisk.calc_kelly_haircut(overlap_map.get(tkr, 0.0)) for tkr in watchlist_tickers}
-                    corr_fig = build_correlation_heatmap(corr_matrix)
-                    if corr_fig is not None:
-                        with st.expander("🕸️ Dynamic Correlation Matrix", expanded=False):
-                            st.plotly_chart(corr_fig, use_container_width=True, config=_PLOTLY_UI_CONFIG)
 
-                    spy_df = None
-                    try:
-                        spy_df = fetch_stock("SPY", "1y", "1d")
-                    except Exception:
-                        pass
-
-                    scanner_results = []
-                    n_scan = len(watchlist_tickers)
-                    scan_progress = st.progress(0)
-                    scan_failed = []
-                    peer_blues = set()
-                    for idx, tkr in enumerate(watchlist_tickers):
-                        scan_progress.progress((idx + 1) / n_scan, text=f"Scanning {tkr}… ({idx + 1}/{n_scan})")
-                        _simp = Opt._simple_corr_haircut(watchlist_tickers, tkr, log_returns_df)
-                        _comb = float(haircut_map.get(tkr, 1.0)) * float(_simp)
-                        try:
-                            overlap = overlap_map.get(tkr, 0.0)
-                            haircut = haircut_map.get(tkr, 1.0)
-                            result = scan_single_ticker(
-                                tkr,
-                                _comb,
-                                cluster_peers=frozenset(peer_blues),
-                                corr_matrix=corr_matrix,
-                                spy_df=spy_df,
-                            )
-                            if result:
-                                result["overlap"] = overlap
-                                result["haircut"] = haircut
-                                result["risk_multiplier"] = float(
-                                    Opt._simple_corr_haircut(watchlist_tickers, tkr, log_returns_df)
+                        scanner_results = []
+                        n_scan = len(watchlist_tickers)
+                        scan_progress = st.progress(0)
+                        scan_failed = []
+                        peer_blues = set()
+                        for idx, tkr in enumerate(watchlist_tickers):
+                            scan_progress.progress((idx + 1) / n_scan, text=f"Scanning {tkr}… ({idx + 1}/{n_scan})")
+                            _simp = Opt._simple_corr_haircut(watchlist_tickers, tkr, log_returns_df)
+                            _comb = float(haircut_map.get(tkr, 1.0)) * float(_simp)
+                            try:
+                                overlap = overlap_map.get(tkr, 0.0)
+                                haircut = haircut_map.get(tkr, 1.0)
+                                result = scan_single_ticker(
+                                    tkr,
+                                    _comb,
+                                    cluster_peers=frozenset(peer_blues),
+                                    corr_matrix=corr_matrix,
+                                    spy_df=spy_df,
                                 )
-                                result["Adj. Kelly %"] = float(result.get("kelly_half", 0.0))
-                                scanner_results.append(result)
-                                if "BLUE" in str(result.get("d_status", "")):
-                                    peer_blues.add(tkr)
-                        except Exception as e:
-                            scan_failed.append((tkr, type(e).__name__))
-                    scan_progress.empty()
-                    st.session_state["_cf_scanner_bundle"] = {
-                        "results": list(scanner_results),
-                        "failed": list(scan_failed),
-                        "watchlist_tickers": list(watchlist_tickers),
-                        "log_returns_df": log_returns_df,
-                    }
+                                if result:
+                                    result["overlap"] = overlap
+                                    result["haircut"] = haircut
+                                    result["risk_multiplier"] = float(
+                                        Opt._simple_corr_haircut(watchlist_tickers, tkr, log_returns_df)
+                                    )
+                                    result["Adj. Kelly %"] = float(result.get("kelly_half", 0.0))
+                                    scanner_results.append(result)
+                                    if "BLUE" in str(result.get("d_status", "")):
+                                        peer_blues.add(tkr)
+                            except Exception as e:
+                                scan_failed.append((tkr, type(e).__name__))
+                        scan_progress.empty()
+                        st.session_state["_cf_scanner_bundle"] = {
+                            "results": list(scanner_results),
+                            "failed": list(scan_failed),
+                            "watchlist_tickers": list(watchlist_tickers),
+                            "log_returns_df": log_returns_df,
+                        }
 
                 _scan_bundle = st.session_state.get("_cf_scanner_bundle")
                 if _scan_bundle:
