@@ -9,15 +9,23 @@ import pandas as pd
 import numpy as np
 import yfinance as yf
 import time
-import requests
+from curl_cffi import requests as curl_requests
 from datetime import datetime, timedelta
+
+# yfinance 0.2+ requires curl_cffi sessions for Yahoo (TLS fingerprinting). One shared
+# session for all Tickers, ``yf.download``, and direct JSON calls — connection reuse and
+# consistent cookies. Community Cloud empty bars + “possibly delisted” are usually
+# throttling on shared egress, not actual delistings.
+_YAHOO_BROWSER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+)
+_YAHOO_SESSION = curl_requests.Session(impersonate="chrome")
+_YAHOO_SESSION.headers.update({"Accept-Language": "en-US,en;q=0.9"})
 
 # Yahoo JSON API (same family yfinance uses) — fallback when Ticker.options is transiently empty.
 _YAHOO_OPTIONS_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-    ),
+    "User-Agent": _YAHOO_BROWSER_UA,
     "Accept": "application/json",
 }
 
@@ -41,18 +49,18 @@ def retry_fetch(fn, retries=3, delay=2):
 
 
 def _yfinance_ticker(symbol: str):
-    """Fresh ``yf.Ticker`` per call — avoids stale sessions and unbounded cached connections on large watchlists."""
-    return yf.Ticker(str(symbol).upper().strip())
+    """New ``yf.Ticker`` per symbol; HTTP uses ``_YAHOO_SESSION`` (Chrome impersonation, reuse)."""
+    return yf.Ticker(str(symbol).upper().strip(), session=_YAHOO_SESSION)
 
 
 def _option_expirations_yahoo_http(symbol: str) -> list[str]:
-    """List YYYY-MM-DD expiries from Yahoo's v7 options endpoint (no yfinance session state)."""
+    """List YYYY-MM-DD expiries from Yahoo's v7 options endpoint (same session as yfinance)."""
     sym = str(symbol).upper().strip()
     if not sym:
         return []
     url = f"https://query2.finance.yahoo.com/v7/finance/options/{sym}"
     try:
-        r = requests.get(url, headers=_YAHOO_OPTIONS_HEADERS, timeout=14)
+        r = _YAHOO_SESSION.get(url, headers=_YAHOO_OPTIONS_HEADERS, timeout=14)
         if r.status_code != 200:
             return []
         payload = r.json()
@@ -86,7 +94,7 @@ def _option_expirations_yfinance(symbol: str, attempts: int = 5) -> list[str]:
     sym = str(symbol).upper().strip()
     for attempt in range(attempts):
         try:
-            t = yf.Ticker(sym)
+            t = _yfinance_ticker(sym)
             if attempt == 0:
                 try:
                     t.history(period="5d", interval="1d")
@@ -190,6 +198,7 @@ def watchlist_tape_pct_changes(symbols: tuple) -> dict:
             threads=False,
             progress=False,
             auto_adjust=True,
+            session=_YAHOO_SESSION,
         )
     except Exception:
         return out
@@ -553,7 +562,7 @@ def _earnings_next_from_yahoo_quotesummary(symbol: str) -> str | None:
         "?modules=calendarEvents"
     )
     try:
-        r = requests.get(url, headers=_YAHOO_OPTIONS_HEADERS, timeout=16)
+        r = _YAHOO_SESSION.get(url, headers=_YAHOO_OPTIONS_HEADERS, timeout=16)
         if r.status_code != 200:
             return None
         js = r.json()
