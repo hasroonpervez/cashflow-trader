@@ -40,7 +40,9 @@ _YAHOO_BROWSER_UA = (
 _YAHOO_SESSION = _ForcedTimeoutSession(impersonate="safari15_5", timeout=_YAHOO_YF_TIMEOUT)
 _YAHOO_SESSION.headers.update({"Accept-Language": "en-US,en;q=0.9"})
 
-_YFIN_YDATA_TIMEOUT_PATCHED = False
+# Idempotency marker lives on ``YfData`` so ``importlib.reload(modules.data)`` cannot stack
+# wrappers on an already-patched class in the same process.
+_YFIN_PATCH_MARKER = "_cashflow_trader_yahoo_timeout_v1"
 
 
 def _clamp_yahoo_http_timeout(timeout) -> float:
@@ -52,28 +54,56 @@ def _clamp_yahoo_http_timeout(timeout) -> float:
         return float(_YAHOO_YF_TIMEOUT)
 
 
+def _bind_yfdata_session() -> None:
+    """Always safe: point the ``YfData`` singleton at our session (handles races / reloads)."""
+    try:
+        from yfinance.data import YfData
+
+        YfData(session=_YAHOO_SESSION)
+    except Exception:
+        pass
+
+
 def _patch_yfinance_data_layer_timeout() -> None:
-    """Cap ``YfData`` timeouts (stops ``timed out after 30001 ms``) and lock singleton session."""
-    global _YFIN_YDATA_TIMEOUT_PATCHED
-    if _YFIN_YDATA_TIMEOUT_PATCHED:
+    """Cap ``YfData`` HTTP timeouts and bind singleton. Never raises — import must not fail."""
+    try:
+        from yfinance.data import YfData
+    except Exception as e:
+        print(
+            f"[cashflow-trader] WARNING: yfinance.data import failed ({type(e).__name__}: {e}).",
+            file=sys.stderr,
+            flush=True,
+        )
+        _bind_yfdata_session()
         return
-    from yfinance.data import YfData
 
-    _orig_make = YfData._make_request
-    _orig_crumb = YfData._get_cookie_and_crumb
+    if getattr(YfData, _YFIN_PATCH_MARKER, False):
+        _bind_yfdata_session()
+        return
 
-    def _make_request_cap(self, url, request_method, body=None, params=None, timeout=30):
-        t = _clamp_yahoo_http_timeout(timeout)
-        return _orig_make(self, url, request_method, body=body, params=params, timeout=t)
+    try:
+        _orig_make = YfData._make_request
+        _orig_crumb = YfData._get_cookie_and_crumb
 
-    def _get_cookie_and_crumb_cap(self, timeout=30):
-        t = _clamp_yahoo_http_timeout(timeout)
-        return _orig_crumb(self, t)
+        def _make_request_cap(self, url, request_method, body=None, params=None, timeout=30):
+            t = _clamp_yahoo_http_timeout(timeout)
+            return _orig_make(self, url, request_method, body=body, params=params, timeout=t)
 
-    YfData._make_request = _make_request_cap
-    YfData._get_cookie_and_crumb = _get_cookie_and_crumb_cap
-    YfData(session=_YAHOO_SESSION)
-    _YFIN_YDATA_TIMEOUT_PATCHED = True
+        def _get_cookie_and_crumb_cap(self, timeout=30):
+            t = _clamp_yahoo_http_timeout(timeout)
+            return _orig_crumb(self, t)
+
+        YfData._make_request = _make_request_cap
+        YfData._get_cookie_and_crumb = _get_cookie_and_crumb_cap
+        setattr(YfData, _YFIN_PATCH_MARKER, True)
+    except Exception as e:
+        print(
+            f"[cashflow-trader] WARNING: yfinance YfData timeout patch failed ({type(e).__name__}: {e}); "
+            "relying on _ForcedTimeoutSession only.",
+            file=sys.stderr,
+            flush=True,
+        )
+    _bind_yfdata_session()
 
 
 _patch_yfinance_data_layer_timeout()
@@ -117,8 +147,11 @@ def retry_fetch(fn, retries=3, delay=2):
 
 
 def _yfinance_ticker(symbol: str):
-    """New ``yf.Ticker`` per symbol; HTTP uses ``_YAHOO_SESSION`` (TLS impersonation, reuse)."""
-    return yf.Ticker(str(symbol).upper().strip(), session=_YAHOO_SESSION)
+    """New ``yf.Ticker`` per symbol; HTTP uses ``_YAHOO_SESSION``. Raises ``ValueError`` if symbol empty."""
+    sym = str(symbol).upper().strip()
+    if not sym:
+        raise ValueError("ticker symbol is empty")
+    return yf.Ticker(sym, session=_YAHOO_SESSION)
 
 
 def _option_expirations_yahoo_http(symbol: str) -> list[str]:
@@ -234,28 +267,44 @@ _PLOTLY_SLATE = "#64748b"
 
 @st.cache_data(ttl=300)
 def fetch_stock(ticker, period="1y", interval="1d"):
-    def _fetch():
-        df = _yfinance_ticker(ticker).history(
-            period=period, interval=interval, timeout=_YAHOO_YF_TIMEOUT
-        )
-        if df.empty:
-            print(
-                f"[cashflow-trader] WARNING: fetch_stock empty DataFrame "
-                f"ticker={ticker!r} period={period!r} interval={interval!r}",
-                file=sys.stderr,
-                flush=True,
-            )
+    """Yahoo daily/intraday bars; never raises — returns ``None`` on any failure."""
+    try:
+        sym = str(ticker).upper().strip()
+        if not sym:
             return None
-        df.index = pd.to_datetime(df.index)
-        if df.index.tz is not None:
-            df.index = df.index.tz_localize(None)
-        return df
-    return retry_fetch(_fetch)
+
+        def _fetch():
+            try:
+                df = _yfinance_ticker(sym).history(
+                    period=period, interval=interval, timeout=_YAHOO_YF_TIMEOUT
+                )
+            except Exception:
+                return None
+            if df is None or df.empty:
+                if df is not None and df.empty:
+                    print(
+                        f"[cashflow-trader] WARNING: fetch_stock empty DataFrame "
+                        f"ticker={sym!r} period={period!r} interval={interval!r}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                return None
+            try:
+                df.index = pd.to_datetime(df.index)
+                if df.index.tz is not None:
+                    df.index = df.index.tz_localize(None)
+            except Exception:
+                return None
+            return df
+
+        return retry_fetch(_fetch)
+    except Exception:
+        return None
 
 
 @st.cache_data(ttl=120)
 def watchlist_tape_pct_changes(symbols: tuple) -> dict:
-    """One Yahoo batch download for the whole tape — fewer round-trips than per-symbol history."""
+    """One Yahoo batch download for the whole tape — never raises; missing symbols stay ``None``."""
     syms = tuple(str(s).upper().strip() for s in symbols if str(s).strip())
     out = {s: None for s in syms}
     if not syms:
@@ -300,11 +349,17 @@ def _ticker_pct_change_1d(symbol: str):
 
 @st.cache_data(ttl=300)
 def fetch_intraday_series(symbol, period="5d", interval="1h"):
-    """Cached intraday close series for compact UI sparklines."""
+    """Cached intraday close series; never raises."""
     try:
-        hist = _yfinance_ticker(symbol).history(
-            period=period, interval=interval, timeout=_YAHOO_YF_TIMEOUT
-        )
+        sym = str(symbol).upper().strip()
+        if not sym:
+            return pd.Series(dtype=float)
+        try:
+            hist = _yfinance_ticker(sym).history(
+                period=period, interval=interval, timeout=_YAHOO_YF_TIMEOUT
+            )
+        except Exception:
+            return pd.Series(dtype=float)
         if hist is None or hist.empty or "Close" not in hist.columns:
             return pd.Series(dtype=float)
         s = pd.to_numeric(hist["Close"], errors="coerce").dropna()
@@ -314,15 +369,26 @@ def fetch_intraday_series(symbol, period="5d", interval="1h"):
 
 @st.cache_data(ttl=300)
 def fetch_info(ticker):
+    """Yahoo quote summary fields; never raises (empty dict on failure)."""
     try:
-        return _yfinance_ticker(ticker).info
+        sym = str(ticker).upper().strip()
+        if not sym:
+            return {}
+        info = _yfinance_ticker(sym).info
+        return info if isinstance(info, dict) else {}
     except Exception:
         return {}
 
 @st.cache_data(ttl=90)
 def list_option_expiration_dates(ticker: str) -> tuple:
-    """Expiry strings only (short TTL): transient Yahoo/yfinance gaps recover without long poisoned cache."""
-    return tuple(_resolve_option_expiration_strings(ticker))
+    """Expiry strings only (short TTL); never raises."""
+    try:
+        sym = str(ticker).upper().strip()
+        if not sym:
+            return tuple()
+        return tuple(_resolve_option_expiration_strings(sym))
+    except Exception:
+        return tuple()
 
 
 @st.cache_data(ttl=300)
@@ -345,12 +411,15 @@ def fetch_options(ticker, exp=None):
         return calls_df, puts_df
 
     try:
-        exps = list(list_option_expiration_dates(ticker))
+        sym = str(ticker).upper().strip()
+        if not sym:
+            return empty, []
+        exps = list(list_option_expiration_dates(sym))
         if not exps:
             return empty, []
         if exp is None:
             return empty, exps
-        t = _yfinance_ticker(ticker)
+        t = _yfinance_ticker(sym)
         exp_s = str(exp)[:10] if exp else ""
         primary = exp_s if exp_s in exps else exps[0]
         candidates = [primary]
