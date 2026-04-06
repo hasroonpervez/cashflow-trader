@@ -138,11 +138,10 @@ def build_context(ticker: str, cfg: dict) -> Optional[DashContext]:
 
     # ── Parallel fetch ──
     with st.spinner(f"Loading {ticker}..."):
-        with make_script_ctx_pool(7) as pool:
+        with make_script_ctx_pool(6) as pool:
             f_df = submit_with_script_ctx(pool, fetch_stock, ticker, "1y", "1d")
             f_wk = submit_with_script_ctx(pool, fetch_stock, ticker, "2y", "1wk")
             f_1mo = submit_with_script_ctx(pool, fetch_stock, ticker, "1mo", "1d")
-            f_vix = submit_with_script_ctx(pool, fetch_stock, "^VIX", "1mo", "1d")
             f_macro = submit_with_script_ctx(pool, fetch_macro)
             f_news = submit_with_script_ctx(pool, fetch_news_headlines, ticker)
             f_earn = submit_with_script_ctx(pool, fetch_earnings_date, ticker)
@@ -150,8 +149,7 @@ def build_context(ticker: str, cfg: dict) -> Optional[DashContext]:
             ctx.df = f_df.result()
             ctx.df_wk = f_wk.result()
             ctx.df_1mo_spark = f_1mo.result()
-            ctx.vix_1mo_df = f_vix.result()
-            ctx.macro = f_macro.result()
+            ctx.macro, ctx.vix_1mo_df = f_macro.result()
             ctx.news = f_news.result()
             ctx.earnings_date_raw = f_earn.result()
 

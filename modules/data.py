@@ -991,21 +991,75 @@ def fetch_earnings_calendar_display(ticker: str):
         return pd.DataFrame(), None
 
 
+_MACRO_PANEL_TICKERS = ("^VIX", "^TNX", "UUP", "SPY", "QQQ")
+_MACRO_TICKER_TO_LABEL = {
+    "^VIX": "VIX",
+    "^TNX": "10Y Yield",
+    "UUP": "DXY (UUP)",
+    "SPY": "SPY",
+    "QQQ": "QQQ",
+}
+
+
 @st.cache_data(ttl=300)
 def fetch_macro():
-    data = {}
-    for label, sym in {"VIX": "^VIX", "10Y Yield": "^TNX", "DXY (UUP)": "UUP", "SPY": "SPY", "QQQ": "QQQ"}.items():
-        try:
-            df = _yfinance_ticker(sym).history(period="5d", timeout=_YAHOO_YF_TIMEOUT)
-            if not df.empty:
-                last = df["Close"].iloc[-1]
-                prev = df["Close"].iloc[-2] if len(df) >= 2 else last
-                data[label] = {"price": last, "chg": (last / prev - 1) * 100}
-        except Exception:
-            pass
+    """Macro strip + ^VIX daily history for the glance spark in **one** ``yf.download`` batch.
+
+    Sequential per-symbol ``history()`` calls were up to ~5s each (~25s on a tar-pitted IP) and
+    often dominated ``build_context`` wall time alongside a separate ^VIX monthly fetch.
+    """
+    data: dict = {}
+    vix_hist = None
+    syms = list(_MACRO_PANEL_TICKERS)
+    try:
+        raw = yf.download(
+            syms,
+            period="1mo",
+            interval="1d",
+            threads=False,
+            progress=False,
+            auto_adjust=True,
+            session=_YAHOO_SESSION,
+            timeout=_YAHOO_YF_TIMEOUT,
+        )
+    except Exception:
+        raw = None
+    if raw is None or raw.empty:
+        data["10Y Yield"] = {"price": 4.5, "chg": 0.0}
+        data["VIX"] = {"price": 20.0, "chg": 0.0}
+        return data, None
+    try:
+        close = raw["Close"]
+    except (KeyError, TypeError, ValueError):
+        data["10Y Yield"] = {"price": 4.5, "chg": 0.0}
+        data["VIX"] = {"price": 20.0, "chg": 0.0}
+        return data, None
+
+    # Multi-ticker download → DataFrame of closes; rare single-column edge case → Series
+    if isinstance(close, pd.Series):
+        close = close.to_frame(name=syms[0] if syms else "Close")
+
+    for sym in syms:
+        label = _MACRO_TICKER_TO_LABEL.get(sym)
+        if not label or sym not in close.columns:
+            continue
+        s = pd.to_numeric(close[sym], errors="coerce").dropna()
+        if len(s) < 1:
+            continue
+        last = float(s.iloc[-1])
+        prev = float(s.iloc[-2]) if len(s) >= 2 else last
+        prev_f = float(prev) if prev else 0.0
+        chg = (last / prev_f - 1.0) * 100.0 if prev_f else 0.0
+        data[label] = {"price": last, "chg": chg}
+
+    if "^VIX" in close.columns:
+        vx = pd.to_numeric(close["^VIX"], errors="coerce").dropna()
+        if len(vx) >= 1:
+            vix_hist = pd.DataFrame({"Close": vx.astype(float)})
+
     if "10Y Yield" not in data:
         data["10Y Yield"] = {"price": 4.5, "chg": 0.0}
     if "VIX" not in data:
         data["VIX"] = {"price": 20.0, "chg": 0.0}
-    return data
+    return data, vix_hist
 
