@@ -412,32 +412,36 @@ def main():
                 "Custom watchlist order" if _scan_seg == "Custom order" else "Highest confluence first"
             )
 
-        st.markdown("### 🎯 Trading Mode")
-        if hasattr(st, "segmented_control"):
-            scanner_mode = st.segmented_control(
-                "Mode",
-                ["📈 Options Yield", "🎯 Equity Radar"],
-                key="sb_scanner_mode",
-                label_visibility="collapsed",
-                default="📈 Options Yield",
-            )
-        else:
-            scanner_mode = st.radio(
-                "Mode",
-                ["📈 Options Yield", "🎯 Equity Radar"],
-                horizontal=True,
-                key="sb_scanner_mode_radio",
-                label_visibility="collapsed",
-                index=0,
-            )
-        equity_capital = 10000
-        if scanner_mode == "🎯 Equity Radar":
-            equity_capital = st.select_slider(
-                "Capital Base per Trade ($)",
-                options=[5000, 10000, 25000, 50000, 100000],
-                value=10000,
-                help="Suggested shares are scaled using Opt.portfolio_allocation (Kelly + correlation haircut).",
-            )
+        st.markdown("### 🎛️ Command Center")
+        with st.container(border=True):
+            col_mode, col_cap = st.columns([1, 1])
+            with col_mode:
+                if hasattr(st, "segmented_control"):
+                    scanner_mode = st.segmented_control(
+                        "Trading Hemisphere",
+                        ["📈 Options Yield", "🎯 Equity Radar"],
+                        key="sb_scanner_mode",
+                        default="📈 Options Yield",
+                        help="Switch between premium harvesting (Options) and Delta-One breakout hunting (Equity).",
+                    )
+                else:
+                    scanner_mode = st.radio(
+                        "Trading Hemisphere",
+                        ["📈 Options Yield", "🎯 Equity Radar"],
+                        horizontal=True,
+                        key="sb_scanner_mode_radio",
+                        index=0,
+                        help="Switch between premium harvesting (Options) and Delta-One breakout hunting (Equity).",
+                    )
+            with col_cap:
+                equity_capital = 10000
+                if scanner_mode == "🎯 Equity Radar":
+                    equity_capital = st.select_slider(
+                        "Capital Base per Trade ($)",
+                        options=[5000, 10000, 25000, 50000, 100000],
+                        value=10000,
+                        help="Scales Suggested Shares dynamically.",
+                    )
 
         def _persist_use_quant_models():
             b = load_config()
@@ -2687,17 +2691,73 @@ def main():
                                         "Support Proximity (%)": pre.get("support_proximity", "—"),
                                     })
 
-                                equity_df = pd.DataFrame(equity_rows)
+                                breakout_count = sum(1 for row in equity_rows if "🔥" in str(row.get("Signal", "")))
+                                accum_count = sum(1 for row in equity_rows if "🟡" in str(row.get("Signal", "")))
 
-                                def style_equity_row(row):
-                                    if "🔥" in str(row.get("Signal", "")):
-                                        return ["background-color: #fefce8; color: #854d0e; font-weight: bold"] * len(row)
-                                    if "🟡" in str(row.get("Signal", "")):
-                                        return ["background-color: #f8fafc; color: #334155"] * len(row)
-                                    return [""] * len(row)
+                                st.markdown("### 📡 Radar Summary")
+                                hud_col1, hud_col2, hud_col3 = st.columns(3)
+                                with hud_col1:
+                                    st.metric(
+                                        "🔥 Imminent Breakouts",
+                                        breakout_count,
+                                        help="Volatility coil + relative strength.",
+                                    )
+                                with hud_col2:
+                                    st.metric(
+                                        "🟡 Accumulating",
+                                        accum_count,
+                                        help="Pre-breakout conditions met; awaiting broader strength.",
+                                    )
+                                with hud_col3:
+                                    st.metric(
+                                        "Total Scanned",
+                                        len(scanner_results),
+                                        help="Tickers evaluated in this run.",
+                                    )
 
-                                styled_df = equity_df.style.apply(style_equity_row, axis=1)
-                                st.dataframe(styled_df, use_container_width=True, hide_index=True)
+                                st.divider()
+
+                                if equity_rows:
+                                    equity_df = pd.DataFrame(equity_rows)
+
+                                    formatted_df = equity_df.copy()
+                                    formatted_df["Price"] = formatted_df["Price"].apply(
+                                        lambda x: f"${x:,.2f}" if isinstance(x, (int, float)) else x
+                                    )
+                                    formatted_df["Stop Loss"] = formatted_df["Stop Loss"].apply(
+                                        lambda x: f"${x:,.2f}" if isinstance(x, (int, float)) else x
+                                    )
+                                    formatted_df["Support Proximity (%)"] = formatted_df[
+                                        "Support Proximity (%)"
+                                    ].apply(
+                                        lambda x: f"{x:.1f}%" if isinstance(x, (int, float)) else x
+                                    )
+                                    formatted_df["Suggested Shares"] = formatted_df["Suggested Shares"].apply(
+                                        lambda x: f"{int(x):,}" if isinstance(x, (int, float)) and not isinstance(x, bool) else x
+                                    )
+
+                                    def style_equity_row(row):
+                                        if "🔥" in str(row.get("Signal", "")):
+                                            return [
+                                                "background-color: #fefce8; color: #854d0e; font-weight: bold"
+                                            ] * len(row)
+                                        if "🟡" in str(row.get("Signal", "")):
+                                            return [
+                                                "background-color: #f8fafc; color: #334155"
+                                            ] * len(row)
+                                        return [""] * len(row)
+
+                                    styled_df = formatted_df.style.apply(style_equity_row, axis=1)
+
+                                    st.markdown("### 🎯 Actionable Targets")
+                                    st.dataframe(
+                                        styled_df,
+                                        use_container_width=True,
+                                        hide_index=True,
+                                        height=min(400, (len(equity_rows) + 1) * 38),
+                                    )
+                                else:
+                                    st.info("Radar scan complete. No tickers met the criteria.")
 
                                 st.caption(
                                     "🔥 **IMMINENT BREAKOUT** = Volatility coil + RS vs SPY + accumulation near Gold/Shadow floor. "
