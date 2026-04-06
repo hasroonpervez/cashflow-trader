@@ -47,9 +47,9 @@ Dealers hedge option **gamma** by trading the underlying. Near **expiry**, net *
 - **Shadow breakout** — If **spot** leaves the purple band but remains **between EM− and EM+**, the desk surfaces a **regime calibration** banner: **liquidity** already moved; **IV** has not fully repriced — useful for monitoring **trend continuation or reversal** before the broad tape catches up.
 - **Golden zone** (ledger) — As **DTE → 0**, pin estimates get sharper. The ledger flags **✨ Golden zone** when you are **close to expiry**, **distance to the predicted pin** is **shrinking** vs the snapshot at **Track Trade**, and **Θ/day** (desk short-leg income) has **expanded** vs entry — the intended “decay + magnet” window for tracked premium sales.
 
-## Venture-style volatility hunting: **Asymmetric Convexity Sieve** (research spec)
+## Venture-style volatility hunting: **Asymmetric Convexity Sieve**
 
-**v22.0** is optimized for **institutional swing** and **premium harvesting** (confluence, Diamonds, GEX regime, pre-diamond coils). A different game—**venture-style “10x” hunting**—looks for **fat-tail** candidates where **liquidity scarcity**, **volatility compression**, **abnormal volume**, and **dealer/short positioning** can align. That lens is **not** the default CashFlow scanner; this section documents the **quantitative sieve** so you can implement, backtest, or sanity-check it elsewhere.
+**v22.0** is optimized for **institutional swing** and **premium harvesting** (confluence, Diamonds, GEX regime, pre-diamond coils). **Venture-style “10x” hunting** looks for **fat-tail** candidates where **liquidity scarcity**, **volatility compression**, **abnormal volume**, and **dealer/short positioning** can align. The sieve below is **implemented** in **`scan_single_ticker`** (`modules/options.py`: **`evaluate_asymmetric_convexity_sieve`**, **`_bbw_series`**, **`_parse_yahoo_float_and_short`**). Each scan row gets **`10x Convexity`** (**`💎 10x Sieve`** only if **all** gates pass, else **—**), a nested **`convexity_sieve`** dict for tooling, the **Scanner Data Table** column **10x Convexity**, **Options Yield** row tiles (**10x Sieve**), **Equity Radar** column **10x Sieve**, and **Delta-One Equity Setup → diagnostics** expander.
 
 **Idea:** Large moves are **rare**; a strict AND-of-filters should usually return **zero** names. That is a feature—noise elimination—not a bug.
 
@@ -101,9 +101,10 @@ def detect_10x_convexity(df, float_shares, short_interest, skew_ratio):
 
 ### Relationship to this repo
 
-- **Pre-diamond** (`Opt.detect_pre_diamond`) already uses **BBW/ATR squeeze** on a **shorter** window and **volume ramp** vs a **5-day** mean—not the same as a **90d Z &gt; 4** bar.
-- **Scanner GEX** and **gamma flip** speak to **dealer gamma**, but not automatically **short interest** or **float**.
-- **Dark-pool proxy** (`TA.get_dark_pool_proxy`) uses an **adaptive** window and **Z &gt; 2** whales—different threshold and intent than the **90d / Z &gt; 4** “break the door” rule above.
+- **Live sieve** — **BBW** is built from **`TA.bollinger`** on **Close** (not a pre-existing **`BBW`** column). **Skew** uses **`calc_vol_skew`** (~10% OTM call vs put IV) on the **same** near-term expiry chain used for scanner **GEX**. **Float / short** come from **`fetch_info`** (`floatShares`, `shortPercentOfFloat`, or **`sharesShort` / float** fallback).
+- **Pre-diamond** (`Opt.detect_pre_diamond`) uses **BBW/ATR squeeze** on a **shorter** window and **volume ramp** vs a **5-day** mean—not the same as **90d volume Z above 4**.
+- **Scanner GEX** and **gamma flip** are independent columns; the sieve does **not** replace them.
+- **Dark-pool proxy** (`TA.get_dark_pool_proxy`) uses an **adaptive** window and **Z above 2**—different threshold than the sieve’s **90d / Z at least 4** rule.
 
 ### How to use this as a trader
 
@@ -372,6 +373,7 @@ If the earnings calendar endpoint returns no rows, the app falls back to the pri
 - **Scanner EM Safety** uses the same **realized-vol proxy** as the scanner MC block when a full options IV snapshot is not fetched per ticker (fast path); the main dashboard uses **listed IV** for chart and Recommended Trade when the chain loads
 - **GEX / gamma flip** depends on **open interest** and option quotes; some symbols return chains without OI — the engine returns empty GEX and the UI shows **—** / omits the flip line
 - **Market Scanner** results are written to **`_cf_scanner_bundle`** when you click **Scan Watchlist**; reruns reuse them until the next scan (if the bundle is missing, run **Scan Watchlist** once). Editing the watchlist text without rescanning can leave a **stale** bundle versus the new list.
+- **10x Convexity sieve** depends on **Yahoo `info`** (float, short %) and a usable **options** snapshot for **skew**; missing fields fail gates and almost always produce **—**. The label is a **research filter**, not a prediction of returns.
 
 ---
 

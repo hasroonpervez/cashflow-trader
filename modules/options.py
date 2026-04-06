@@ -12,7 +12,7 @@ from datetime import datetime
 from concurrent.futures import as_completed
 
 from .ta import TA
-from .data import fetch_stock, fetch_options, fetch_news_headlines
+from .data import fetch_stock, fetch_options, fetch_news_headlines, fetch_info
 from .sentiment import Sentiment
 from .streamlit_threading import make_script_ctx_pool, submit_with_script_ctx
 
@@ -882,6 +882,101 @@ def latest_diamond_status(diamonds):
     return diamonds[-1]
 
 
+def _bbw_series(close: pd.Series, p: int = 20, sd: float = 2.0) -> pd.Series:
+    """Bollinger Band Width (upper − lower) / middle, aligned to close index."""
+    upper, mid, lower = TA.bollinger(close, p=p, sd=sd)
+    denom = mid.replace(0, np.nan)
+    return (upper - lower) / denom
+
+
+def _parse_yahoo_float_and_short(info: dict):
+    """Return (free_float_shares, short_interest_fraction 0–1) from yfinance ``info``; often incomplete."""
+    if not isinstance(info, dict):
+        return None, None
+    fs = info.get("floatShares") or info.get("impliedSharesOutstanding")
+    try:
+        float_shares = float(fs) if fs is not None and float(fs) > 0 else None
+    except (TypeError, ValueError):
+        float_shares = None
+    short_pct = info.get("shortPercentOfFloat")
+    try:
+        si = float(short_pct) if short_pct is not None and np.isfinite(float(short_pct)) else None
+    except (TypeError, ValueError):
+        si = None
+    if si is None:
+        try:
+            sh = info.get("sharesShort")
+            if sh is not None and float_shares and float(sh) > 0:
+                si = min(1.0, float(sh) / float(float_shares))
+        except (TypeError, ValueError):
+            pass
+    return float_shares, si
+
+
+def evaluate_asymmetric_convexity_sieve(
+    df: pd.DataFrame,
+    float_shares,
+    short_interest_pct,
+    skew_ratio,
+    *,
+    max_float_shares: float = 30_000_000.0,
+    min_short_interest: float = 0.20,
+    max_bbw_percentile: float = 0.05,
+    min_volume_z: float = 4.0,
+    min_skew_ratio: float = 1.1,
+    bbw_lookback: int = 252,
+    volume_lookback: int = 90,
+) -> dict:
+    """
+    Venture-style **Asymmetric Convexity** gate (research sieve): all conditions AND.
+    Expect almost always False; Yahoo float/short/skew gaps yield soft fails.
+    """
+    gates: dict = {
+        "float": {"ok": False, "value": float_shares, "max": max_float_shares},
+        "short": {"ok": False, "value": short_interest_pct, "min": min_short_interest},
+        "bbw": {"ok": False, "pctile": None, "max_pctile": max_bbw_percentile},
+        "vol_z": {"ok": False, "z": None, "min": min_volume_z},
+        "skew": {"ok": False, "ratio": skew_ratio, "min": min_skew_ratio},
+    }
+    if float_shares is not None and float_shares <= max_float_shares:
+        gates["float"]["ok"] = True
+    if short_interest_pct is not None and short_interest_pct >= min_short_interest:
+        gates["short"]["ok"] = True
+
+    bbw_pctile = None
+    try:
+        if df is not None and not df.empty and "Close" in df.columns and "Volume" in df.columns:
+            bbw = _bbw_series(pd.to_numeric(df["Close"], errors="coerce"))
+            lb = min(bbw_lookback, len(bbw.dropna()))
+            if lb >= 30:
+                tail = bbw.dropna().tail(lb)
+                bbw_pctile = float(tail.rank(pct=True).iloc[-1])
+                gates["bbw"]["pctile"] = bbw_pctile
+                if bbw_pctile <= max_bbw_percentile:
+                    gates["bbw"]["ok"] = True
+    except Exception:
+        pass
+
+    vol_z = None
+    try:
+        vol = pd.to_numeric(df["Volume"], errors="coerce")
+        tail_v = vol.tail(min(volume_lookback, len(vol))).dropna()
+        if len(tail_v) >= 30:
+            vm = float(tail_v.mean())
+            vs = float(tail_v.std(ddof=1))
+            if vs > 0 and np.isfinite(vs):
+                vol_z = float((vol.iloc[-1] - vm) / vs)
+                gates["vol_z"]["z"] = vol_z
+                if vol_z >= min_volume_z:
+                    gates["vol_z"]["ok"] = True
+    except Exception:
+        pass
+
+    if skew_ratio is not None and skew_ratio >= min_skew_ratio:
+        gates["skew"]["ok"] = True
+
+    hit = all(g["ok"] for g in gates.values())
+    return {"hit": hit, "gates": gates, "bbw_pctile": bbw_pctile, "vol_z": vol_z}
 
 
 def scan_single_ticker(tkr, correlation_haircut=1.0, cluster_peers=None, corr_matrix=None, spy_df=None):
@@ -899,14 +994,15 @@ def scan_single_ticker(tkr, correlation_haircut=1.0, cluster_peers=None, corr_ma
 
         gamma_flip_sc = None
         gex_regime = "—"
+        c_s, p_s = pd.DataFrame(), pd.DataFrame()
         try:
             _, opt_exps_s = fetch_options(tkr)
             if opt_exps_s:
                 exp_s = opt_exps_s[min(2, len(opt_exps_s) - 1)]
                 raw_s, _ = fetch_options(tkr, exp_s)
-                c_s, p_s = raw_s if isinstance(raw_s, (tuple, list)) and len(raw_s) == 2 else (pd.DataFrame(), pd.DataFrame())
-                c_s = c_s if isinstance(c_s, pd.DataFrame) else pd.DataFrame()
-                p_s = p_s if isinstance(p_s, pd.DataFrame) else pd.DataFrame()
+                _c, _p = raw_s if isinstance(raw_s, (tuple, list)) and len(raw_s) == 2 else (pd.DataFrame(), pd.DataFrame())
+                c_s = _c if isinstance(_c, pd.DataFrame) else pd.DataFrame()
+                p_s = _p if isinstance(_p, pd.DataFrame) else pd.DataFrame()
                 if not c_s.empty or not p_s.empty:
                     ct = c_s.copy()
                     pt = p_s.copy()
@@ -1080,6 +1176,24 @@ def scan_single_ticker(tkr, correlation_haircut=1.0, cluster_peers=None, corr_ma
         elif news_bias_score is not None:
             flow_bias = "—"
 
+        skew_ratio = None
+        try:
+            _, _piv, _civ = calc_vol_skew(float(price), c_s, p_s)
+            if _piv is not None and _civ is not None and float(_piv) > 0:
+                skew_ratio = float(_civ) / float(_piv)
+        except Exception:
+            pass
+
+        _yf_info = fetch_info(tkr) or {}
+        _flt, _short_pct = _parse_yahoo_float_and_short(_yf_info)
+        _sieve = evaluate_asymmetric_convexity_sieve(
+            df,
+            _flt,
+            _short_pct,
+            skew_ratio,
+        )
+        convexity_label = "💎 10x Sieve" if _sieve.get("hit") else "—"
+
         return {
             "ticker": tkr,
             "price": price,
@@ -1113,6 +1227,8 @@ def scan_single_ticker(tkr, correlation_haircut=1.0, cluster_peers=None, corr_ma
                 if "ATR" in df.columns and not df.empty
                 else round(price * 0.95, 2)
             ),
+            "10x Convexity": convexity_label,
+            "convexity_sieve": _sieve,
         }
     except Exception:
         return None

@@ -239,6 +239,23 @@ def _render_equity_setup_desk(scanner_results, selectbox_key: str, prefer_ticker
                 help="(Gold Zone − spot) ÷ (spot − stop) per share when all inputs exist; illustrative target only.",
             )
 
+    _cvx = ticker_data.get("convexity_sieve")
+    if isinstance(_cvx, dict) and _cvx.get("gates"):
+        with st.expander("🧪 Asymmetric Convexity sieve (diagnostics)", expanded=False):
+            st.caption(
+                "All five gates must pass for **💎 10x Sieve**. Missing Yahoo **float/short** or chain **IV** usually fails a gate — not a verdict on the stock."
+            )
+            _g = _cvx["gates"]
+            for label, key in (
+                ("Float ≤30M", "float"),
+                ("Short ≥20%", "short"),
+                ("BBW ≤5th pct (1y)", "bbw"),
+                ("Vol Z ≥4 (90d)", "vol_z"),
+                ("Call IV / Put IV ≥1.1", "skew"),
+            ):
+                block = _g.get(key) or {}
+                st.write(f"**{label}:** {'✅' if block.get('ok') else '⬜'} `{block}`")
+
     st.divider()
     st.markdown("### 📊 Structure visualizer")
     st.caption("Last **60** daily closes — context for volatility coil / drift (Yahoo daily bars).")
@@ -2665,6 +2682,7 @@ def main():
                                         "Flow / Bias": r.get("Flow / Bias", "—"),
                                         "Gold Zone Dist %": float(r["dist_gz"]),
                                         "Daily": r["struct"],
+                                        "10x Convexity": r.get("10x Convexity", "—"),
                                         "Summary": r["summary"],
                                     }
                                     for r in scanner_results
@@ -2708,6 +2726,10 @@ def main():
                                         ),
                                         "Gold Zone Dist %": st.column_config.NumberColumn("Gold Zone Dist", format="%+.1f%%"),
                                         "Daily": st.column_config.TextColumn("Daily"),
+                                        "10x Convexity": st.column_config.TextColumn(
+                                            "10x Convexity",
+                                            help="Venture-style sieve: float ≤30M, short ≥20%, BBW ≤5th pct (1y), vol Z≥4 (90d), call/put IV ≥1.1. All must pass; Yahoo data often gaps.",
+                                        ),
                                         "Summary": st.column_config.TextColumn("Summary", width="large"),
                                     },
                                 )
@@ -2792,6 +2814,10 @@ def main():
                                         <div style='font-size:.65rem;color:#64748b;text-transform:uppercase'>Diamond</div>
                                         <span class='diamond-badge {r["d_class"]}'>{_ds}</span>
                                     </div>
+                                    <div style='text-align:center;min-width:88px'>
+                                        <div style='font-size:.65rem;color:#64748b;text-transform:uppercase'>10x Sieve</div>
+                                        <div class='mono' style='font-size:.78rem;color:#a78bfa;font-weight:700;line-height:1.25'>{_html_mod.escape(str(r.get("10x Convexity") or "—"))}</div>
+                                    </div>
                                     <div style='text-align:center;min-width:100px'>
                                         <div style='font-size:.65rem;color:#64748b;text-transform:uppercase'>GEX Regime</div>
                                         <div class='mono' style='font-size:.72rem;color:#e2e8f0;font-weight:700;line-height:1.25'>{_html_mod.escape(str(r.get("GEX Regime") or "—"))}</div>
@@ -2875,6 +2901,7 @@ def main():
                                         "Stop Loss": r.get("stock_stop_price", "—"),
                                         "QE Score": r.get("qs", 0),
                                         "Support Proximity (%)": pre.get("support_proximity", "—"),
+                                        "10x Sieve": r.get("10x Convexity", "—"),
                                     })
 
                                 breakout_count = sum(1 for row in equity_rows if "🔥" in str(row.get("Signal", "")))
