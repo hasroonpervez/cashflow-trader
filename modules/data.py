@@ -17,10 +17,11 @@ from datetime import datetime, timedelta
 # consistent cookies. Community Cloud empty bars + “possibly delisted” are usually
 # throttling on shared egress, not actual delistings.
 #
-# yfinance’s data layer often passes ``timeout=30`` (or similar) for ``.info``, ``.options``,
-# etc., which overrides a short session default. Subclassing ``Session`` and forcing
-# ``kwargs["timeout"]`` in ``request()`` caps *every* call, including sieve ``fetch_info``
-# and option-chain traffic, so tar-pits cannot hang the Streamlit thread for 30s per hop.
+# yfinance’s ``YfData._make_request`` passes an explicit ``timeout`` (often 30) into
+# ``session.get``; ``curl_cffi`` uses that value over ``Session``’s default ``self.timeout``,
+# so a plain short session default is not enough. We (1) subclass ``Session.request`` to
+# force ``_YAHOO_YF_TIMEOUT`` and (2) monkey-patch ``YfData`` to clamp timeouts and bind the
+# singleton to ``_YAHOO_SESSION`` before any ticker touches a default chrome session.
 _YAHOO_YF_TIMEOUT = 5.0
 
 
@@ -38,6 +39,44 @@ _YAHOO_BROWSER_UA = (
 )
 _YAHOO_SESSION = _ForcedTimeoutSession(impersonate="safari15_5", timeout=_YAHOO_YF_TIMEOUT)
 _YAHOO_SESSION.headers.update({"Accept-Language": "en-US,en;q=0.9"})
+
+_YFIN_YDATA_TIMEOUT_PATCHED = False
+
+
+def _clamp_yahoo_http_timeout(timeout) -> float:
+    try:
+        if timeout is None:
+            return float(_YAHOO_YF_TIMEOUT)
+        return min(float(timeout), float(_YAHOO_YF_TIMEOUT))
+    except (TypeError, ValueError):
+        return float(_YAHOO_YF_TIMEOUT)
+
+
+def _patch_yfinance_data_layer_timeout() -> None:
+    """Cap ``YfData`` timeouts (stops ``timed out after 30001 ms``) and lock singleton session."""
+    global _YFIN_YDATA_TIMEOUT_PATCHED
+    if _YFIN_YDATA_TIMEOUT_PATCHED:
+        return
+    from yfinance.data import YfData
+
+    _orig_make = YfData._make_request
+    _orig_crumb = YfData._get_cookie_and_crumb
+
+    def _make_request_cap(self, url, request_method, body=None, params=None, timeout=30):
+        t = _clamp_yahoo_http_timeout(timeout)
+        return _orig_make(self, url, request_method, body=body, params=params, timeout=t)
+
+    def _get_cookie_and_crumb_cap(self, timeout=30):
+        t = _clamp_yahoo_http_timeout(timeout)
+        return _orig_crumb(self, t)
+
+    YfData._make_request = _make_request_cap
+    YfData._get_cookie_and_crumb = _get_cookie_and_crumb_cap
+    YfData(session=_YAHOO_SESSION)
+    _YFIN_YDATA_TIMEOUT_PATCHED = True
+
+
+_patch_yfinance_data_layer_timeout()
 
 # Yahoo JSON API (same family yfinance uses) — fallback when Ticker.options is transiently empty.
 _YAHOO_OPTIONS_HEADERS = {
