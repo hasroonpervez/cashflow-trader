@@ -2,7 +2,7 @@
 
 **Single-screen options income desk that grew from a basic multi-ticker scanner into a portfolio-aware command center.**
 
-**v22.0** adds **predictive** layers on top of v21: **`Opt.predict_opex_pin`** (GEX gamma-wall + **Θ/Γ** magnetic blend), **`TA.get_shadow_move`** (70% whale-volume close band vs IV **Expected Move**, purple chart zone), **Bayesian-style news weighting** (forward **guidance / outlook / forecast** phrases outweigh trailing **beat / miss** in `Sentiment.analyze_news_bias`), **Sentinel Ledger** columns **Dist. to pin %** + **Edge realization %** + **Pin maturity** (✨ **Golden zone**), and **regime calibration**: a **Shadow breakout** callout when spot **exits** the purple whale band but stays **inside** the IV **1σ** rails — an early liquidity-vs-options read. **v21** adaptive stack (FFD correlation, adaptive whale Z, HVN GEX) remains. **Data: Yahoo Finance only.**
+**v22.0** adds **predictive** layers on top of v21: **`Opt.predict_opex_pin`** (GEX gamma-wall + **Θ/Γ** magnetic blend), **`TA.get_shadow_move`** (70% whale-volume close band vs IV **Expected Move**, purple chart zone), **Bayesian-style news weighting** (forward **guidance / outlook / forecast** phrases outweigh trailing **beat / miss** in `Sentiment.analyze_news_bias`), **Sentinel Ledger** columns **Dist. to pin %** + **Edge realization %** + **Pin maturity** (✨ **Golden zone**), and **regime calibration**: a **Shadow breakout** callout when spot **exits** the purple whale band but stays **inside** the IV **1σ** rails — an early liquidity-vs-options read. The **Market Scanner** also offers **🎯 Equity Radar** mode: **`Opt.detect_pre_diamond`** flags **pre-diamond** coils (confluence **5–6**, squeeze, volume ramp, Gold Zone / **shadow** proximity, weekly not **BEARISH**, **3d RS vs SPY**), with **one cached SPY** fetch per scan for relative strength — suggested **share** sizes reuse **`Opt.portfolio_allocation`** (QE × MC PoP weights × **correlation haircut**) against your **capital base** slider. **v21** adaptive stack (FFD correlation, adaptive whale Z, HVN GEX) remains. **Data: Yahoo Finance only.**
 
 **In-app help:** open **Intel → Quick Reference Guide** for a plain-language glossary (synced with the concepts below).
 
@@ -18,7 +18,7 @@
 | **v19** | Flow & language | **Volume Z-score** whale scaling, **NLP** bias on desk + scanner **Flow / Bias** |
 | **v20.0** | Portfolio | **Correlation heatmap**, **cluster penalty** across Blues, **Kelly-style allocator**, **Sentinel Ledger** |
 | **v21.0** | Adaptive quant | **Adaptive whale radar**, **FFD correlation + HMM**, **HVN-weighted GEX**, **ADAPTIVE INTELLIGENCE** branding |
-| **v22.0** | Predictive | **OpEx pin**, **Shadow EM**, **Bayesian NLP nuance**, **Sentinel alpha columns**, **v22.0 · PREDICTIVE ANALYTICS** |
+| **v22.0** | Predictive | **OpEx pin**, **Shadow EM**, **Bayesian NLP nuance**, **Sentinel alpha columns**, **Equity Radar** (pre-diamond + **SPY RS** + allocator-sized shares), **v22.0 · PREDICTIVE ANALYTICS** |
 
 The Market Scanner still ranks the watchlist, but v20+ treats the list as a **portfolio**: overlap and co-movement inform both **signal scores** and **sizing**. **v21** sharpens correlations and flow baselines; **v22** projects **pin risk**, **liquidity-implied range**, and **edge retention** on tracked legs.
 
@@ -33,6 +33,7 @@ The Market Scanner still ranks the watchlist, but v20+ treats the list as a **po
 - **Sentinel Ledger** — **`qs_at_entry`** on **Track Trade**; snapshots **`dist_pin_pct_at_entry`** and **`theta_desk_day_entry`** (hidden columns) for calibration; table shows **Dist. to pin %**, **Edge realization %**, **Pin maturity**; metric **Edge realization (avg)** for active-ticker rows.
 - **Regime calibration** — **`_cf_regime_shadow_breakout`**: purple banner on the **Technical Chart** when spot is outside **`get_shadow_move`** but inside **`calc_expected_move`** (BLUF IV/DTE). **Pin maturity ✨ Golden zone** when **≤14 DTE**, **|Dist. to pin %|** shrinks vs entry, and desk **Θ/day** is **≥ ~102%** of entry (pin magnet + rising decay into expiry).
 - **UI** — Caption *Predictive Pinning, Bayesian News Nuance, & Shadow Liquidity Architecture.*; badge **v22.0 · PREDICTIVE ANALYTICS**.
+- **Equity Radar (scanner)** — **MISSION CONTROL → Trading Mode**: toggle **📈 Options Yield** (unchanged: full diamond/confluence scanner + optional **$50k** Blue allocator) vs **🎯 Equity Radar**. Radar table shows **Signal** (**🔥 IMMINENT BREAKOUT** / **🟡 ACCUMULATING** / **—**), **Suggested Shares** from **`Opt.portfolio_allocation`** on pre-diamond rows only ( **`premium_per_contract` = spot** so **contracts** ≈ shares), **`stock_stop_price`** (ATR trail when **`ATR`** exists on history, else **~5%** cushion). **`scan_single_ticker`** accepts optional **`spy_df`**; the app fetches **SPY** once per **Scan Watchlist** and passes it into every ticker (no per-row Yahoo spam).
 
 ### Pinning theory (GEX, Θ/Γ, and “magnets”)
 
@@ -65,7 +66,7 @@ Integer differentiation (**d = 1**, e.g. simple log-returns) pushes series towar
 - **`TA.get_correlation_matrix`** — *(v21)* Now Pearson on **FFD return** innovations; still **`pd.concat(..., join="inner")`** on dates and `dropna(how="any")` on the return panel.
 - **`watchlist_correlation_matrix_cached`** — `@st.cache_data(ttl=3600)` wrapper used by the main **Portfolio Risk** expander and the scanner heatmap path so the matrix is not recomputed on every widget interaction.
 - **Cluster penalty** — `detect_diamonds(..., ticker_symbol=, peer_diamond_symbols=, cluster_corr_matrix=)` subtracts **2** from Blue **composite** when ρ **> 0.75** to any peer ticker already showing an active **Blue** earlier in the **same** watchlist scan (sequential scan order).
-- **`Opt.portfolio_allocation`** — For scanner **Blue Diamond** rows: weights ∝ **QE × MC PoP %**, notional **× `_simple_corr_haircut`**, outputs **capital ($)** and **contract count** (floor by reference premium).
+- **`Opt.portfolio_allocation`** — For scanner **Blue Diamond** rows: weights ∝ **QE × MC PoP %**, notional **× `_simple_corr_haircut`**, outputs **capital ($)** and **contract count** (floor by reference premium). **Equity Radar** reuses the same engine for **pre-diamond** names with **reference premium = share price** so the floored **contracts** field maps to **suggested shares**.
 - **Sentinel Ledger** — `st.session_state["_cf_ledger"]`; **Track Trade** on optimal **Covered Call** / **CSP** lines; tab **📊 Sentinel Ledger** with table + **`sentinel_ledger_metrics`** (BS mark vs entry premium).
 
 ---
@@ -124,7 +125,7 @@ Integer differentiation (**d = 1**, e.g. simple log-returns) pushes series towar
 - **HMM regimes (FFD)** — Gaussian HMM trains on **FFD-level differences** plus short rolling volatility (stationary features with memory); `fit` / `predict_proba` stay inside `try/except` so singular covariance cases do not crash the app.
 - **Scanner threading** — Rolling Edge Capture and other modules still use a **bounded** pool with `submit_with_script_ctx`. **v20.0** runs the **full watchlist Diamond scan sequentially** so **cluster penalties** see a deterministic **peer-Blue** ordering (correlation context is shared across tickers in one pass).
 - **Data layer** — `fetch_stock` is wrapped with `@st.cache_data(ttl=300)`; an **empty** Yahoo history prints a **stderr** warning (visible in Streamlit Cloud logs) instead of failing silently.
-- **Diamond detection** — **Hurst exponent** on `Close` adapts **RSI** length (8 if `H < 0.45`, 21 if `H > 0.55`, else 14) and **MACD** fast/slow/signal by the same scale; when `H > 0.55`, **Blue** diamonds also require **MACD line > signal** (when both are defined). **v18** layers **GEX regime** bonuses/penalties on Blue scores when a gamma flip resolves. **v19** adds a **scaled Whale bonus** on Blue from **volume Z-score**: **+1** if **Z > 2.0**, **+2** if **Z > 3.0**. **v20** adds optional **cluster guard** (−2 composite when ρ **> 0.75** vs another **Blue** in the same scanner pass).
+- **Diamond detection** — **Hurst exponent** on `Close` adapts **RSI** length (8 if `H < 0.45`, 21 if `H > 0.55`, else 14) and **MACD** fast/slow/signal by the same scale; when `H > 0.55`, **Blue** diamonds also require **MACD line > signal** (when both are defined). **v18** layers **GEX regime** bonuses/penalties on Blue scores when a gamma flip resolves. **v19** adds a **scaled Whale bonus** on Blue from **volume Z-score**: **+1** if **Z > 2.0**, **+2** if **Z > 3.0**. **v20** adds optional **cluster guard** (−2 composite when ρ **> 0.75** vs another **Blue** in the same scanner pass). **v22** adds **`Opt.detect_pre_diamond`** on the scanner path (three-bar **Hurst-aligned** confluence slice, **shadow** low from **`TA.get_shadow_move`**, optional **SPY** dataframe for **3d** relative strength).
 - **Skew-aware BLUF** — If **OTM put IV ≥ 120% of OTM call IV** (when call IV is positive) and daily structure is **not BEARISH**, routing prioritizes **SELL CASH SECURED PUTS** even when the tape is only neutral (after covered-call and fear-score rules).
 - **Walk-up limit** — The **Recommended Trade** card shows **(bid + mid) / 2** per share for **short premium** as a passive fill anchor (e.g. Robinhood-style limit sells), including the strict-filter **fallback** strike path when present.
 
@@ -151,7 +152,7 @@ The dashboard answers one question: **"What should I do right now?"**
 - **One-Click Backtest Presets** — Conservative, Balanced, and Aggressive slider snaps for instant scenario switching
 - **Options Math Stack** — Black-Scholes Greeks, Corrado-Su skew/kurtosis expansion, Expected Value, discrete/continuous Kelly sizing, Volatility Skew, **Expected Move (1-σ)**, **Θ/Γ**, **GEX / gamma flip**, **predicted OpEx pin**, **shadow move** vs EM
 - **Sentinel Ledger (v22+)** — **Track Trade** snapshots; **Dist. to pin %**, **Edge realization %**, **Pin maturity**; portfolio **Δ**, **Θ/day**, model **P&L**; **Shadow breakout** alert on the chart when conditions align
-- **Multi-Ticker Scanner** — ranks the watchlist by confluence and diamond status; **v20** uses a **sequential** pass with **cluster-aware** Blue scores; **PoP** = historical Diamond win rate; **EM Safety**; **GEX Regime**; **Flow / Bias**; optional **$50k allocator** expander for **Blue** rows
+- **Multi-Ticker Scanner** — ranks the watchlist by confluence and diamond status; **v20** uses a **sequential** pass with **cluster-aware** Blue scores; **PoP** = historical Diamond win rate; **EM Safety**; **GEX Regime**; **Flow / Bias**; optional **$50k allocator** expander for **Blue** rows; **v22** adds **Equity Radar** mode (**`Opt.detect_pre_diamond`**, **SPY** RS, **`portfolio_allocation`** share sizing, styled radar table)
 - **Premium Simulator** — covered call backtest with honest disclaimers
 
 ---
@@ -171,7 +172,7 @@ cashflow-trader/
     ├── config.py             # Config persistence, defaults, st.secrets overlay
     ├── data.py               # yfinance fetchers, retry/backoff, fetch_stock cache (300s), macro
     ├── ta.py                 # TA class — indicators, **`apply_ffd`**, **adaptive `get_dark_pool_proxy`**, **`get_shadow_move` (whale band)**, **`get_correlation_matrix`**, HVN / volume profile
-    ├── options.py            # Black-Scholes, Corrado-Su, EV, Kelly, Quant Edge, **GEX / gamma flip / `predict_opex_pin`**, Diamonds, **`Opt.portfolio_allocation`**, **`watchlist_correlation_matrix_cached`**, **MC PoP**, **`PortfolioRisk`**
+    ├── options.py            # Black-Scholes, Corrado-Su, EV, Kelly, Quant Edge, **GEX / gamma flip / `predict_opex_pin`**, Diamonds, **`Opt.detect_pre_diamond`**, **`Opt.portfolio_allocation`**, **`scan_single_ticker`** (optional **`spy_df`**), **`watchlist_correlation_matrix_cached`**, **MC PoP**, **`PortfolioRisk`**
     ├── sentiment.py          # **Bayesian-style `analyze_news_bias`**, HMM (FFD), CC sim, Alerts, QuantBacktest
     ├── chart.py              # Price / volume / RSI / MACD + **Shadow move (purple)** + **OpEx pin** + HVN / EM / gamma flip / correlation heatmap
     ├── ui_helpers.py         # Sparklines, fragments, **`sentinel_ledger_metrics`**, **`sentinel_ledger_table_rows`**, **`ledger_theta_desk_day`**, regime **Shadow breakout** banner, **expected_move_safety_html**, **Θ/Γ desk line**

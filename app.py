@@ -412,6 +412,33 @@ def main():
                 "Custom watchlist order" if _scan_seg == "Custom order" else "Highest confluence first"
             )
 
+        st.markdown("### 🎯 Trading Mode")
+        if hasattr(st, "segmented_control"):
+            scanner_mode = st.segmented_control(
+                "Mode",
+                ["📈 Options Yield", "🎯 Equity Radar"],
+                key="sb_scanner_mode",
+                label_visibility="collapsed",
+                default="📈 Options Yield",
+            )
+        else:
+            scanner_mode = st.radio(
+                "Mode",
+                ["📈 Options Yield", "🎯 Equity Radar"],
+                horizontal=True,
+                key="sb_scanner_mode_radio",
+                label_visibility="collapsed",
+                index=0,
+            )
+        equity_capital = 10000
+        if scanner_mode == "🎯 Equity Radar":
+            equity_capital = st.select_slider(
+                "Capital Base per Trade ($)",
+                options=[5000, 10000, 25000, 50000, 100000],
+                value=10000,
+                help="Suggested shares are scaled using Opt.portfolio_allocation (Kelly + correlation haircut).",
+            )
+
         def _persist_use_quant_models():
             b = load_config()
             q = bool(st.session_state.get("sb_use_quant", False))
@@ -2377,6 +2404,12 @@ def main():
                         with st.expander("🕸️ Dynamic Correlation Matrix", expanded=False):
                             st.plotly_chart(corr_fig, use_container_width=True, config=_PLOTLY_UI_CONFIG)
 
+                    spy_df = None
+                    try:
+                        spy_df = fetch_stock("SPY", "1y", "1d")
+                    except Exception:
+                        pass
+
                     scanner_results = []
                     n_scan = len(watchlist_tickers)
                     scan_progress = st.progress(0)
@@ -2394,6 +2427,7 @@ def main():
                                 _comb,
                                 cluster_peers=frozenset(peer_blues),
                                 corr_matrix=corr_matrix,
+                                spy_df=spy_df,
                             )
                             if result:
                                 result["overlap"] = overlap
@@ -2420,61 +2454,62 @@ def main():
                             order = {t: i for i, t in enumerate(watchlist_tickers)}
                             scanner_results.sort(key=lambda x: order.get(x["ticker"], 10_000))
 
-                        _blues_alloc = [r for r in scanner_results if "BLUE" in str(r.get("d_status", ""))]
-                        if _blues_alloc:
-                            _alloc_rows = Opt.portfolio_allocation(
-                                [
-                                    {
-                                        "ticker": r["ticker"],
-                                        "quant_edge": float(r["qs"]),
-                                        "mc_pop_pct": float(r.get("scanner_mc_pop") or 0),
-                                        "premium_per_contract": float(r.get("reference_prem_100") or 1),
-                                    }
-                                    for r in _blues_alloc
-                                ],
-                                total_capital=50000,
-                                watchlist_tickers=watchlist_tickers,
-                                log_returns_df=log_returns_df,
-                            )
-                            if _alloc_rows:
-                                with st.expander("$50k Kelly-style mix (Blue Diamonds only)", expanded=False):
-                                    st.caption(
-                                        "Weights scale with Quant Edge × MC PoP %; each name’s notional is scaled by `_simple_corr_haircut` vs the watchlist (FFD-return correlations when history is sufficient)."
-                                    )
-                                    _adf = pd.DataFrame(_alloc_rows)
-                                    streamlit_show_dataframe(
-                                        _adf,
-                                        use_container_width=True,
-                                        hide_index=True,
-                                        key="cf_portfolio_alloc_df",
-                                        on_select="ignore",
-                                        selection_mode=[],
-                                    )
+                        if scanner_mode == "📈 Options Yield":
+                            _blues_alloc = [r for r in scanner_results if "BLUE" in str(r.get("d_status", ""))]
+                            if _blues_alloc:
+                                _alloc_rows = Opt.portfolio_allocation(
+                                    [
+                                        {
+                                            "ticker": r["ticker"],
+                                            "quant_edge": float(r["qs"]),
+                                            "mc_pop_pct": float(r.get("scanner_mc_pop") or 0),
+                                            "premium_per_contract": float(r.get("reference_prem_100") or 1),
+                                        }
+                                        for r in _blues_alloc
+                                    ],
+                                    total_capital=50000,
+                                    watchlist_tickers=watchlist_tickers,
+                                    log_returns_df=log_returns_df,
+                                )
+                                if _alloc_rows:
+                                    with st.expander("$50k Kelly-style mix (Blue Diamonds only)", expanded=False):
+                                        st.caption(
+                                            "Weights scale with Quant Edge × MC PoP %; each name’s notional is scaled by `_simple_corr_haircut` vs the watchlist (FFD-return correlations when history is sufficient)."
+                                        )
+                                        _adf = pd.DataFrame(_alloc_rows)
+                                        streamlit_show_dataframe(
+                                            _adf,
+                                            use_container_width=True,
+                                            hide_index=True,
+                                            key="cf_portfolio_alloc_df",
+                                            on_select="ignore",
+                                            selection_mode=[],
+                                        )
 
-                        # Single markdown block: one st.markdown per row desyncs Streamlit's element tree
-                        # (setIn index errors) when the watchlist length changes between reruns.
-                        _scan_chunks = []
-                        for r in scanner_results:
-                            pc = "#10b981" if r["chg_pct"] >= 0 else "#ef4444"
-                            cpc = "#10b981" if r["cp_score"] >= 7 else ("#f59e0b" if r["cp_score"] >= 4 else "#ef4444")
-                            qec = "#10b981" if r["qs"] > 70 else ("#f59e0b" if r["qs"] > 50 else "#ef4444")
-                            gz_c = "#10b981" if r["dist_gz"] > 0 else "#ef4444"
-                            cp_mini_bar = ""
-                            for bi in range(r["cp_max"]):
-                                filled = bi < r["cp_score"]
-                                bc = "#10b981" if filled and r["cp_score"] >= 7 else ("#f59e0b" if filled and r["cp_score"] >= 4 else ("#ef4444" if filled else "#1e293b"))
-                                cp_mini_bar += f"<div style='flex:1;height:6px;background:{bc};border-radius:3px;margin:0 1px'></div>"
-                            _tk = _html_mod.escape(str(r["ticker"]))
-                            _sum = _html_mod.escape(str(r.get("summary") or ""))
-                            _st = _html_mod.escape(str(r.get("struct") or ""))
-                            _ds = _html_mod.escape(str(r.get("d_status") or ""))
-                            _ov = (
-                                f"<div style='font-size:.72rem;color:#f59e0b;font-weight:600'>⚠️ High Portfolio Overlap ({float(r.get('overlap', 0.0)):.2f})</div>"
-                                if r.get("overlap", 0.0) >= 0.7
-                                else ""
-                            )
-                            _scan_chunks.append(
-                                f"""<div class='scanner-row'>
+                            # Single markdown block: one st.markdown per row desyncs Streamlit's element tree
+                            # (setIn index errors) when the watchlist length changes between reruns.
+                            _scan_chunks = []
+                            for r in scanner_results:
+                                pc = "#10b981" if r["chg_pct"] >= 0 else "#ef4444"
+                                cpc = "#10b981" if r["cp_score"] >= 7 else ("#f59e0b" if r["cp_score"] >= 4 else "#ef4444")
+                                qec = "#10b981" if r["qs"] > 70 else ("#f59e0b" if r["qs"] > 50 else "#ef4444")
+                                gz_c = "#10b981" if r["dist_gz"] > 0 else "#ef4444"
+                                cp_mini_bar = ""
+                                for bi in range(r["cp_max"]):
+                                    filled = bi < r["cp_score"]
+                                    bc = "#10b981" if filled and r["cp_score"] >= 7 else ("#f59e0b" if filled and r["cp_score"] >= 4 else ("#ef4444" if filled else "#1e293b"))
+                                    cp_mini_bar += f"<div style='flex:1;height:6px;background:{bc};border-radius:3px;margin:0 1px'></div>"
+                                _tk = _html_mod.escape(str(r["ticker"]))
+                                _sum = _html_mod.escape(str(r.get("summary") or ""))
+                                _st = _html_mod.escape(str(r.get("struct") or ""))
+                                _ds = _html_mod.escape(str(r.get("d_status") or ""))
+                                _ov = (
+                                    f"<div style='font-size:.72rem;color:#f59e0b;font-weight:600'>⚠️ High Portfolio Overlap ({float(r.get('overlap', 0.0)):.2f})</div>"
+                                    if r.get("overlap", 0.0) >= 0.7
+                                    else ""
+                                )
+                                _scan_chunks.append(
+                                    f"""<div class='scanner-row'>
                                 <div class='scanner-grid'>
                                     <div style='min-width:80px'>
                                         <div style='font-size:1.1rem;font-weight:700;color:#e2e8f0'>{_tk}</div>
@@ -2527,83 +2562,146 @@ def main():
                                     </div>
                                 </div>
                             </div>"""
-                            )
-                        if _scan_chunks:
-                            st.markdown("\n".join(_scan_chunks), unsafe_allow_html=True)
+                                )
+                            if _scan_chunks:
+                                st.markdown("\n".join(_scan_chunks), unsafe_allow_html=True)
 
-                        scanner_df = pd.DataFrame(
-                            [
-                                {
-                                    "Ticker": r["ticker"],
-                                    "Price": float(r["price"]),
-                                    "Change %": float(r["chg_pct"]),
-                                    "QE Score": float(r["qs"]),
-                                    "Adj. Kelly %": float(r.get("Adj. Kelly %", 0.0)),
-                                    "Confluence": int(r["cp_score"]),
-                                    "Diamond": r["d_status"],
-                                    "PoP": (
-                                        f"{float(r.get('diamond_pop', 0)):.0f}%"
-                                        if int(r.get("diamond_n") or 0) > 0
-                                        else "—"
-                                    ),
-                                    "EM Safety": r.get("EM Safety", "—"),
-                                    "GEX Regime": r.get("GEX Regime", "—"),
-                                    "Flow / Bias": r.get("Flow / Bias", "—"),
-                                    "Gold Zone Dist %": float(r["dist_gz"]),
-                                    "Daily": r["struct"],
-                                    "Summary": r["summary"],
-                                }
-                                for r in scanner_results
-                            ]
-                        )
-                        with st.expander("Scanner Data Table", expanded=False):
-                            streamlit_show_dataframe(
-                                scanner_df,
-                                use_container_width=True,
-                                hide_index=True,
-                                key="cf_scanner_tbl_df",
-                                on_select="ignore",
-                                selection_mode=[],
-                                column_config={
-                                    "Ticker": st.column_config.TextColumn("Ticker", width="small"),
-                                    "Price": st.column_config.NumberColumn("Price", format="$%.2f"),
-                                    "Change %": st.column_config.NumberColumn("Change", format="%+.1f%%"),
-                                    "QE Score": st.column_config.NumberColumn("QE Score", format="%.0f"),
-                                    "Adj. Kelly %": st.column_config.NumberColumn(
-                                        "Adj. Kelly",
-                                        format="%.1f%%",
-                                        help="Kelly Criterion sizing after applying the Portfolio Correlation Haircut.",
-                                    ),
-                                    "Confluence": st.column_config.NumberColumn("Confluence", format="%d"),
-                                    "Diamond": st.column_config.TextColumn("Diamond"),
-                                    "PoP": st.column_config.TextColumn(
-                                        "PoP",
-                                        help="Historical win rate for Diamond signals (same methodology as the main dashboard backtest).",
-                                    ),
-                                    "EM Safety": st.column_config.TextColumn(
-                                        "EM Safety",
-                                        help="1-σ implied move vs scanner short-put strike: SAFE if strike < spot − EM (else MONITOR).",
-                                    ),
-                                    "GEX Regime": st.column_config.TextColumn(
-                                        "GEX Regime",
-                                        help="Gamma Flip: the price level where market maker hedging accelerates volatility. 🛡️ STABLE = spot above flip; ⚠️ TURBULENT = spot below flip.",
-                                    ),
-                                    "Flow / Bias": st.column_config.TextColumn(
-                                        "Flow / Bias",
-                                        help=SCANNER_WHALE_FLOW_BIAS_HELP,
-                                    ),
-                                    "Gold Zone Dist %": st.column_config.NumberColumn("Gold Zone Dist", format="%+.1f%%"),
-                                    "Daily": st.column_config.TextColumn("Daily"),
-                                    "Summary": st.column_config.TextColumn("Summary", width="large"),
-                                },
+                            scanner_df = pd.DataFrame(
+                                [
+                                    {
+                                        "Ticker": r["ticker"],
+                                        "Price": float(r["price"]),
+                                        "Change %": float(r["chg_pct"]),
+                                        "QE Score": float(r["qs"]),
+                                        "Adj. Kelly %": float(r.get("Adj. Kelly %", 0.0)),
+                                        "Confluence": int(r["cp_score"]),
+                                        "Diamond": r["d_status"],
+                                        "PoP": (
+                                            f"{float(r.get('diamond_pop', 0)):.0f}%"
+                                            if int(r.get("diamond_n") or 0) > 0
+                                            else "—"
+                                        ),
+                                        "EM Safety": r.get("EM Safety", "—"),
+                                        "GEX Regime": r.get("GEX Regime", "—"),
+                                        "Flow / Bias": r.get("Flow / Bias", "—"),
+                                        "Gold Zone Dist %": float(r["dist_gz"]),
+                                        "Daily": r["struct"],
+                                        "Summary": r["summary"],
+                                    }
+                                    for r in scanner_results
+                                ]
                             )
+                            with st.expander("Scanner Data Table", expanded=False):
+                                streamlit_show_dataframe(
+                                    scanner_df,
+                                    use_container_width=True,
+                                    hide_index=True,
+                                    key="cf_scanner_tbl_df",
+                                    on_select="ignore",
+                                    selection_mode=[],
+                                    column_config={
+                                        "Ticker": st.column_config.TextColumn("Ticker", width="small"),
+                                        "Price": st.column_config.NumberColumn("Price", format="$%.2f"),
+                                        "Change %": st.column_config.NumberColumn("Change", format="%+.1f%%"),
+                                        "QE Score": st.column_config.NumberColumn("QE Score", format="%.0f"),
+                                        "Adj. Kelly %": st.column_config.NumberColumn(
+                                            "Adj. Kelly",
+                                            format="%.1f%%",
+                                            help="Kelly Criterion sizing after applying the Portfolio Correlation Haircut.",
+                                        ),
+                                        "Confluence": st.column_config.NumberColumn("Confluence", format="%d"),
+                                        "Diamond": st.column_config.TextColumn("Diamond"),
+                                        "PoP": st.column_config.TextColumn(
+                                            "PoP",
+                                            help="Historical win rate for Diamond signals (same methodology as the main dashboard backtest).",
+                                        ),
+                                        "EM Safety": st.column_config.TextColumn(
+                                            "EM Safety",
+                                            help="1-σ implied move vs scanner short-put strike: SAFE if strike < spot − EM (else MONITOR).",
+                                        ),
+                                        "GEX Regime": st.column_config.TextColumn(
+                                            "GEX Regime",
+                                            help="Gamma Flip: the price level where market maker hedging accelerates volatility. 🛡️ STABLE = spot above flip; ⚠️ TURBULENT = spot below flip.",
+                                        ),
+                                        "Flow / Bias": st.column_config.TextColumn(
+                                            "Flow / Bias",
+                                            help=SCANNER_WHALE_FLOW_BIAS_HELP,
+                                        ),
+                                        "Gold Zone Dist %": st.column_config.NumberColumn("Gold Zone Dist", format="%+.1f%%"),
+                                        "Daily": st.column_config.TextColumn("Daily"),
+                                        "Summary": st.column_config.TextColumn("Summary", width="large"),
+                                    },
+                                )
 
-                        _explain("🔎 How to use the Scanner",
-                            "Look for tickers with <strong>7+ confluence points</strong> and an active <strong>Blue Diamond</strong>. "
-                            "Those are your highest-probability setups across the entire watchlist. "
-                            "Tickers near their Gold Zone with rising confluence are about to trigger. "
-                            "Pink Diamonds mean take profits or avoid new entries on that ticker. "
-                            "Sort mentally by confluence score. The higher the number, the stronger the setup.", "neutral")
+                            _explain("🔎 How to use the Scanner",
+                                "Look for tickers with <strong>7+ confluence points</strong> and an active <strong>Blue Diamond</strong>. "
+                                "Those are your highest-probability setups across the entire watchlist. "
+                                "Tickers near their Gold Zone with rising confluence are about to trigger. "
+                                "Pink Diamonds mean take profits or avoid new entries on that ticker. "
+                                "Sort mentally by confluence score. The higher the number, the stronger the setup.", "neutral")
+                        else:
+                            try:
+                                _pre_signal = [
+                                    r for r in scanner_results
+                                    if r.get("pre_diamond_status", {}).get("is_pre_diamond")
+                                ]
+                                _alloc_by_tkr = {}
+                                if _pre_signal:
+                                    _eq_alloc = Opt.portfolio_allocation(
+                                        [
+                                            {
+                                                "ticker": r["ticker"],
+                                                "quant_edge": float(r["qs"]),
+                                                "mc_pop_pct": float(r.get("scanner_mc_pop") or 0),
+                                                "premium_per_contract": max(float(r["price"]), 1e-9),
+                                            }
+                                            for r in _pre_signal
+                                        ],
+                                        total_capital=float(equity_capital),
+                                        watchlist_tickers=watchlist_tickers,
+                                        log_returns_df=log_returns_df,
+                                    )
+                                    for row in _eq_alloc:
+                                        _alloc_by_tkr[row["ticker"]] = int(row.get("contracts") or 0)
+
+                                equity_rows = []
+                                for r in scanner_results:
+                                    pre = r.get("pre_diamond_status", {"is_pre_diamond": False})
+                                    signal = pre.get("signal_strength", "—") if pre.get("is_pre_diamond") else "—"
+                                    price = float(r.get("price") or 0)
+                                    shares = (
+                                        _alloc_by_tkr.get(r["ticker"], 0)
+                                        if pre.get("is_pre_diamond")
+                                        else 0
+                                    )
+                                    equity_rows.append({
+                                        "Ticker": r.get("ticker", "—"),
+                                        "Signal": signal,
+                                        "Price": round(price, 2) if price else "—",
+                                        "Suggested Shares": shares,
+                                        "Stop Loss": r.get("stock_stop_price", "—"),
+                                        "QE Score": r.get("qs", 0),
+                                        "Support Proximity (%)": pre.get("support_proximity", "—"),
+                                    })
+
+                                equity_df = pd.DataFrame(equity_rows)
+
+                                def style_equity_row(row):
+                                    if "🔥" in str(row.get("Signal", "")):
+                                        return ["background-color: #fefce8; color: #854d0e; font-weight: bold"] * len(row)
+                                    if "🟡" in str(row.get("Signal", "")):
+                                        return ["background-color: #f8fafc; color: #334155"] * len(row)
+                                    return [""] * len(row)
+
+                                styled_df = equity_df.style.apply(style_equity_row, axis=1)
+                                st.dataframe(styled_df, use_container_width=True, hide_index=True)
+
+                                st.caption(
+                                    "🔥 **IMMINENT BREAKOUT** = Volatility coil + RS vs SPY + accumulation near Gold/Shadow floor. "
+                                    "Suggested shares respect full Kelly + correlation haircut."
+                                )
+                            except Exception:
+                                st.info("Equity Radar temporarily unavailable — falling back to normal scanner.")
                     else:
                         st.info("No scanner results. Check your ticker symbols.")
             else:

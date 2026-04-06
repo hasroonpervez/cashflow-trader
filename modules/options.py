@@ -884,7 +884,7 @@ def latest_diamond_status(diamonds):
 
 
 
-def scan_single_ticker(tkr, correlation_haircut=1.0, cluster_peers=None, corr_matrix=None):
+def scan_single_ticker(tkr, correlation_haircut=1.0, cluster_peers=None, corr_matrix=None, spy_df=None):
     """Fetch data and compute all scores for a single ticker (for the scanner)."""
     try:
         df = fetch_stock(tkr, "1y", "1d")
@@ -952,6 +952,36 @@ def scan_single_ticker(tkr, correlation_haircut=1.0, cluster_peers=None, corr_ma
 
         struct, _, _ = TA.market_structure(df)
         wk_lbl, _ = weekly_trend_label(df_wk)
+
+        pre_diamond = {"is_pre_diamond": False, "signal_strength": "—"}
+        try:
+            rsi_p, _, _, _, _ = _hurst_adaptive_signal_periods(df["Close"])
+            sc_now, _, _, _ = _calc_confluence_points_core(
+                df, df_wk, None, gold_zone, rsi_period=rsi_p
+            )
+            sc_prev, _, _, _ = _calc_confluence_points_core(
+                df.iloc[:-1], df_wk, None, gold_zone, rsi_period=rsi_p
+            )
+            sc_prev2, _, _, _ = _calc_confluence_points_core(
+                df.iloc[:-2], df_wk, None, gold_zone, rsi_period=rsi_p
+            )
+            confluence_series = pd.Series(
+                [int(sc_prev2), int(sc_prev), int(sc_now)]
+            )
+            shadow_move = TA.get_shadow_move(df)
+            shadow_low = None
+            if isinstance(shadow_move, dict) and "low" in shadow_move:
+                shadow_low = shadow_move["low"]
+            pre_diamond = Opt.detect_pre_diamond(
+                df=df,
+                gold_zone_price=gold_zone,
+                shadow_low=shadow_low,
+                weekly_bias=wk_lbl,
+                confluence_series=confluence_series,
+                spy_df=spy_df,
+            )
+        except Exception:
+            pre_diamond = {"is_pre_diamond": False, "signal_strength": "—"}
 
         nodes_s = TA.get_volume_nodes(df)
         hvn_floor, _ = nearest_hvn_within_pct(price, nodes_s, 0.02)
@@ -1077,6 +1107,12 @@ def scan_single_ticker(tkr, correlation_haircut=1.0, cluster_peers=None, corr_ma
             "Flow / Bias": flow_bias,
             "news_bias_score": news_bias_score,
             "reference_prem_100": float(prem_scan),
+            "pre_diamond_status": pre_diamond,
+            "stock_stop_price": (
+                round(price - (1.5 * df["ATR"].iloc[-1]), 2)
+                if "ATR" in df.columns and not df.empty
+                else round(price * 0.95, 2)
+            ),
         }
     except Exception:
         return None
@@ -1091,6 +1127,72 @@ class Opt:
     DELTA_LOW, DELTA_HIGH = 0.15, 0.20
     MIN_OI, MIN_VOL = 100, 10
     RELAXED_MIN_OI, RELAXED_MIN_VOL = 10, 1
+
+    @staticmethod
+    def detect_pre_diamond(df, gold_zone_price, shadow_low, weekly_bias, confluence_series, spy_df=None):
+        """
+        v22.0 Pre-Diamond Coil Detection:
+        Institutional early-warning for equity accumulation.
+        Combines volatility squeeze, volume ramp, relative strength vs SPY,
+        and proximity to Gold Zone / Shadow Low.
+        """
+        try:
+            if confluence_series is None or len(confluence_series) < 3 or df is None or df.empty or 'Close' not in df.columns:
+                return {"is_pre_diamond": False, "signal_strength": "—"}
+
+            current_score = confluence_series.iloc[-1]
+            prev_score = confluence_series.iloc[-2]
+            close = df['Close'].iloc[-1]
+
+            # Volatility Squeeze (coil)
+            squeeze = True
+            if 'ATR' in df.columns and len(df) >= 60:
+                squeeze = (df['ATR'].tail(60).rank(pct=True).iloc[-1] <= 0.25)
+            elif 'BBW' in df.columns and len(df) >= 60:
+                squeeze = (df['BBW'].tail(60).rank(pct=True).iloc[-1] <= 0.25)
+
+            # Relative Strength vs SPY (3-day return)
+            rs_strong = True
+            if spy_df is not None and not spy_df.empty and len(df) >= 3 and len(spy_df) >= 3:
+                ticker_3d = (close / df['Close'].iloc[-3]) - 1
+                spy_3d = (spy_df['Close'].iloc[-1] / spy_df['Close'].iloc[-3]) - 1
+                rs_strong = ticker_3d > spy_3d
+
+            # Volume ramping (accumulation)
+            vol_ramping = False
+            if 'Volume' in df.columns and len(df) >= 5:
+                vol_ramping = df['Volume'].tail(3).mean() > df['Volume'].tail(5).mean()
+
+            # Institutional support proximity
+            near_support = False
+            if gold_zone_price and abs(close - gold_zone_price) / gold_zone_price < 0.025:
+                near_support = True
+            elif shadow_low and abs(close - shadow_low) / close < 0.015:
+                near_support = True
+
+            conditions = [
+                5 <= current_score <= 6,
+                current_score > prev_score,
+                squeeze,
+                vol_ramping,
+                near_support,
+                weekly_bias != "BEARISH"
+            ]
+
+            if all(conditions):
+                support_dist = min(
+                    abs(close - (gold_zone_price or close)),
+                    abs(close - (shadow_low or close))
+                ) / close * 100
+                return {
+                    "is_pre_diamond": True,
+                    "signal_strength": "🔥 IMMINENT BREAKOUT" if rs_strong else "🟡 ACCUMULATING",
+                    "volatility_state": "SQUEEZED",
+                    "support_proximity": round(support_dist, 1)
+                }
+            return {"is_pre_diamond": False, "signal_strength": "—"}
+        except Exception:
+            return {"is_pre_diamond": False, "signal_strength": "—"}
 
     @staticmethod
     def calc_gamma_exposure(opts_df, spot_price, rfr=0.045, T_years=None, hvn_prices=None):
