@@ -8,6 +8,8 @@
 
 **Streamlit UX polish (institutional dark + feedback):** repo **`.streamlit/config.toml`** sets a default **dark theme** (deep background, slate secondary surfaces, institutional blue primary). Changing **Trading Hemisphere** shows a **`st.toast`** on successful **`config.json`** write (or a warning toast if the host is read-only). **Scan Watchlist** runs inside **`st.spinner`** (plus the existing per-ticker **`st.progress`**). The **Delta-One Equity Setup** desk uses **`st.container(border=True)`** around metrics (bento-style grouping) and a **Structure visualizer**: last **60** daily closes via **`st.line_chart`** for the focused ticker (one Yahoo fetch per drill-down).
 
+**Yahoo / Streamlit Cloud hardening:** **`modules/data.py`** uses a **`curl_cffi`** session with forced caps, clamps **`yfinance` `YfData`** HTTP timeouts (so **`timed out after 30001 ms`** tar-pits do not block the app for 30s per hop), batches the sidebar tape, avoids retry-on-empty bars, and exposes fetch helpers that **return empty / `None` instead of raising** so a bad symbol or throttled IP does not take down the page. Details: **Quant & desk history → Data layer** and **Deploy → Yahoo data and shared IPs**.
+
 ---
 
 ## Evolution: v14 Basic Scanner → v22 Predictive Analytics
@@ -235,7 +237,7 @@ cashflow-trader/
 └── modules/
     ├── __init__.py
     ├── config.py             # Config persistence, defaults, st.secrets overlay
-    ├── data.py               # yfinance + Yahoo HTTP: `_ForcedTimeoutSession` + `_YAHOO_YF_TIMEOUT`; fetch_stock (300s); batched tape; macro
+    ├── data.py               # Yahoo: `_ForcedTimeoutSession`, `YfData` timeout clamp + `_cashflow_trader_yahoo_timeout_v1`, fail-safe import; `fetch_*` never-raise; tape batch; macro
     ├── ta.py                 # TA class — indicators, **`apply_ffd`**, **adaptive `get_dark_pool_proxy`**, **`get_shadow_move` (whale band)**, **`get_correlation_matrix`**, HVN / volume profile
     ├── options.py            # Black-Scholes, Corrado-Su, EV, Kelly, Quant Edge, **GEX / gamma flip / `predict_opex_pin`**, Diamonds, **`Opt.detect_pre_diamond`**, **`Opt.portfolio_allocation`**, **`scan_single_ticker`** (optional **`spy_df`**), **`watchlist_correlation_matrix_cached`**, **MC PoP**, **`PortfolioRisk`**
     ├── sentiment.py          # **Bayesian-style `analyze_news_bias`**, HMM (FFD), CC sim, Alerts, QuantBacktest
@@ -274,10 +276,10 @@ streamlit run app.py
 
 ```bash
 pip install -r requirements-dev.txt
-pytest tests/ -q
+python3 -m pytest tests/ -q
 ```
 
-Covers `TA.get_correlation_matrix` (FFD-return path), earnings runway spark series, `Opt.portfolio_allocation` / `_simple_corr_haircut`, and basic Black–Scholes / EV math (no live Yahoo calls).
+Covers `TA.get_correlation_matrix` (FFD-return path), earnings runway spark series, `Opt.portfolio_allocation` / `_simple_corr_haircut`, and basic Black–Scholes / EV math (no live Yahoo calls). Use **`python3 -m pytest`** if the `pytest` script is not on your `PATH`.
 
 ## Deploy to Streamlit Cloud
 
@@ -298,7 +300,7 @@ Community Cloud apps often **share egress IPs**. Heavy watchlists plus frequent 
 - **Reboot the app** in the Streamlit dashboard (**⋯ → Reboot app**) to get a **fresh container** and often a **new IP**.
 - Rely on **caching** already in the repo (`fetch_stock` **300s**, tape batch **120s**); avoid hammering **Scan Watchlist** unnecessarily.
 - Prefer a **shorter watchlist** for 24/7 Cloud use if problems recur; mega-caps and indices add traffic without always helping a focused radar.
-- If logs show **`timed out after 30001`** (or similar) even after deploy, confirm you are on a commit that passes **`timeout=`** into **`history`** / **`download`** (constant **`_YAHOO_YF_TIMEOUT`** in **`modules/data.py`**). To trade responsiveness vs success rate on a slow network, raise **`_YAHOO_YF_TIMEOUT`** (e.g. **8–10**) locally — do not commit secrets; only this float is needed.
+- If logs still show very long **`timed out after … ms`** lines, deploy the latest **`main`**: the app clamps **`YfData._make_request`** / **`_get_cookie_and_crumb`**, forces **`timeout=`** on **`history`** / **`download`**, and subclasses **`Session.request`**. Tune **`_YAHOO_YF_TIMEOUT`** in **`modules/data.py`** (e.g. **8–10**) if **5s** is too aggressive on a slow home network — no Secrets needed, only that float.
 
 If Cloud logs show **`503 GET /script-health-check`** around **60s**, the script was taking too long to become healthy — the data-layer changes above reduce redundant Yahoo work; a reboot still helps after a bad IP day.
 
@@ -379,7 +381,7 @@ If the earnings calendar endpoint returns no rows, the app falls back to the pri
 
 ## Known Limitations
 
-- **Yahoo Finance** may **throttle, block, or tar-pit** requests from **Streamlit Community Cloud** (shared IPs, bot heuristics). Symptoms: **empty** price data, **curl (28)** / **`Operation timed out after … ms`** in logs, scanner rows with **n/a**, and **`possibly delisted`** stderr from **`yfinance`** for symbols that still trade. **Reboot** the app for a new IP; reduce watchlist size and rerun frequency. The app uses **curl_cffi** (**Safari 15.5** impersonation) via **`_ForcedTimeoutSession`** (forces **`_YAHOO_YF_TIMEOUT`** on every HTTP request, including **`.info`** / **`.options`**), explicit **`timeout=`** on **`history`** / **`download`**, plus **caching**, **batched tape downloads**, **no retry-on-empty**, and **no retry on timeout** — not a paid data feed.
+- **Yahoo Finance** may **throttle, block, or tar-pit** requests from **Streamlit Community Cloud** (shared IPs, bot heuristics). Symptoms: **empty** price data, **curl (28)** / **`Operation timed out after … ms`** in logs, scanner rows with **n/a**, and **`possibly delisted`** stderr from **`yfinance`** for symbols that still trade. **Reboot** the app for a new IP; reduce watchlist size and rerun frequency. The data layer is built to **degrade gracefully**: core **`fetch_*`** helpers return **empty / `None`** instead of crashing the UI. Under the hood: **curl_cffi** (**Safari 15.5**), **`_ForcedTimeoutSession`**, **`YfData`** timeout clamp, **`history` / `download`** explicit timeouts, **caching**, **batched tape**, **no retry-on-empty**, **no retry on timeout** — not a paid data feed.
 - Config persistence is local-only; Cloud deploys reset the filesystem
 - You may still see occasional `missing ScriptRunContext` lines in Cloud logs from threads outside the app’s pool (Streamlit labels many as ignorable in bare mode); parallel cached fetches use `submit_with_script_ctx` to minimize this
 - Micro-cap tickers (e.g. BMNR) may lack options chains; the desk falls back gracefully
