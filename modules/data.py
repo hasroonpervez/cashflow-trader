@@ -17,17 +17,27 @@ from datetime import datetime, timedelta
 # consistent cookies. Community Cloud empty bars + “possibly delisted” are usually
 # throttling on shared egress, not actual delistings.
 #
-# ``impersonate="safari15_5"`` + 5s session timeout, plus ``timeout=`` on every
-# ``Ticker.history`` / ``yf.download`` — yfinance’s own HTTP layer can ignore session
-# defaults and wait ~30s unless the call passes an explicit cap.
+# yfinance’s data layer often passes ``timeout=30`` (or similar) for ``.info``, ``.options``,
+# etc., which overrides a short session default. Subclassing ``Session`` and forcing
+# ``kwargs["timeout"]`` in ``request()`` caps *every* call, including sieve ``fetch_info``
+# and option-chain traffic, so tar-pits cannot hang the Streamlit thread for 30s per hop.
+_YAHOO_YF_TIMEOUT = 5.0
+
+
+class _ForcedTimeoutSession(curl_requests.Session):
+    """``curl_cffi`` session that always uses ``_YAHOO_YF_TIMEOUT`` regardless of caller."""
+
+    def request(self, method, url, **kwargs):
+        kwargs["timeout"] = _YAHOO_YF_TIMEOUT
+        return super().request(method, url, **kwargs)
+
+
 _YAHOO_BROWSER_UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
     "(KHTML, like Gecko) Version/15.5 Safari/605.1.15"
 )
-_YAHOO_SESSION = curl_requests.Session(impersonate="safari15_5", timeout=5.0)
+_YAHOO_SESSION = _ForcedTimeoutSession(impersonate="safari15_5", timeout=_YAHOO_YF_TIMEOUT)
 _YAHOO_SESSION.headers.update({"Accept-Language": "en-US,en;q=0.9"})
-# yfinance uses its own per-call timeout for chart/price HTTP (often ~10–30s if omitted).
-_YAHOO_YF_TIMEOUT = 5.0
 
 # Yahoo JSON API (same family yfinance uses) — fallback when Ticker.options is transiently empty.
 _YAHOO_OPTIONS_HEADERS = {
