@@ -386,13 +386,16 @@ def render_tape_open_editor_flush(
     _prev_snap = st.session_state.get("_cf_global_market_bundle")
     _prev_key = st.session_state.get("_cf_global_market_key")
     _global_snap = None
+    _tp = None
+    _timed_out = False
     try:
         from concurrent.futures import TimeoutError as _FTE
 
-        with make_script_ctx_pool(max_workers=1) as _tp:
-            _fut = submit_with_script_ctx(_tp, fetch_global_market_bundle, tuple(watch_items), ticker)
-            _global_snap = _fut.result(timeout=_BUNDLE_WALL_TIMEOUT)
+        _tp = make_script_ctx_pool(max_workers=1)
+        _fut = submit_with_script_ctx(_tp, fetch_global_market_bundle, tuple(watch_items), ticker)
+        _global_snap = _fut.result(timeout=_BUNDLE_WALL_TIMEOUT)
     except _FTE:
+        _timed_out = True
         log_warn(
             f"global bundle wall timeout ({_BUNDLE_WALL_TIMEOUT}s)",
             TimeoutError("yf.download too slow for Cloud health check"),
@@ -401,6 +404,13 @@ def render_tape_open_editor_flush(
     except Exception as _e:
         log_warn("global bundle fetch", _e)
         _global_snap = _prev_snap
+    finally:
+        if _tp is not None:
+            try:
+                # Critical for Cloud health-check: do not block on slow Yahoo worker teardown.
+                _tp.shutdown(wait=False, cancel_futures=_timed_out)
+            except Exception as _e:
+                log_warn("global bundle worker shutdown", _e)
 
     if _global_snap is None:
         from modules.data import GlobalMarketSnapshot, DeskMarketSnapshot, _macro_defaults_tuple
