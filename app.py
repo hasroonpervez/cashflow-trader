@@ -50,19 +50,7 @@ footer,
     unsafe_allow_html=True,
 )
 
-import pandas as pd
-from datetime import datetime
-import warnings, time
-warnings.filterwarnings("ignore")
-
-if "edge_log" not in st.session_state:
-    st.session_state.edge_log = pd.DataFrame(columns=["Time", "Ticker", "Retail", "Quant", "Delta", "Preview"])
-if "bt_thresh" not in st.session_state:
-    st.session_state.bt_thresh = 70
-if "bt_hold" not in st.session_state:
-    st.session_state.bt_hold = 5
-if "_cf_ledger" not in st.session_state:
-    st.session_state["_cf_ledger"] = []
+import time
 
 def _is_script_health_probe() -> bool:
     """Best-effort detection of platform health-check requests."""
@@ -91,6 +79,21 @@ def _is_script_health_probe() -> bool:
 # Hard short-circuit for health probes before expensive imports/context building.
 if _is_script_health_probe():
     st.stop()
+
+import warnings
+from datetime import datetime
+import pandas as pd
+
+warnings.filterwarnings("ignore")
+
+if "edge_log" not in st.session_state:
+    st.session_state.edge_log = pd.DataFrame(columns=["Time", "Ticker", "Retail", "Quant", "Delta", "Preview"])
+if "bt_thresh" not in st.session_state:
+    st.session_state.bt_thresh = 70
+if "bt_hold" not in st.session_state:
+    st.session_state.bt_hold = 5
+if "_cf_ledger" not in st.session_state:
+    st.session_state["_cf_ledger"] = []
 
 # ── Module imports: serialize + retry on KeyError (Streamlit watcher vs import race; see streamlit#6404)
 _modules_import_lock = threading.Lock()
