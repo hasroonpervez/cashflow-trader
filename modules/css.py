@@ -3,6 +3,8 @@ CSS theme, Mini Mode density overrides, and sidebar toggle JS.
 All injected via st.markdown(unsafe_allow_html=True) in the entrypoint.
 """
 import html as _html_mod
+import base64
+import json
 
 _MINI_MODE_DENSITY_CSS = """
 <style>
@@ -1025,6 +1027,23 @@ def inject_css_and_navbar():
 </nav>
 <iframe data-cf-toggle-boot="1" srcdoc="{_TOGGLE_SRCDOC}" title="" tabindex="-1" aria-hidden="true"></iframe>
 """,
+        unsafe_allow_html=True,
+    )
+    _manifest = json.dumps(
+        {
+            "name": "CashFlow Command Center",
+            "short_name": "CashFlow",
+            "display": "standalone",
+            "background_color": "#0f172a",
+            "theme_color": "#10b981",
+        }
+    )
+    _b64 = base64.b64encode(_manifest.encode("utf-8")).decode("utf-8")
+    st.markdown(
+        f'<link rel="manifest" href="data:application/manifest+json;base64,{_b64}">'
+        '<meta name="theme-color" content="#10b981">'
+        '<meta name="apple-mobile-web-app-capable" content="yes">'
+        '<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">',
         unsafe_allow_html=True,
     )
 
