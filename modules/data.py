@@ -753,7 +753,8 @@ def fetch_global_market_bundle(watch_syms: tuple, active_ticker: str) -> GlobalM
             session=_YAHOO_SESSION,
             timeout=_YAHOO_YF_TIMEOUT,
         )
-    except Exception:
+    except Exception as _e:
+        log_warn("yf.download global bundle", _e)
         return empty
     if raw is None or getattr(raw, "empty", True):
         return empty
@@ -790,7 +791,8 @@ def fetch_global_market_bundle(watch_syms: tuple, active_ticker: str) -> GlobalM
     sieve_map: dict = {}
     try:
         sieve_map[str(act).upper().strip()] = evaluate_fundamental_sieve(act)
-    except Exception:
+    except Exception as _e:
+        log_warn("evaluate_fundamental_sieve active ticker in bundle", _e, ticker=str(act))
         sieve_map[str(act).upper().strip()] = None
     return GlobalMarketSnapshot(
         desk, risk_df, ad, aw, am, raw, tuple(universe), tuple(risk), rs_map, sieve_map
