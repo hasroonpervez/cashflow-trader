@@ -265,6 +265,12 @@ cashflow-trader/
 
 > **Note:** While the **Global Market Bundle** caches price data to minimize API footprint, secondary metadata (**news**, **earnings**) may still trigger brief background fetches during workspace transitions so the desk stays current; **`build_context`** runs those fetches (with their own **`@st.cache_data`** TTLs) inside **`st.spinner`** on each full script rerun—so you may still see a short “working” state even when the **2y** price panel is a cache hit. **Clear price cache & retry** is scoped to the **price feed** (**`fetch_stock`** + **`fetch_global_market_bundle`**), not every cached helper in the app.
 
+### Future optimization backlog
+
+- **News / earnings spinner (intentional for now)** — The brief spinner is an acceptable signal that fresh headline and calendar context is loading. No change planned unless it becomes a real UX issue.
+- **Fragmented metadata** — If needed later: move **news** and **earnings** fetches into **`@st.fragment`** (or equivalent lazy regions) so the main script can paint price/context first while metadata loads without blocking the primary **`build_context`** spinner path (requires careful wiring so any block that assumes `ctx.news` / earnings is ready either tolerates empty first paint or reads from `st.session_state`).
+- **Alternative earnings provider** — Optional future path: a dedicated calendar/earnings API with stable auth instead of Yahoo-only scraping, to reduce dependence on **crumb** / quote flows for dates alone (adds vendor choice, keys, and fallback logic).
+
 ---
 
 ## Run Locally
