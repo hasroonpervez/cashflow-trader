@@ -1190,6 +1190,55 @@ def score_10x_potential(df: pd.DataFrame, info: dict, *, spy_df: pd.DataFrame = 
     return int(score), flags
 
 
+def _intraday_confirmation_check(ticker: str, *, rsi_cap: float = 70.0) -> dict:
+    """Optional 1h-bar confirmation: RSI not overbought + OBV not declining."""
+    result = {
+        "confirmed": True,
+        "reason": "no intraday data (pass-through)",
+        "rsi_1h": None,
+        "obv_rising": None,
+    }
+    try:
+        from .data import fetch_intraday_series
+
+        s = fetch_intraday_series(str(ticker).upper().strip())
+        if s is None or len(s) < 20:
+            return result
+
+        close = pd.to_numeric(s, errors="coerce").dropna()
+        if len(close) < 20:
+            return result
+
+        rsi_s = TA.rsi(close, 14)
+        rsi_val = safe_float(safe_last(rsi_s), 50.0)
+        result["rsi_1h"] = round(rsi_val, 1)
+
+        ret = close.diff()
+        obv_proxy = (np.sign(ret) * 1).cumsum()
+        obv_last = safe_float(safe_last(obv_proxy), 0.0)
+        obv_ref = safe_float(
+            obv_proxy.iloc[-10] if len(obv_proxy) >= 10 else obv_proxy.iloc[0],
+            0.0,
+        )
+        obv_rising = obv_last > obv_ref
+        result["obv_rising"] = bool(obv_rising)
+
+        if rsi_val > rsi_cap:
+            result["confirmed"] = False
+            result["reason"] = f"1h RSI {rsi_val:.0f} > {rsi_cap:.0f} (overbought)"
+        elif not obv_rising:
+            result["confirmed"] = False
+            result["reason"] = "1h OBV declining (distribution)"
+        else:
+            result["confirmed"] = True
+            result["reason"] = f"1h RSI {rsi_val:.0f}, OBV rising — confirmed"
+    except Exception as e:
+        log_warn("intraday_confirmation_check", e, ticker=str(ticker))
+        result["confirmed"] = True
+        result["reason"] = f"intraday check failed ({type(e).__name__}) — pass-through"
+    return result
+
+
 def scan_single_ticker(
     tkr,
     correlation_haircut=1.0,
@@ -1307,6 +1356,15 @@ def scan_single_ticker(
         except Exception as e:
             log_warn("scan_single_ticker pre_diamond", e, ticker=str(tkr))
             pre_diamond = {"is_pre_diamond": False, "signal_strength": "—"}
+
+        if (
+            pre_diamond.get("is_pre_diamond")
+            and "IMMINENT" in str(pre_diamond.get("signal_strength", ""))
+        ):
+            _intra = _intraday_confirmation_check(tkr)
+            if not _intra["confirmed"]:
+                pre_diamond["signal_strength"] = f"🟡 ACCUMULATING ({_intra['reason']})"
+            pre_diamond["intraday_gate"] = _intra
 
         nodes_s = TA.get_volume_nodes(df)
         hvn_floor, _ = nearest_hvn_within_pct(price, nodes_s, 0.02)
