@@ -1,7 +1,8 @@
 """
 Desk-level consensus signal, trader's note, and bento-style copy from DashContext + OHLCV.
 
-Single 0–100 score blends quant edge, confluence, sentiment, structure, and volume z-score.
+Blends quant edge, confluence, sentiment, structure, volume Z, and rolling **VWAP distance Z**
+(daily multi-bar VWAP from typical price; Z vs prior deviation history — not intraday session VWAP).
 """
 from __future__ import annotations
 
@@ -12,6 +13,66 @@ import numpy as np
 import pandas as pd
 
 from .ta import TA
+
+# Rolling VWAP + Z prior window (sessions); keep in sync with ``vwap_distance_stats`` defaults.
+_VWAP_ROLL_BARS = 20
+_VWAP_Z_PRIOR_BARS = 20
+
+
+def vwap_distance_stats(
+    df: pd.DataFrame,
+    *,
+    vwap_window: int = _VWAP_ROLL_BARS,
+    prior_sessions: int = _VWAP_Z_PRIOR_BARS,
+    min_prior: int = 10,
+) -> dict:
+    """
+    Rolling multi-session VWAP (typical price × volume), then Z-score of how far the last
+    close sits vs that VWAP relative to recent history of the same deviation.
+
+    Uses relative deviation (Close − VWAP) / VWAP so scale is comparable across tickers.
+    μ and σ are taken from the prior ``prior_sessions`` bars (last bar excluded), matching
+    the volume-Z pattern in ``last_bar_volume_zscore``.
+
+    Not intraday session VWAP — daily OHLCV proxy only.
+    """
+    out: dict = {"vwap_z": None, "rolling_vwap": None, "deviation_pct": None}
+    need = vwap_window + prior_sessions + 2
+    if df is None or getattr(df, "empty", True) or len(df) < need:
+        return out
+    for col in ("High", "Low", "Close", "Volume"):
+        if col not in df.columns:
+            return out
+    h = pd.to_numeric(df["High"], errors="coerce")
+    lo = pd.to_numeric(df["Low"], errors="coerce")
+    c = pd.to_numeric(df["Close"], errors="coerce")
+    v = pd.to_numeric(df["Volume"], errors="coerce")
+    if c.isna().all() or v.isna().all():
+        return out
+    tp = (h + lo + c) / 3.0
+    pv = tp * v
+    v_sum = v.rolling(vwap_window, min_periods=vwap_window).sum()
+    vwap = pv.rolling(vwap_window, min_periods=vwap_window).sum() / v_sum.replace(0, np.nan)
+    rel = (c - vwap) / vwap.replace(0, np.nan)
+    rel = rel.replace([np.inf, -np.inf], np.nan)
+    if rel.isna().all() or len(rel) < prior_sessions + 2:
+        return out
+    prior = rel.iloc[-(prior_sessions + 1) : -1]
+    prior = prior.dropna()
+    if len(prior) < min_prior:
+        return out
+    mu, sig = float(prior.mean()), float(prior.std(ddof=0))
+    if not np.isfinite(mu) or not np.isfinite(sig) or sig < 1e-12:
+        return out
+    last_rel = float(rel.iloc[-1])
+    last_vwap = float(vwap.iloc[-1])
+    last_c = float(c.iloc[-1])
+    if not np.isfinite(last_rel) or not np.isfinite(last_vwap) or last_vwap <= 0 or not np.isfinite(last_c):
+        return out
+    out["rolling_vwap"] = last_vwap
+    out["deviation_pct"] = (last_c / last_vwap - 1.0) * 100.0
+    out["vwap_z"] = (last_rel - mu) / sig
+    return out
 
 
 def last_bar_volume_zscore(df: pd.DataFrame) -> Optional[float]:
@@ -154,10 +215,16 @@ def compute_desk_consensus(ctx: Any, df: pd.DataFrame) -> dict:
     tape = max(0.0, min(100.0, tape))
     vz = last_bar_volume_zscore(df)
     absorb = institutional_absorption(df, volume_z=vz)
+    vwap_st = vwap_distance_stats(df)
+    vwap_z = vwap_st.get("vwap_z")
     if vz is None:
         vol_s = 50.0
     else:
         vol_s = float(np.clip(50.0 + vz * 9.0, 0.0, 100.0))
+    if vwap_z is not None and np.isfinite(float(vwap_z)):
+        vz_f = float(vwap_z)
+        vwap_s = float(np.clip(50.0 + vz_f * 8.0, 0.0, 100.0))
+        vol_s = float(0.5 * vol_s + 0.5 * vwap_s)
     # Weights sum to 1.0
     score = (
         0.28 * qs
@@ -204,6 +271,14 @@ def compute_desk_consensus(ctx: Any, df: pd.DataFrame) -> dict:
     ]
     if vz is not None:
         mom_parts.append(f"Volume Z today **{vz:+.1f}**")
+    if vwap_z is not None and np.isfinite(float(vwap_z)):
+        dp = vwap_st.get("deviation_pct")
+        if dp is not None and np.isfinite(float(dp)):
+            mom_parts.append(
+                f"VWAP distance Z **{float(vwap_z):+.1f}** (close **{dp:+.2f}%** vs **{_VWAP_ROLL_BARS}-bar** VWAP)"
+            )
+        else:
+            mom_parts.append(f"VWAP distance Z **{float(vwap_z):+.1f}**")
     if absorb.get("active"):
         rp = absorb.get("last_return_pct")
         thr = absorb.get("flat_threshold_pct")
@@ -240,6 +315,14 @@ def compute_desk_consensus(ctx: Any, df: pd.DataFrame) -> dict:
         "exit_hint": exit_hint,
         "absorption": bool(absorb.get("active")),
         "absorption_detail": absorb,
+        "vwap_z": vwap_st.get("vwap_z"),
+        "vwap_detail": vwap_st,
+        "vwap_urgency": bool(
+            vz is not None
+            and vwap_z is not None
+            and float(vz) >= 2.0
+            and float(vwap_z) >= 2.0
+        ),
     }
 
 
@@ -351,6 +434,21 @@ def traders_note_markdown(ticker: str, ctx: Any, df: pd.DataFrame, c: dict) -> s
             parts.append(f"Volume is elevated (**{vz:.1f}σ** vs recent sessions).")
         else:
             parts.append(f"Volume Z is **{vz:+.1f}** (quiet to normal).")
+    wz_note = c.get("vwap_z")
+    wd = c.get("vwap_detail") or {}
+    if wz_note is not None and np.isfinite(float(wz_note)) and abs(float(wz_note)) >= 2.0:
+        dp_n = wd.get("deviation_pct")
+        if dp_n is not None and np.isfinite(float(dp_n)):
+            parts.append(
+                f"Versus a **{_VWAP_ROLL_BARS}-bar** rolling VWAP (daily OHLCV proxy), spot is **{float(dp_n):+.2f}%** "
+                f"from VWAP with deviation **Z ≈ {float(wz_note):+.1f}** vs its own recent history — "
+                "pair with volume for an **urgency** read (not intraday session VWAP)."
+            )
+        else:
+            parts.append(
+                f"**VWAP stretch:** deviation Z ≈ **{float(wz_note):+.1f}** vs recent **{_VWAP_ROLL_BARS}-bar** VWAP — "
+                "context for institutional footprint."
+            )
     if stop_px and stop_px > 0:
         parts.append(
             f"An **ATR-style risk anchor** (~1.5× 14d ATR below spot) sits near **${stop_px:,.2f}** — "

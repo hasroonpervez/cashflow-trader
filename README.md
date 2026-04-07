@@ -38,6 +38,7 @@ The Market Scanner still ranks the watchlist, but v20+ treats the list as a **po
 - **Regime calibration** — **`_cf_regime_shadow_breakout`**: purple banner on the **Technical Chart** when spot is outside **`get_shadow_move`** but inside **`calc_expected_move`** (BLUF IV/DTE). **Pin maturity ✨ Golden zone** when **≤14 DTE**, **|Dist. to pin %|** shrinks vs entry, and desk **Θ/day** is **≥ ~102%** of entry (pin magnet + rising decay into expiry).
 - **UI** — Caption *Predictive Pinning, Bayesian News Nuance, & Shadow Liquidity Architecture.*; badge **v22.0 · PREDICTIVE ANALYTICS**.
 - **Consensus desk — institutional absorption (`institutional_absorption`)** — **Whale trap** when **volume Z ≥ 4** vs the prior **20** sessions (same baseline as the chart whale vline) but the last daily **close-to-close %** sits inside an **ATR-scaled** quiet band (floored **0.35%**, capped **1.0%**, **0.55%** fallback if ATR missing). Surfaces a cyan **INSTITUTIONAL ABSORPTION** strip on the consensus card, **ABSORPTION** in **mini / Turbo** consensus, bento **momentum** copy, and an extended **trader’s note**; **`compute_desk_consensus`** adds a small score lift when active. **OHLCV proxy only** — not lit-book order-flow imbalance.
+- **Consensus desk — rolling VWAP distance Z (`vwap_distance_stats`)** — **20-bar** rolling VWAP from **typical price × volume** (daily bars — not cumulative `TA.vwap` from inception, not intraday session VWAP). **Relative deviation** \((C-\text{VWAP})/\text{VWAP}\); **Z** vs **μ/σ** of the **prior 20** deviations (last bar excluded). **`compute_desk_consensus`** blends **volume Z** and **VWAP stretch** in the flow slice (**50/50** on the mapped **0–100** flow score), adds **momentum** copy, exposes **`vwap_z`**, **`vwap_detail`**, and **`vwap_urgency`** (**True** when **volume Z ≥ 2** and **VWAP Z ≥ 2** — intended for a future **heatmap ribbon** in **`app.py`**). **`traders_note_markdown`** adds a **VWAP stretch** paragraph when **|VWAP Z| ≥ 2**. Covered by **`tests/test_signal_desk.py`**.
 - **Equity Radar & context-aware workspaces** — **MISSION CONTROL → 🎛️ Command Center**: bordered **control deck** with two columns — **Trading Hemisphere** (**📈 Options Yield** vs **🎯 Equity Radar**, `segmented_control` with **radio** fallback) and **Capital Base** slider (Equity mode only). **Trading mode persists** to **`config.json`** as **`scanner_mode`** (restored on the next app launch; same atomic **`save_config`** path as the watchlist). The same **`Scan Watchlist`** run powers both modes; the UI **branches on `scanner_mode`** so **Equity Radar** does not surface options-specific scanner chrome (e.g. **GEX Regime**, Diamond **PoP**, **Scanner Data Table**) on the premium-selling path. **`_cf_scanner_bundle`** stores **`results`**, **`failed`**, **`watchlist_tickers`**, and **`log_returns_df`** after each scan so the Intel scanner block and **Cashflow & strikes** (Equity path) can re-render without a new scan on every rerun. **Delta-One Equity Setup** (below **Actionable Targets** and on **Cashflow & strikes** in Equity mode): focus ticker **`selectbox`**, **Breakout Metrics** (volatility state, confluence, RS vs SPY, QE), **Risk & Support** (entry = scan spot, ATR-style stop from the same `stock_stop_price` rule, distance to support, illustrative **R:R to Gold Zone** using scan **Gold Zone** vs stop). The **📝 Rolling Edge Capture Log** expander uses **mode-aware copy**: **Options Yield** explains premium-selling context (not a simple buy list); **Equity Radar** uses plain **“stocks to BUY”** language (including **IMMINENT BREAKOUT** as a direct buy-list framing). After **Scan Watchlist**, **📡 Radar Summary** HUD uses **`st.metric`** for **🔥 Imminent Breakouts**, **🟡 Accumulating**, and **Total Scanned**. **🎯 Actionable Targets** table uses **string-formatted** currency / percent / thousands separators on **`Styler`**, row highlights unchanged, and **dynamic `st.dataframe` height** (`min(400, (rows+1)×38)`). Core math and **`Opt.portfolio_allocation`** sizing are unchanged. **`scan_single_ticker`** accepts optional **`spy_df`** and **`panel_raw`** (multi-ticker **`yf.download`** frame from the desk snapshot); **SPY** for relative strength is sliced from that panel when present, else **`fetch_stock("SPY", …)`** — if Yahoo times out or returns no rows, **stderr** notes that **RS vs SPY** was skipped for that pass. If the radar UI path errors, a **caption** plus the **Options Yield** **Scanner Data Table** expander is shown.
 
 ### Pinning theory (GEX, Θ/Γ, and “magnets”)
@@ -244,7 +245,7 @@ cashflow-trader/
     ├── sentiment.py          # **Bayesian-style `analyze_news_bias`**, HMM (FFD), CC sim, Alerts, QuantBacktest
     ├── chart.py              # Price / volume / RSI / MACD + **Shadow move (purple)** + **OpEx pin** + HVN / EM / gamma flip / correlation heatmap
     ├── ui_helpers.py         # Sparklines, fragments, **`sentinel_ledger_metrics`**, **`sentinel_ledger_table_rows`**, **`ledger_theta_desk_day`**, regime **Shadow breakout** banner, **expected_move_safety_html**, **Θ/Γ desk line**
-    ├── signal_desk.py        # **`compute_desk_consensus`**, **`institutional_absorption`** (whale trap), trader’s note, volume-Z / bento; **roadmap:** FFD momentum, correlation-aware sizer UX
+    ├── signal_desk.py        # **`compute_desk_consensus`**, **`vwap_distance_stats`** (rolling VWAP Z), **`institutional_absorption`**, trader’s note, volume-Z / bento; **roadmap:** FFD momentum, correlation-aware sizer UX, optional **`app.py`** urgency ribbon from **`vwap_urgency`**
     ├── pages.py              # **`build_context`** (optional **`global_snapshot`**): options → GEX → **OpEx pin map** → **shadow move** → **shadow breakout** flag → fused Gold → confluence → diamonds
     ├── streamlit_threading.py # Thread pools with ScriptRunContext re-attach per task
     └── css.py                # Full CSS theme + Mini Mode + sidebar toggle JS
@@ -277,13 +278,13 @@ cashflow-trader/
 
 Desk upgrades from **raw metrics** toward **actionable signals** (ongoing).
 
-1. **Consensus / “traffic light” signal** — **Shipped:** **`modules/signal_desk.py`** + **`compute_desk_consensus`** blends Quant Edge, confluence, fear/greed, daily/weekly structure, MACD/OBV tilt, and **volume Z** into a **0–100** score with **high risk / neutral / conviction** bands. **`app.py`** renders a **ring + bar** banner (compact strip in **Turbo mode**). When **`institutional_absorption`** fires, the banner adds an **INSTITUTIONAL ABSORPTION** callout and the score gets a small bonus.
-2. **Context-first “bento” grouping** — **Shipped:** three columns under the note — **The setup** (Bollinger / squeeze language), **The momentum** (RSI, MACD, OBV, volume Z, optional **absorption / whale trap** line), **The exit** (Gold Zone distance + copy).
+1. **Consensus / “traffic light” signal** — **Shipped:** **`modules/signal_desk.py`** + **`compute_desk_consensus`** blends Quant Edge, confluence, fear/greed, daily/weekly structure, MACD/OBV tilt, **volume Z**, and **rolling VWAP distance Z** (combined into the **5% flow** weight) into a **0–100** score with **high risk / neutral / conviction** bands. **`app.py`** renders a **ring + bar** banner (compact strip in **Turbo mode**). When **`institutional_absorption`** fires, the banner adds an **INSTITUTIONAL ABSORPTION** callout and the score gets a small bonus.
+2. **Context-first “bento” grouping** — **Shipped:** three columns under the note — **The setup** (Bollinger / squeeze language), **The momentum** (RSI, MACD, OBV, volume Z, **VWAP distance Z**, optional **absorption / whale trap** line), **The exit** (Gold Zone distance + copy).
 3. **Chart storytelling** — **Partially shipped:** price chart adds a **gold vertical** on the **last bar** when **volume Z ≥ 4** vs the prior 20 sessions (**`build_chart(..., mark_whale_volume=True)`**), with overlay key text. Golden Zone / existing overlays unchanged.
-4. **Plain-English desk note** — **Shipped:** deterministic **`traders_note_markdown`** (markdown) below the consensus card — ATR-style stop line, squeeze / volume language, and a dedicated **whale trap / absorption** paragraph when the absorption gate triggers (supersedes the generic “4σ footprint” line for that case). LLM swap remains a future option.
+4. **Plain-English desk note** — **Shipped:** deterministic **`traders_note_markdown`** (markdown) below the consensus card — ATR-style stop line, squeeze / volume language, **VWAP stretch** copy when **|VWAP Z| ≥ 2**, and a dedicated **whale trap / absorption** paragraph when the absorption gate triggers (supersedes the generic “4σ footprint” line for that case). LLM swap remains a future option.
 5. **One-touch workflow** — **Shipped (illustrative):** expander **Calculate position size** — account $, risk %, **~1.5× ATR** stop below spot → suggested share count (**`suggested_shares_atr_risk`**); not broker-connected.
 
-**Still optional later:** broader **CSS** pass, LLM-generated note, **Secrets**-default account size, breakout-candle callouts on chart.
+**Still optional later:** broader **CSS** pass, LLM-generated note, **Secrets**-default account size, breakout-candle callouts on chart, **`app.py` heatmap ribbon** using **`_consensus["vwap_urgency"]`**, **`volume_z`**, and **`vwap_z`** to separate **normal** vs **whale + stretch** at a glance.
 
 ---
 
@@ -303,7 +304,7 @@ pip install -r requirements-dev.txt
 python3 -m pytest tests/ -q
 ```
 
-Covers `TA.get_correlation_matrix` (FFD-return path), earnings runway spark series, `Opt.portfolio_allocation` / `_simple_corr_haircut`, **`tests/test_signal_desk.py`** (consensus + **`institutional_absorption`**), and basic Black–Scholes / EV math (no live Yahoo calls). Use **`python3 -m pytest`** if the `pytest` script is not on your `PATH`.
+Covers `TA.get_correlation_matrix` (FFD-return path), earnings runway spark series, `Opt.portfolio_allocation` / `_simple_corr_haircut`, **`tests/test_signal_desk.py`** (consensus + **`institutional_absorption`** + **`vwap_distance_stats`** / VWAP Z), and basic Black–Scholes / EV math (no live Yahoo calls). Use **`python3 -m pytest`** if the `pytest` script is not on your `PATH`.
 
 ## Deploy to Streamlit Cloud
 
@@ -379,7 +380,7 @@ If the earnings calendar endpoint returns no rows, the app falls back to the pri
 |---|---|
 | Trend | EMA 20/50/200, Ichimoku Cloud, Supertrend |
 | Momentum | RSI (14), RSI (2), MACD (12,26,9), Stochastic, CCI |
-| Volume | OBV, Volume Profile, VWAP, **HVN nodes (volume-at-price)**, **adaptive volume Z-score (dark pool proxy)** |
+| Volume | OBV, Volume Profile, VWAP (**`TA.vwap`** cumulative; desk uses **rolling multi-bar VWAP** in **`vwap_distance_stats`**), **HVN nodes (volume-at-price)**, **adaptive volume Z-score (dark pool proxy)** |
 | Volatility | Bollinger Bands, ATR (14), Hurst Exponent, **1-σ Expected Move (IV × √T)** |
 | Structure | Market Structure (BOS/CHOCH), Support/Resistance, Fair Value Gaps |
 | Gann | Square of 9 levels, Angles, Time Cycles |
@@ -399,6 +400,7 @@ If the earnings calendar endpoint returns no rows, the app falls back to the pri
 | Continuous Kelly (Merton) | Compute variance-aware continuous-time allocation with optional half-Kelly |
 | OTM IV Skew Regime Ratio | Classify market-maker fear/greed posture from put-vs-call OTM implied volatility |
 | Vectorized Historical Edge Proxy | Backtest threshold/hold edge signals over daily history without UI lockups |
+| **Desk VWAP distance Z** | **`signal_desk.vwap_distance_stats`**: rolling **20**-session VWAP from typical price; Z of **(Close−VWAP)/VWAP** vs prior **20** deviations; **`vwap_urgency`** when aligned with **volume Z** |
 
 `hmmlearn` and `scipy` are handled with safe fallbacks so the app remains usable if those packages are unavailable.
 
@@ -406,7 +408,7 @@ If the earnings calendar endpoint returns no rows, the app falls back to the pri
 
 ## Elite tier roadmap: market microstructure & data science
 
-This section frames where the desk is headed beyond classic “green arrow” TA: **stationarity with memory**, **volume–price joint tests**, **convex sizing**, **structural liquidity (VPVR/HVN)**, and **portfolio-level correlation hygiene**. **Already shipped** here includes FFD + HMM correlation path, adaptive volume Z, HVN-weighted GEX, Kelly governors with correlation haircut, cluster penalty on scanner Blues, and **desk-level institutional absorption** (**`institutional_absorption`** in **`signal_desk.py`**). Remaining items below are **FFD momentum**, **VWAP-distance Z in copy**, explicit **Kelly** copy on the sizer, and **correlation warnings** in the position-size flow.
+This section frames where the desk is headed beyond classic “green arrow” TA: **stationarity with memory**, **volume–price joint tests**, **convex sizing**, **structural liquidity (VPVR/HVN)**, and **portfolio-level correlation hygiene**. **Already shipped** here includes FFD + HMM correlation path, adaptive volume Z, HVN-weighted GEX, Kelly governors with correlation haircut, cluster penalty on scanner Blues, **desk-level institutional absorption** (**`institutional_absorption`**), and **rolling VWAP distance Z** (**`vwap_distance_stats`** in **`signal_desk.py`**). Remaining items below are **FFD momentum**, explicit **Kelly** copy on the sizer, **correlation warnings** in the position-size flow, and optional **heatmap ribbon** wiring in **`app.py`**.
 
 ### 1. Mathematical stationarity: fractional differentiation (FFD)
 
@@ -420,7 +422,7 @@ Integer differencing (\(d = 1\), e.g. log returns) pushes prices toward stationa
 
 ### 2. Volume-weighted alpha: VWAP deviation and relative volume
 
-A raw volume spike is noisy; a professional read combines **where** size traded with **how unusual** participation is. A standard construct is the **z-score of distance from session or rolling VWAP** (conceptually \(Z_{\text{VWAP}} = (P_t - \text{VWAP}_t) / \sigma_{\text{VWAP}}\) when a rolling dispersion of VWAP distance is defined), together with **relative volume (RVOL)**. **Narrative:** when price trends, **RVOL / volume Z** is extreme (e.g. **Z > 4**), and **VWAP distance** expands, the desk reads **urgency** (aggressive flow sweeping the book). **In this repo:** VWAP and adaptive volume Z (`get_dark_pool_proxy`) exist on the TA side; **full VWAP-distance Z** wired into **`signal_desk` consensus copy** is **roadmap**.
+A raw volume spike is noisy; a professional read combines **where** size traded with **how unusual** participation is. A standard construct is the **z-score of distance from session or rolling VWAP** (conceptually \(Z_{\text{VWAP}} = (P_t - \text{VWAP}_t) / \sigma_{\text{VWAP}}\) when a rolling dispersion of VWAP distance is defined), together with **relative volume (RVOL)**. **Narrative:** when price trends, **RVOL / volume Z** is extreme (e.g. **Z > 4**), and **VWAP distance** expands, the desk reads **urgency** (aggressive flow sweeping the book). **In this repo:** VWAP and adaptive volume Z (`get_dark_pool_proxy`) exist on the TA side; **rolling VWAP-distance Z** is **shipped** in **`signal_desk.vwap_distance_stats`** (daily multi-bar VWAP — not intraday tape). **RVOL** as a separate column remains optional future work.
 
 ### 3. Convexity engine: Kelly-style allocation
 
@@ -438,7 +440,8 @@ Retail draws arbitrary support; professionals anchor to **high volume nodes (HVN
 
 1. **FFD-weighted momentum** — **Roadmap:** replace or augment MACD-only tape tilt with a **stationarity-aware** momentum signal derived from FFD-aligned series (consensus inputs stay bounded for Streamlit latency).
 2. **“Whale trap” / institutional absorption** — **Shipped:** **`institutional_absorption`**: **volume Z ≥ 4** (vs prior **20** sessions, last bar excluded from μ/σ) and **muted** last daily close vs an **ATR-scaled** band; wired into **`compute_desk_consensus`** (`absorption`, `absorption_detail`), **`consensus_banner_html`**, **`consensus_compact_html`**, **`traders_note_markdown`**, and bento **momentum** text. Covered by **`tests/test_signal_desk.py`**.
-3. **Portfolio optimizer hook** — **Roadmap:** **correlation check** in the position-sizer path: warn or haircut when the candidate is highly correlated with symbols already treated as **held** or **scanned peers** (extends existing **`_simple_corr_haircut`** / cluster ideas to the desk UX).
+3. **Rolling VWAP distance Z** — **Shipped:** **`vwap_distance_stats`**: **20-bar** rolling VWAP, **Z** of relative close-vs-VWAP deviation vs **prior 20** bars; consensus **flow** blend, **`vwap_z`**, **`vwap_detail`**, **`vwap_urgency`**; trader’s note when **|Z| ≥ 2**. **`app.py` ribbon** not yet wired (see UI roadmap).
+4. **Portfolio optimizer hook** — **Roadmap:** **correlation check** in the position-sizer path: warn or haircut when the candidate is highly correlated with symbols already treated as **held** or **scanned peers** (extends existing **`_simple_corr_haircut`** / cluster ideas to the desk UX).
 
 **Disclaimer:** All labels above are **research and education**; they do not guarantee performance. Yahoo-derived OHLCV cannot observe true order flow or lit book imbalance.
 

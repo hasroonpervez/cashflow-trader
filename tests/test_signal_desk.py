@@ -8,6 +8,7 @@ from modules.signal_desk import (
     institutional_absorption,
     last_bar_volume_zscore,
     suggested_shares_atr_risk,
+    vwap_distance_stats,
     whale_session_x_for_chart,
 )
 
@@ -63,6 +64,9 @@ def test_consensus_score_in_range():
     assert c["band"] in ("high_risk", "neutral", "conviction")
     assert "absorption" in c and isinstance(c["absorption"], bool)
     assert "absorption_detail" in c
+    assert "vwap_z" in c
+    assert "vwap_detail" in c
+    assert "vwap_urgency" in c and isinstance(c["vwap_urgency"], bool)
 
 
 def test_institutional_absorption_triggers_on_flat_close():
@@ -86,6 +90,25 @@ def test_institutional_absorption_off_when_price_runs():
     df.loc[df.index[-1], "Close"] = c_prev * 1.05
     a = institutional_absorption(df)
     assert a["active"] is False
+
+
+def test_vwap_distance_stats_finite():
+    s = vwap_distance_stats(_dummy_df(120))
+    assert set(s.keys()) == {"vwap_z", "rolling_vwap", "deviation_pct"}
+    assert s["vwap_z"] is not None
+    assert s["rolling_vwap"] is not None and s["rolling_vwap"] > 0
+    assert s["deviation_pct"] is not None
+
+
+def test_vwap_z_extreme_positive_on_gap_close():
+    df = _dummy_df(100)
+    base = float(df["Close"].iloc[-2])
+    df.loc[df.index[-1], "High"] = base * 1.08
+    df.loc[df.index[-1], "Low"] = base * 1.02
+    df.loc[df.index[-1], "Close"] = base * 1.07
+    df.loc[df.index[-1], "Open"] = base * 1.01
+    z = vwap_distance_stats(df).get("vwap_z")
+    assert z is not None and float(z) > 2.0
 
 
 def test_suggested_shares():
