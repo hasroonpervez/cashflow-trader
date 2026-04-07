@@ -1190,6 +1190,50 @@ def score_10x_potential(df: pd.DataFrame, info: dict, *, spy_df: pd.DataFrame = 
     return int(score), flags
 
 
+def compute_explosion_score(scan_row: dict) -> float:
+    """Composite explosion score from scan_single_ticker output.
+
+    Weighted: Pre-Diamond signal 30%, 10x Potential 25%, QE 20%,
+              Diamond presence 15%, GEX stability 10%.
+    Range: 0-100.
+    """
+    try:
+        score = 0.0
+
+        pre = scan_row.get("pre_diamond_status") or {}
+        if pre.get("is_pre_diamond"):
+            strength = str(pre.get("signal_strength", ""))
+            if "IMMINENT" in strength or "🔥" in strength:
+                score += 30
+            else:
+                score += 20
+
+        tenx = int(scan_row.get("10x Potential", 0) or 0)
+        score += min(25, tenx * 2.5)
+
+        qs = safe_float(scan_row.get("qs"), 0)
+        score += min(20, qs * 0.2)
+
+        d_status = str(scan_row.get("d_status", ""))
+        if "BLUE" in d_status:
+            score += 15
+        elif "PINK" not in d_status:
+            score += 0
+
+        gex = str(scan_row.get("GEX Regime", ""))
+        if "STABLE" in gex:
+            score += 10
+        elif "TURBULENT" in gex:
+            score += 0
+        else:
+            score += 5
+
+        return round(min(100, score), 1)
+    except Exception as _e:
+        log_warn("compute_explosion_score", _e)
+        return 0.0
+
+
 def _intraday_confirmation_check(ticker: str, *, rsi_cap: float = 70.0) -> dict:
     """Optional 1h-bar confirmation: RSI not overbought + OBV not declining."""
     result = {

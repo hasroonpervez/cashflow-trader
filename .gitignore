@@ -24,3 +24,4 @@ env/
 # Optional: keep personal portfolio config local (uncomment if you prefer)
 # config.json
 trade_journal.json
+radar_hits.json

@@ -9,12 +9,15 @@ import json, os
 from pathlib import Path
 from datetime import datetime
 
+_RADAR_UNIVERSE = "SOUN,BBAI,BIGC,BRZE,DT,GTLB,PATH,ESTC,CFLT,IOT,S,MNDY,DUOL,TOST,RXRX,ABCL,DNA,BEAM,NTLA,EDIT,VERV,ARQT,SANA,DNLI,NUVL,RIVN,LCID,QS,CHPT,ENVX,FREY,ENPH,SEDG,RUN,NOVA,SOFI,UPST,AFRM,HOOD,LMND,ROOT,RELY,DAVE,CIFR,KEEL,MARA,RIOT,CLSK,HUT,CORZ,IREN,COIN,RKLB,ASTS,LUNR,JOBY,ACHR,LILM,STRL,AIT,POWL,AGX,ECG,GVA,CUBI,SSB,RF,FSBC,HIMS,BYND,DLX,PAHC,IONQ,RGTI,QUBT,APLD,GSAT,OUST,LAZR,SMCI,ZETA,OPEN"
+
 CONFIG_PATH = Path(__file__).parent.parent / "config.json"
 
 DEFAULT_CONFIG = {
     "watchlist": (
         "PLTR,HIMS,TSLA,SOFI,RIVN,CIFR,SPY,QQQ"
     ),
+    "radar_universe": _RADAR_UNIVERSE,
     "scanner_sort_mode": "Custom watchlist order",
     "scanner_mode": "📈 Options Yield",
     "equity_capital": 10000,
@@ -171,6 +174,41 @@ def journal_close_trade(index: int, actual_close_price: float, close_date: str =
 
 def journal_clear() -> bool:
     return save_journal([])
+
+
+RADAR_HITS_PATH = CONFIG_PATH.parent / "radar_hits.json"
+
+
+def load_radar_hits() -> list:
+    """Load persisted radar hits log."""
+    try:
+        if RADAR_HITS_PATH.exists():
+            with open(RADAR_HITS_PATH) as f:
+                data = json.load(f)
+            return data if isinstance(data, list) else []
+    except Exception:
+        pass
+    return []
+
+
+def save_radar_hits(entries: list) -> bool:
+    """Atomic write of radar hits. Keeps last 200 entries."""
+    try:
+        entries = entries[-200:]
+        temp = RADAR_HITS_PATH.with_suffix(".tmp")
+        with open(temp, "w") as f:
+            json.dump(entries, f, indent=2, default=str)
+        os.replace(temp, RADAR_HITS_PATH)
+        return True
+    except Exception:
+        return False
+
+
+def radar_add_hit(hit: dict) -> bool:
+    """Append one radar hit and persist."""
+    entries = load_radar_hits()
+    entries.append(hit)
+    return save_radar_hits(entries)
 
 
 class ConfigTransaction:

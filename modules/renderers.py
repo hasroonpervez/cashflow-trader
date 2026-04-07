@@ -21,7 +21,11 @@ from modules.config import (
     journal_add_entry,
     journal_clear,
     journal_close_trade,
+    load_config,
     load_journal,
+    load_radar_hits,
+    radar_add_hit,
+    save_radar_hits,
 )
 from modules.data import (
     _PLOTLY_AXIS_TITLE,
@@ -34,7 +38,9 @@ from modules.data import (
     _PLOTLY_PLOT_BG,
     _PLOTLY_UI_CONFIG,
     _ticker_daily_ohlcv_from_raw,
+    _RADAR_UNIVERSE,
     fetch_watchlist_earnings_heatmap,
+    radar_broad_filter,
     fetch_stock,
     list_option_expiration_dates,
 )
@@ -47,6 +53,7 @@ from modules.options import (
     calc_ev,
     calc_skew_regime,
     calc_vol_skew,
+    compute_explosion_score,
     fetch_options,
     kelly_criterion,
     quant_edge_score,
@@ -2057,6 +2064,22 @@ def render_intel_tab(d: DeskLocals) -> None:
                     _cfg_alerts_live = load_config()
                     _webhook = str(_cfg_alerts_live.get("discord_webhook_url", "") or "")
                     _do_alert = bool(_cfg_alerts_live.get("alert_on_conviction", True))
+                    for r in _conviction:
+                        radar_add_hit(
+                            {
+                                "scan_time": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                                "ticker": r["ticker"],
+                                "price": r.get("price"),
+                                "source": "scanner_conviction",
+                                "explosion_score": None,
+                                "pre_diamond": True,
+                                "signal": "💎 CONVICTION",
+                                "10x_score": r.get("10x Potential"),
+                                "qs": r.get("qs"),
+                                "struct": r.get("struct"),
+                                "confluence": r.get("cp_score"),
+                            }
+                        )
                     if _webhook and _do_alert:
                         import threading
 
@@ -2516,6 +2539,210 @@ def render_intel_tab(d: DeskLocals) -> None:
                 if i + 1 < len(edu):
                     st.markdown(f"<div class='edu-card'><strong style='font-size:.82rem;letter-spacing:.01em'>{edu[i + 1][0]}</strong><div style='color:#9fb0c7;font-size:.76rem;margin-top:5px;line-height:1.38'>{edu[i + 1][1]}</div></div>", unsafe_allow_html=True)
 
+
+
+@st.fragment
+def render_radar_tab(d: DeskLocals) -> None:
+    """Market Explosion Radar — broad scan for hidden pre-breakout setups."""
+    try:
+        ticker = d.ticker
+        _ = ticker
+        cfg = load_config()
+
+        st.markdown("### 🌎 Market Explosion Radar")
+        st.caption(
+            "Scans ~100 growth/momentum names for hidden **pre-breakout coils** that retail doesn't see. "
+            "**Tier 1** (fast, cheap): single Yahoo batch -> squeeze/Hurst/RS/volume filter. "
+            "**Tier 2** (deep): survivors get full pre-diamond + 10x + GEX analysis. "
+            "Results persist in **radar_hits.json** so you can track what fired and what happened."
+        )
+
+        universe_csv = cfg.get("radar_universe", _RADAR_UNIVERSE)
+        col_scan, col_status = st.columns([1, 2])
+        with col_scan:
+            scan_clicked = st.button(
+                "🚀 Scan Market Now",
+                type="primary",
+                key="cf_radar_scan",
+                use_container_width=True,
+            )
+        with col_status:
+            st.empty()
+
+        if scan_clicked:
+            with st.spinner("Tier 1: Broad filter (squeeze + Hurst + RS + volume)..."):
+                spy_df = fetch_stock("SPY", "1y", "1d")
+                spy_closes = None
+                if spy_df is not None and not spy_df.empty and "Close" in spy_df.columns:
+                    spy_closes = pd.to_numeric(spy_df["Close"], errors="coerce").dropna()
+                candidates = radar_broad_filter(universe_csv, spy_closes)
+
+            if not candidates:
+                st.warning(
+                    "No candidates passed Tier 1 filter. Yahoo may be rate-limiting. Try again in a few minutes."
+                )
+                return
+
+            st.success(
+                f"Tier 1: **{len(candidates)}** candidates passed (squeeze + trend + RS filter)"
+            )
+            with st.expander(f"Tier 1 candidates ({len(candidates)})", expanded=False):
+                st.dataframe(
+                    pd.DataFrame(candidates), use_container_width=True, hide_index=True
+                )
+
+            top_n = min(25, len(candidates))
+            tier2_tickers = [c["ticker"] for c in candidates[:top_n]]
+            with st.spinner(
+                f"Tier 2: Deep scan on top {top_n} candidates (pre-diamond + 10x + GEX)..."
+            ):
+                deep_results = []
+                progress = st.progress(0)
+                for i, tkr in enumerate(tier2_tickers):
+                    progress.progress(
+                        (i + 1) / top_n,
+                        text=f"Deep scanning {tkr}... ({i + 1}/{top_n})",
+                    )
+                    try:
+                        row = scan_single_ticker(tkr, spy_df=spy_df)
+                        if row:
+                            row["explosion_score"] = compute_explosion_score(row)
+                            t1 = next((c for c in candidates if c["ticker"] == tkr), {})
+                            row["tier1_pre_score"] = t1.get("pre_score", 0)
+                            row["squeeze"] = t1.get("squeeze", False)
+                            row["trending"] = t1.get("trending", False)
+                            deep_results.append(row)
+                    except Exception as e:
+                        log_warn("radar tier2 deep scan", e, ticker=tkr)
+                progress.empty()
+
+            if not deep_results:
+                st.warning(
+                    "No tickers passed Tier 2 deep scan. Yahoo may be throttling per-ticker calls."
+                )
+                return
+
+            deep_results.sort(key=lambda x: x.get("explosion_score", 0), reverse=True)
+            scan_time = datetime.now().strftime("%Y-%m-%d %H:%M")
+            for r in deep_results[:10]:
+                radar_add_hit(
+                    {
+                        "scan_time": scan_time,
+                        "ticker": r["ticker"],
+                        "price": r.get("price"),
+                        "explosion_score": r.get("explosion_score"),
+                        "pre_diamond": bool(
+                            (r.get("pre_diamond_status") or {}).get("is_pre_diamond")
+                        ),
+                        "signal": str(
+                            (r.get("pre_diamond_status") or {}).get("signal_strength", "—")
+                        ),
+                        "10x_score": r.get("10x Potential"),
+                        "qs": r.get("qs"),
+                        "struct": r.get("struct"),
+                        "confluence": r.get("cp_score"),
+                    }
+                )
+
+            st.markdown("### 🔥 Top Explosive Setups")
+            for r in deep_results[:10]:
+                pre = r.get("pre_diamond_status") or {}
+                is_pre = pre.get("is_pre_diamond", False)
+                signal = pre.get("signal_strength", "—")
+                tenx = int(r.get("10x Potential", 0) or 0)
+                exp_score = r.get("explosion_score", 0)
+                tkr = safe_html(r["ticker"])
+                price = safe_float(r.get("price"), 0)
+                qs_v = safe_float(r.get("qs"), 0)
+                conf = int(r.get("cp_score", 0) or 0)
+                struct = safe_html(str(r.get("struct", "—")))
+                gex = safe_html(str(r.get("GEX Regime", "—")))
+                d_status = safe_html(str(r.get("d_status", "—")))
+
+                if exp_score >= 60:
+                    border_color = "#10b981"
+                    badge = "🔥 HIGH CONVICTION"
+                elif exp_score >= 40:
+                    border_color = "#f59e0b"
+                    badge = "⚡ COILING"
+                else:
+                    border_color = "#64748b"
+                    badge = "📊 WATCH"
+
+                reasons = []
+                if r.get("squeeze"):
+                    reasons.append("volatility coiled tight (squeeze)")
+                if r.get("trending"):
+                    reasons.append("Hurst confirms trending regime")
+                if is_pre:
+                    reasons.append("pre-diamond accumulation detected")
+                if tenx >= 5:
+                    reasons.append(f"10x potential score {tenx}/10")
+                if conf >= 5:
+                    reasons.append(f"confluence {conf}/9 (rising)")
+                if "STABLE" in str(r.get("GEX Regime", "")):
+                    reasons.append("dealer gamma supports price")
+                why_hidden = (
+                    " · ".join(reasons) if reasons else "Institutional rotation in progress"
+                )
+
+                st.markdown(
+                    f"<div style='border:2px solid {border_color};border-radius:14px;padding:16px 20px;"
+                    f"margin:8px 0;background:{border_color}10'>"
+                    f"<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>"
+                    f"<span style='font-size:1.3rem;font-weight:800;color:#e2e8f0'>{tkr}</span>"
+                    f"<span style='font-size:.75rem;font-weight:700;color:{border_color};padding:3px 10px;"
+                    f"border-radius:8px;border:1px solid {border_color}40;background:{border_color}20'>"
+                    f"{badge} · Score {exp_score:.0f}</span></div>"
+                    f"<div style='font-size:.9rem;color:#cbd5e1;margin-bottom:6px'>"
+                    f"<strong>${price:.2f}</strong> · QE {qs_v:.0f} · Conf {conf}/9 · {struct} · {gex} · {d_status}"
+                    f"</div>"
+                    f"<div style='font-size:.78rem;color:#94a3b8;margin-bottom:8px'>"
+                    f"<strong style='color:#a5b4fc'>Why retail misses this:</strong> {safe_html(why_hidden)}</div>"
+                    f"<div style='font-size:.72rem;color:#64748b'>"
+                    f"Signal: {safe_html(signal)} · 10x: {tenx}/10 · Stop: ${safe_float(r.get('stock_stop_price'), 0):.2f}"
+                    f"</div></div>",
+                    unsafe_allow_html=True,
+                )
+
+                if st.button(
+                    f"Add {r['ticker']} to watchlist",
+                    key=f"cf_radar_add_{r['ticker']}",
+                ):
+                    wl = _parse_watchlist_string(st.session_state.get("sb_scanner", ""))
+                    if r["ticker"] not in wl:
+                        wl.append(r["ticker"])
+                        st.session_state["_sb_scanner_sync"] = ",".join(wl)
+                        from modules.config import save_config
+
+                        b = load_config()
+                        save_config({**b, "watchlist": ",".join(wl)})
+                        st.success(
+                            f"Added {r['ticker']} to watchlist. Rerun to scan with full desk."
+                        )
+                        st.rerun()
+                    else:
+                        st.info(f"{r['ticker']} is already in your watchlist.")
+
+        st.divider()
+        st.markdown("### 📋 Radar Hit History")
+        st.caption(
+            "Every signal the radar has ever fired, with timestamps. Persists across sessions."
+        )
+        history = load_radar_hits()
+        if history:
+            hist_df = pd.DataFrame(history)
+            if "scan_time" in hist_df.columns:
+                hist_df = hist_df.sort_values("scan_time", ascending=False)
+            st.dataframe(hist_df, use_container_width=True, hide_index=True)
+            if st.button("Clear radar history", key="cf_radar_clear"):
+                save_radar_hits([])
+                st.rerun()
+        else:
+            st.info("No radar hits yet. Click **Scan Market Now** above.")
+    except Exception as e:
+        log_warn("render_radar_tab", e, ticker=str(getattr(d, "ticker", "")))
+        st.error("Radar temporarily unavailable due to a data or network issue. Please retry.")
 
 
 @st.fragment

@@ -91,6 +91,7 @@ for _import_try in range(_IMPORT_KEYERROR_RETRIES):
                 render_cashflow_tab,
                 render_intel_tab,
                 render_ledger_tab,
+                render_radar_tab,
             )
             from modules.data import (
                 retry_fetch, _yfinance_ticker,
@@ -282,12 +283,13 @@ def main():
         ctx.mobile_chart_layout,
     )
 
-    dash_tab_setup, dash_tab_cashflow, dash_tab_intel, dash_tab_ledger = st.tabs(
+    dash_tab_setup, dash_tab_cashflow, dash_tab_intel, dash_tab_ledger, dash_tab_radar = st.tabs(
         [
             "Setup & quant",
             "Cashflow & strikes",
             "Risk, scanner & intel",
             "📊 Sentinel Ledger",
+            "🌎 Market Explosion Radar",
         ]
     )
 
@@ -299,6 +301,8 @@ def main():
         render_intel_tab(desk)
     with dash_tab_ledger:
         render_ledger_tab(desk)
+    with dash_tab_radar:
+        render_radar_tab(desk)
 
 
 if __name__ == "__main__":

@@ -17,6 +17,8 @@ from typing import NamedTuple, Optional
 
 from .utils import log_warn, safe_float, safe_last
 
+_RADAR_UNIVERSE = "SOUN,BBAI,BIGC,BRZE,DT,GTLB,PATH,ESTC,CFLT,IOT,S,MNDY,DUOL,TOST,RXRX,ABCL,DNA,BEAM,NTLA,EDIT,VERV,ARQT,SANA,DNLI,NUVL,RIVN,LCID,QS,CHPT,ENVX,FREY,ENPH,SEDG,RUN,NOVA,SOFI,UPST,AFRM,HOOD,LMND,ROOT,RELY,DAVE,CIFR,KEEL,MARA,RIOT,CLSK,HUT,CORZ,IREN,COIN,RKLB,ASTS,LUNR,JOBY,ACHR,LILM,STRL,AIT,POWL,AGX,ECG,GVA,CUBI,SSB,RF,FSBC,HIMS,BYND,DLX,PAHC,IONQ,RGTI,QUBT,APLD,GSAT,OUST,LAZR,SMCI,ZETA,OPEN"
+
 # ~90 trading sessions RS vs SPY (growth-factor ratio) on date-aligned closes from the batch panel.
 _RS_SPY_LOOKBACK_SESSIONS = 90
 
@@ -822,6 +824,144 @@ def fetch_global_market_bundle(watch_syms: tuple, active_ticker: str) -> GlobalM
     return GlobalMarketSnapshot(
         desk, risk_df, ad, aw, am, raw, tuple(universe), tuple(risk), rs_map, sieve_map
     )
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def radar_broad_filter(universe_csv: str, spy_closes: pd.Series = None) -> list[dict]:
+    """Tier 1 cheap filter: single yf.download -> compute BBW/Hurst/RS/volume-Z from closes only.
+
+    No per-ticker API calls. Returns candidates sorted by composite pre-score.
+    Typical: 100 tickers -> 20-30 survivors in ~10 seconds.
+    """
+    try:
+        syms = [s.strip().upper() for s in universe_csv.split(",") if s.strip()]
+        if not syms:
+            return []
+
+        try:
+            raw = yf.download(
+                syms,
+                period="1y",
+                interval="1d",
+                threads=True,
+                progress=False,
+                auto_adjust=True,
+                session=_YAHOO_SESSION,
+                timeout=_YAHOO_YF_TIMEOUT,
+            )
+        except Exception as _e:
+            log_warn("radar_broad_filter yf.download", _e)
+            return []
+
+        if raw is None or getattr(raw, "empty", True):
+            return []
+
+        close = _yf_close_matrix_from_raw(raw, syms)
+        if close is None:
+            return []
+
+        spy_s = None
+        if spy_closes is not None and len(spy_closes) >= 90:
+            spy_s = spy_closes
+        elif "SPY" in close.columns:
+            spy_s = pd.to_numeric(close["SPY"], errors="coerce").dropna()
+
+        results = []
+        for sym in syms:
+            if sym == "SPY" or sym not in close.columns:
+                continue
+            c = pd.to_numeric(close[sym], errors="coerce").dropna()
+            if len(c) < 60:
+                continue
+
+            price = safe_float(safe_last(c), 0.0)
+            if price <= 0:
+                continue
+
+            sma20 = c.rolling(20).mean()
+            std20 = c.rolling(20).std()
+            bw = ((sma20 + 2 * std20) - (sma20 - 2 * std20)) / sma20
+            bw_pctile = safe_float(safe_last(bw.rank(pct=True)), 0.5)
+
+            try:
+                from modules.ta import TA
+
+                H = TA.calculate_hurst_exponent(c) or 0.5
+            except Exception:
+                H = 0.5
+
+            rs_ratio = None
+            if spy_s is not None and len(spy_s) >= 90 and len(c) >= 90:
+                try:
+                    stk_f = safe_float(safe_last(c.tail(90)), 0) / max(
+                        1e-9, safe_float(c.tail(90).iloc[0], 0)
+                    )
+                    spy_f = safe_float(safe_last(spy_s.tail(90)), 0) / max(
+                        1e-9, safe_float(spy_s.tail(90).iloc[0], 0)
+                    )
+                    if spy_f > 0:
+                        rs_ratio = stk_f / spy_f
+                except Exception:
+                    pass
+
+            vol_z = 0.0
+            try:
+                if isinstance(raw.columns, pd.MultiIndex):
+                    if (sym, "Volume") in raw.columns:
+                        vol_s = pd.to_numeric(raw[(sym, "Volume")], errors="coerce").dropna()
+                    elif ("Volume", sym) in raw.columns:
+                        vol_s = pd.to_numeric(raw[("Volume", sym)], errors="coerce").dropna()
+                    else:
+                        vol_s = pd.Series(dtype=float)
+                else:
+                    vol_s = pd.to_numeric(
+                        raw.get("Volume", pd.Series(dtype=float)), errors="coerce"
+                    ).dropna()
+                if len(vol_s) >= 21:
+                    v_mean = vol_s.iloc[-21:-1].mean()
+                    v_std = vol_s.iloc[-21:-1].std()
+                    if v_std > 0:
+                        vol_z = (safe_float(safe_last(vol_s), 0) - v_mean) / v_std
+            except Exception:
+                vol_z = 0.0
+
+            ema20 = safe_float(safe_last(c.ewm(span=20, adjust=False).mean()), 0)
+            ema50 = safe_float(safe_last(c.ewm(span=50, adjust=False).mean()), 0)
+            ema_aligned = price > ema20 > ema50 if ema20 > 0 and ema50 > 0 else False
+            mom_30d = (price / safe_float(c.iloc[-30], price) - 1) * 100 if len(c) >= 30 else 0
+
+            squeeze_score = max(0, min(30, (1 - bw_pctile) * 30))
+            trend_score = max(0, min(20, (H - 0.4) * 100)) if H > 0.4 else 0
+            rs_score = max(0, min(20, ((rs_ratio or 1.0) - 0.8) * 50)) if rs_ratio else 0
+            vol_score = max(0, min(15, vol_z * 5)) if vol_z > 0 else 0
+            ema_score = 15 if ema_aligned else 0
+            pre_score = round(
+                squeeze_score + trend_score + rs_score + vol_score + ema_score, 1
+            )
+            if pre_score < 25:
+                continue
+
+            results.append(
+                {
+                    "ticker": sym,
+                    "price": round(price, 2),
+                    "pre_score": pre_score,
+                    "bbw_pctile": round(bw_pctile, 3),
+                    "hurst": round(float(H), 3),
+                    "rs_spy": round(float(rs_ratio), 3) if rs_ratio else None,
+                    "vol_z": round(vol_z, 2),
+                    "ema_aligned": ema_aligned,
+                    "mom_30d": round(mom_30d, 1),
+                    "squeeze": bw_pctile <= 0.15,
+                    "trending": H > 0.55,
+                }
+            )
+
+        results.sort(key=lambda x: x["pre_score"], reverse=True)
+        return results
+    except Exception as _e:
+        log_warn("radar_broad_filter", _e)
+        return []
 
 
 def fetch_desk_market_snapshot(watch_syms: tuple) -> DeskMarketSnapshot:
