@@ -247,7 +247,7 @@ The dashboard answers one question: **"What should I do right now?"**
 ```
 cashflow-trader/
 ├── app.py                    # Thin orchestrator: watchlist **`@st.fragment`**, Mission Control + tape (**`modules/render_pre_tabs.py`**), **`build_context`**, desk header through execution strip, chart fragment, tab dispatch
-├── tests/                    # pytest — correlation, allocation, earnings spark, BS/EV
+├── tests/                    # pytest — utils, ConfigTransaction, correlation, allocation, earnings spark, BS/EV, signal desk
 ├── config.json               # Watchlist & UI preferences (atomic JSON writes)
 ├── requirements.txt
 ├── requirements-dev.txt      # pytest (optional local / CI)
@@ -257,10 +257,10 @@ cashflow-trader/
     ├── config.py             # Config persistence, defaults, st.secrets overlay; **`ConfigTransaction`** batch flush
     ├── desk_locals.py        # **`DeskLocals`** + **`build_desk_locals`** snapshot for tab renderers
     ├── render_pre_tabs.py    # Pre-tab UI: watchlist fragment, HUD, tape, config flush; **`render_desk_after_context`** (consensus → execution strip → alerts)
-    ├── renderers.py          # Tab bodies (**`@st.fragment`** on major tabs), equity desk; **`_news_item_markdown_html`** (escaped headlines, http(s)-only links)
+    ├── renderers.py          # Tab bodies (**`@st.fragment`** on major tabs), equity desk; **`commit_watchlist`** (persist + sync keys + rerun); **`_news_item_markdown_html`** (escaped headlines, http(s)-only links)
     ├── data.py               # Yahoo: `_ForcedTimeoutSession`, `YfData` timeout clamp; **`fetch_stock`** → optional **Alpha Vantage** daily fallback when **`ALPHAVANTAGE_API_KEY`** set; **`fetch_info`** + AV **fundamental** merge; **`evaluate_fundamental_sieve`**; `fetch_global_market_bundle` / `GlobalMarketSnapshot` (**`rs_spy_ratio_map`**, **`fundamental_sieve_map`**); **`rs_spy_ratio_map_from_close_matrix`**; `fetch_*` never-raise; tape + macro via desk slice; swallowed exceptions → **`log_warn`** on stderr for key paths
     ├── ta.py                 # TA class — indicators, **`apply_ffd`**, **`calculate_hurst_exponent`** (R/S, 100-bar), **adaptive `get_dark_pool_proxy`**, **`get_shadow_move` (whale band)**, **`get_correlation_matrix`**, HVN / volume profile
-    ├── options.py            # Black-Scholes (**`bs_greeks`**: δ, γ, θ, ν, **vanna**, **charm**), Corrado-Su, EV, Kelly, Quant Edge, **GEX / gamma flip / `predict_opex_pin`**, Diamonds, **`Opt.detect_pre_diamond`**, **`Opt.portfolio_allocation`** (+ **Sentinel sector** / **top-3 ρ** guards), **`scan_single_ticker`** (optional **`spy_df`**, **`panel_raw`**), **`scan_watchlist_edge_rows`** (optional **`panel_raw`**), **`watchlist_correlation_matrix_cached`**, **MC PoP**, **`PortfolioRisk`**
+    ├── options.py            # Black-Scholes (**`bs_greeks`**: δ, γ, θ, ν, **vanna**, **charm**), Corrado-Su, EV, Kelly, Quant Edge, **GEX / gamma flip / `predict_opex_pin`**, Diamonds, **`Opt.detect_pre_diamond`**, **`Opt.portfolio_allocation`** (+ **Sentinel sector** / **top-3 ρ** guards), **`scan_single_ticker`** (optional **`spy_df`**, **`panel_raw`**), **`scan_watchlist_edge_rows`** (optional **`panel_raw`**), **`watchlist_correlation_matrix_cached`**, **MC PoP**, **`PortfolioRisk`** — last-bar OHLC/indicator reads use **`safe_last` / `safe_float`** from **`utils`**; previously silent **`except Exception`** fallbacks log via **`log_warn`**
     ├── sentiment.py          # **Bayesian-style `analyze_news_bias`**, HMM (FFD), CC sim, Alerts, QuantBacktest
     ├── chart.py              # Price / volume / RSI / MACD + **Shadow move (purple)** + **OpEx pin** + HVN / EM / gamma flip / correlation heatmap
     ├── ui_helpers.py         # Sparklines, fragments, **`sentinel_ledger_metrics`**, **`sentinel_ledger_table_rows`**, **`ledger_theta_desk_day`**, regime **Shadow breakout** banner, **expected_move_safety_html**, **Θ/Γ desk line**
@@ -273,7 +273,7 @@ cashflow-trader/
 
 ### Observability & HTML hygiene
 
-- **`modules.utils.log_warn`** — Prefer over bare `except: pass` for non-trivial failures; writes **`[cashflow-trader]`** / **`[cashflow-trader:TICKER]`** lines to **stderr** (visible in local terminals and Streamlit logs). **`data.py`**, **`options.py`**, and **`sentiment.py`** use it on previously silent handlers (e.g. news timestamps, earnings merge paths, quant/HMM fallbacks, scanner sub-blocks).
+- **`modules.utils.log_warn`** — Prefer over bare `except: pass` for non-trivial failures; writes **`[cashflow]`** / **`[cashflow:TICKER]`** lines to **stderr** (visible in local terminals and Streamlit logs). **`safe_last`** accepts **`pd.Series`**, **`pd.Index`**, **`np.ndarray`**, and sequences — use it instead of unguarded **`.iloc[-1]`** when the series may be empty or the last value may be NaN. **`data.py`**, **`options.py`**, **`app.py`**, and **`sentiment.py`** (among others) use **`log_warn`** on failure paths; **`options.py`** is fully migrated for last-bar reads.
 - **`safe_html` / `safe_href`** — Any string that reaches **`st.markdown(..., unsafe_allow_html=True)`** should be escaped or validated. **`safe_href`** only allows **`http://`** / **`https://`** URLs in attributes (blocks **`javascript:`** etc.). **Intel → Market News** uses **`_news_item_markdown_html`** in **`renderers.py`**; macro row labels are escaped.
 
 **Why this split works with Streamlit:**
@@ -329,7 +329,7 @@ pip install -r requirements-dev.txt
 python3 -m pytest tests/ -q
 ```
 
-Covers `TA.get_correlation_matrix` (FFD-return path), earnings runway spark series, `Opt.portfolio_allocation` / `_simple_corr_haircut` / sector–ρ guards, **`tests/test_signal_desk.py`** (consensus, absorption, VWAP Z, heatmap, **market leader**, unified blend, OFI proxy, bento accents, **desk conviction + whale_sweep**, **`test_traders_note_unicorn_perfect_storm`**), **`tests/test_data_rs.py`** (**`rs_spy_ratio_map_from_close_matrix`**), **`tests/test_bs_greeks.py`** (**vanna** / **charm**), and basic Black–Scholes / EV math (no live Yahoo calls). Use **`python3 -m pytest`** if the `pytest` script is not on your `PATH`.
+Covers **`tests/test_utils.py`** (**`safe_last`**, **`safe_float`**, **`safe_html`**, **`log_warn`**), **`tests/test_config_transaction.py`** (**`ConfigTransaction`** batch flush with patched **`CONFIG_PATH`**), `TA.get_correlation_matrix` (FFD-return path), earnings runway spark series, `Opt.portfolio_allocation` / `_simple_corr_haircut` / sector–ρ guards, **`tests/test_signal_desk.py`** (consensus, absorption, VWAP Z, heatmap, **market leader**, unified blend, OFI proxy, bento accents, **desk conviction + whale_sweep**, **`test_traders_note_unicorn_perfect_storm`**), **`tests/test_data_rs.py`** (**`rs_spy_ratio_map_from_close_matrix`**), **`tests/test_bs_greeks.py`** (**vanna** / **charm**), **`tests/test_quant_edge.py`**, watchlist mutation helpers, and basic Black–Scholes / EV math (no live Yahoo calls). Use **`python3 -m pytest`** if the `pytest` script is not on your `PATH`.
 
 ## Deploy to Streamlit Cloud
 
@@ -361,7 +361,7 @@ If Cloud logs show **`503 GET /script-health-check`** around **60s**, the script
 
 ## Config (`config.json`)
 
-Persisted locally via atomic writes (`.tmp` → `os.replace`). The watchlist **auto-saves** when you edit it (and on each script rerun if the text area differs from disk), so a new browser session reloads from `config.json` on the same machine or container.
+Persisted locally via atomic writes (`.tmp` → `os.replace`). **Mission Control** preferences (watchlist tape, strategy, horizon, mini mode, quant toggle, sort mode) are accumulated in a **`ConfigTransaction`** during the run and **flushed once** before **`build_context`** when dirty (fewer redundant disk writes than per-widget saves). The watchlist editor still **saves immediately** on text changes and on **move / remove / sort** actions (those paths call **`save_config`** then **`st.rerun()`**). A new browser session reloads from **`config.json`** on the same machine or container.
 
 On Streamlit Cloud the repo’s `config.json` is read from git; **runtime writes** may be blocked (read-only). If saving fails, set a top-level secret `watchlist = "PLTR,AAPL,..."` (comma-separated, one line) in **Settings → Secrets** so the list survives redeploys.
 
