@@ -86,7 +86,8 @@ for _import_try in range(_IMPORT_KEYERROR_RETRIES):
                 fetch_stock, fetch_intraday_series,
                 fetch_info, fetch_options, list_option_expiration_dates, compute_iv_rank_proxy, fetch_news_headlines,
                 fetch_earnings_date, fetch_earnings_calendar_display,
-                fetch_desk_market_snapshot, fetch_equity_daily_closes_wide,
+                fetch_global_market_bundle,
+                _ticker_daily_ohlcv_from_raw,
                 _PLOTLY_UI_CONFIG, _PLOTLY_PAPER_BG, _PLOTLY_PLOT_BG,
                 _PLOTLY_CASH_UP, _PLOTLY_CASH_DOWN, _PLOTLY_GRID, _PLOTLY_FONT_MAIN, _PLOTLY_BLUE, _PLOTLY_AXIS_TITLE,
             )
@@ -636,14 +637,16 @@ def main():
             on_change=_persist_use_quant_models,
         )
 
-    # One Yahoo batch for tape + macro (``build_context`` reuses the same snapshot).
-    _desk_snap = fetch_desk_market_snapshot(tuple(watch_items))
+    # One Yahoo batch for tape, macro, risk closes, active OHLC, and scanner panel (2y daily → resampled weekly).
+    _global_snap = fetch_global_market_bundle(tuple(watch_items), ticker)
+    st.session_state["_cf_global_market_bundle"] = _global_snap
+    st.session_state["_cf_global_market_key"] = (tuple(watch_items), str(ticker).strip().upper())
 
     # Clickable ticker tape (chunk rows on wide lists so columns stay usable on mobile)
     if watch_items:
         st.markdown('<p class="cf-tape-title">Watchlist tape</p>', unsafe_allow_html=True)
         st.caption("Tap a symbol to promote it to the active ticker. Daily move is versus the prior session close (cached).")
-        _tape_pcts = _desk_snap.tape_pcts
+        _tape_pcts = _global_snap.desk.tape_pcts
         _TAPE_CHUNK = 8
         tape_i = 0
         for row_start in range(0, len(watch_items), _TAPE_CHUNK):
@@ -710,7 +713,7 @@ def main():
 
     # ── BUILD CONTEXT (all fetches + computations in one shot) ──
     from modules.pages import build_context
-    ctx = build_context(ticker, cfg, desk_snapshot=_desk_snap)
+    ctx = build_context(ticker, cfg, global_snapshot=_global_snap)
     if ctx is None:
         _sym_e = _html_mod.escape(str(ticker))
         st.error(
@@ -726,11 +729,7 @@ def main():
             except Exception:
                 pass
             try:
-                fetch_desk_market_snapshot.clear()
-            except Exception:
-                pass
-            try:
-                fetch_equity_daily_closes_wide.clear()
+                fetch_global_market_bundle.clear()
             except Exception:
                 pass
             st.rerun()
@@ -795,7 +794,7 @@ def main():
         _tku = str(ticker).strip().upper()
         if _tku not in _risk_syms:
             _risk_syms.append(_tku)
-        _risk_closes_df = fetch_equity_daily_closes_wide(tuple(_risk_syms), "1y")
+        _risk_closes_df = _global_snap.risk_closes_df
         if len(_risk_closes_df.columns) >= 2 and len(_risk_closes_df) >= 5:
             _portfolio_lr_df = TA.ffd_returns_from_closes(_risk_closes_df, d=0.4)
             if _portfolio_lr_df.empty:
@@ -2591,10 +2590,21 @@ def main():
             if watchlist_tickers:
                 if st.button("Scan Watchlist", key="run_scanner"):
                     with st.spinner("📡 Radar active. Scanning institutional order flow…"):
+                        _panel_scan = (
+                            _global_snap.raw_panel
+                            if _global_snap is not None and _global_snap.raw_panel is not None
+                            else None
+                        )
                         closes_map = {}
                         for tkr in watchlist_tickers:
                             try:
-                                cdf = fetch_stock(tkr, "1y", "1d")
+                                cdf = None
+                                if _panel_scan is not None:
+                                    od = _ticker_daily_ohlcv_from_raw(_panel_scan, tkr)
+                                    if od is not None and "Close" in od.columns and len(od) >= 5:
+                                        cdf = od.iloc[-260:]
+                                if cdf is None:
+                                    cdf = fetch_stock(tkr, "1y", "1d")
                                 if cdf is not None and not cdf.empty and "Close" in cdf.columns:
                                     closes_map[tkr] = pd.to_numeric(cdf["Close"], errors="coerce")
                             except Exception:
@@ -2616,7 +2626,12 @@ def main():
                         spy_df = None
                         _spy_fetch_err = None
                         try:
-                            spy_df = fetch_stock("SPY", "1y", "1d")
+                            if _panel_scan is not None:
+                                sspy = _ticker_daily_ohlcv_from_raw(_panel_scan, "SPY")
+                                if sspy is not None and len(sspy) >= 60:
+                                    spy_df = sspy.iloc[-260:].copy()
+                            if spy_df is None or getattr(spy_df, "empty", True):
+                                spy_df = fetch_stock("SPY", "1y", "1d")
                         except Exception as e:
                             _spy_fetch_err = e
                         if _spy_fetch_err is not None:
@@ -2652,6 +2667,7 @@ def main():
                                     cluster_peers=frozenset(peer_blues),
                                     corr_matrix=corr_matrix,
                                     spy_df=spy_df,
+                                    panel_raw=_panel_scan,
                                 )
                                 if result:
                                     result["overlap"] = overlap

@@ -381,19 +381,104 @@ class DeskMarketSnapshot(NamedTuple):
     vix_1mo_df: Optional[pd.DataFrame]
 
 
-@st.cache_data(ttl=120)
-def fetch_desk_market_snapshot(watch_syms: tuple) -> DeskMarketSnapshot:
-    """One Yahoo batch for **watchlist ∪ macro panel** — sidebar tape + macro strip share one timeout.
+def _ticker_daily_ohlcv_from_raw(raw, sym: str) -> Optional[pd.DataFrame]:
+    """One symbol's OHLCV from multi-ticker ``yf.download`` output (``Price`` × ``Ticker`` columns)."""
+    if raw is None or getattr(raw, "empty", True):
+        return None
+    sym = str(sym).upper().strip()
+    if not sym:
+        return None
+    try:
+        if isinstance(raw.columns, pd.MultiIndex):
+            sub = raw.xs(sym, axis=1, level="Ticker")
+        else:
+            sub = raw
+    except (KeyError, TypeError, ValueError):
+        return None
+    need = ("Open", "High", "Low", "Close")
+    if not all(c in sub.columns for c in need):
+        return None
+    cols = list(need) + [c for c in ("Volume",) if c in sub.columns]
+    out = sub[cols].copy()
+    try:
+        out.index = pd.to_datetime(out.index)
+        if out.index.tz is not None:
+            out.index = out.index.tz_localize(None)
+    except Exception:
+        return None
+    out = out.apply(pd.to_numeric, errors="coerce")
+    out = out.dropna(how="all")
+    return out if len(out) >= 2 else None
 
-    Replaces separate tape + ``fetch_macro`` downloads on the main desk run (~2× → 1× Yahoo calls).
+
+def _weekly_ohlcv_from_daily(df: pd.DataFrame) -> pd.DataFrame:
+    o = df["Open"].resample("W-FRI").first()
+    h = df["High"].resample("W-FRI").max()
+    lo = df["Low"].resample("W-FRI").min()
+    c = df["Close"].resample("W-FRI").last()
+    w = pd.DataFrame({"Open": o, "High": h, "Low": lo, "Close": c}).dropna(how="any")
+    return w
+
+
+def active_ticker_frames_from_panel(
+    raw: Optional[pd.DataFrame], act: str
+) -> tuple[Optional[pd.DataFrame], Optional[pd.DataFrame], Optional[pd.DataFrame]]:
+    """From a shared panel: (~1y daily, ~2y weekly-resampled, ~1mo daily) for the active symbol."""
+    if raw is None:
+        return None, None, None
+    full = _ticker_daily_ohlcv_from_raw(raw, act)
+    if full is None or len(full) < 5:
+        return None, None, None
+    ad = full.iloc[-260:].copy()
+    am = full.iloc[-28:].copy()
+    wfull = _weekly_ohlcv_from_daily(full)
+    aw = wfull.iloc[-110:].copy() if len(wfull) >= 5 else None
+    return ad, aw, am
+
+
+class GlobalMarketSnapshot(NamedTuple):
+    """One ``yf.download`` for watchlist ∪ macro ∪ risk ∪ active — desk, risk matrix, and scanner panel."""
+
+    desk: DeskMarketSnapshot
+    risk_closes_df: pd.DataFrame
+    active_daily_df: Optional[pd.DataFrame]
+    active_weekly_df: Optional[pd.DataFrame]
+    active_1mo_df: Optional[pd.DataFrame]
+    raw_panel: Optional[pd.DataFrame]
+    universe_syms: tuple
+    risk_syms: tuple
+
+
+@st.cache_data(ttl=120)
+def fetch_global_market_bundle(watch_syms: tuple, active_ticker: str) -> GlobalMarketSnapshot:
+    """Single Yahoo batch for tape, macro, portfolio risk closes, active-ticker OHLC, and scanner reuse.
+
+    Uses **2y** daily bars (not 5d): the command center, correlation block, and scanner need ~1y+ of
+    structure; weekly series are resampled from this panel to avoid a second interval per symbol.
     """
     wl = tuple(str(s).upper().strip() for s in watch_syms if str(s).strip())
-    all_syms = sorted(set(wl) | set(_MACRO_PANEL_TICKERS))
+    act = str(active_ticker).upper().strip() or "PLTR"
+    risk = list(dict.fromkeys([x for x in wl if x]))[:20]
+    if act not in risk:
+        risk.append(act)
+    universe = sorted(set(wl) | set(_MACRO_PANEL_TICKERS) | set(risk))
     out_tape = {s: None for s in wl}
+    m0, v0 = _macro_defaults_tuple()
+    empty_desk = DeskMarketSnapshot(out_tape, m0, v0)
+    empty = GlobalMarketSnapshot(
+        empty_desk,
+        pd.DataFrame(),
+        None,
+        None,
+        None,
+        None,
+        tuple(universe),
+        tuple(risk),
+    )
     try:
         raw = yf.download(
-            all_syms,
-            period="1mo",
+            universe,
+            period="2y",
             interval="1d",
             threads=False,
             progress=False,
@@ -402,15 +487,39 @@ def fetch_desk_market_snapshot(watch_syms: tuple) -> DeskMarketSnapshot:
             timeout=_YAHOO_YF_TIMEOUT,
         )
     except Exception:
-        m, v = _macro_defaults_tuple()
-        return DeskMarketSnapshot(out_tape, m, v)
-    close = _yf_close_matrix_from_raw(raw, all_syms)
+        return empty
+    if raw is None or getattr(raw, "empty", True):
+        return empty
+
+    close = _yf_close_matrix_from_raw(raw, universe)
     if close is None:
-        m, v = _macro_defaults_tuple()
-        return DeskMarketSnapshot(out_tape, m, v)
+        return GlobalMarketSnapshot(
+            DeskMarketSnapshot(out_tape, m0, v0),
+            pd.DataFrame(),
+            None,
+            None,
+            None,
+            raw,
+            tuple(universe),
+            tuple(risk),
+        )
     tape = _tape_pcts_from_close_matrix(close, wl)
     macro, vix_df = _macro_bundle_from_close_matrix(close)
-    return DeskMarketSnapshot(tape, macro, vix_df)
+    desk = DeskMarketSnapshot(tape, macro, vix_df)
+
+    risk_cols = [c for c in risk if c in close.columns]
+    risk_df = pd.DataFrame()
+    if risk_cols:
+        risk_df = close[risk_cols].iloc[-260:].apply(pd.to_numeric, errors="coerce").dropna(how="all")
+
+    ad, aw, am = active_ticker_frames_from_panel(raw, act)
+    return GlobalMarketSnapshot(desk, risk_df, ad, aw, am, raw, tuple(universe), tuple(risk))
+
+
+def fetch_desk_market_snapshot(watch_syms: tuple) -> DeskMarketSnapshot:
+    """Sidebar/macro slice of ``fetch_global_market_bundle`` (cached on the bundle key)."""
+    act = watch_syms[0] if watch_syms else "PLTR"
+    return fetch_global_market_bundle(watch_syms, act).desk
 
 
 @st.cache_data(ttl=300)

@@ -12,7 +12,13 @@ from datetime import datetime
 from concurrent.futures import as_completed
 
 from .ta import TA
-from .data import fetch_stock, fetch_options, fetch_news_headlines, fetch_info
+from .data import (
+    fetch_stock,
+    fetch_options,
+    fetch_news_headlines,
+    fetch_info,
+    active_ticker_frames_from_panel,
+)
 from .sentiment import Sentiment
 from .streamlit_threading import make_script_ctx_pool, submit_with_script_ctx
 
@@ -349,9 +355,15 @@ def quant_edge_status_line(qs: float) -> str:
     return "STAND DOWN. WAIT FOR A CLEANER ENTRY."
 
 
-def _edge_row_worker(sym: str, vix_val, use_quant: bool):
+def _edge_row_worker(sym: str, vix_val, use_quant: bool, panel_raw=None):
     """Fetch daily bars and compute retail vs quant edge for one symbol (thread-pool worker)."""
-    df = fetch_stock(sym, "1y", "1d")
+    df = None
+    if panel_raw is not None:
+        ad, _, _ = active_ticker_frames_from_panel(panel_raw, sym)
+        if ad is not None and len(ad) >= 30:
+            df = ad
+    if df is None:
+        df = fetch_stock(sym, "1y", "1d")
     if df is None or df.empty:
         return None
     retail_s, _ = quant_edge_score(df, vix_val=vix_val, use_quant=False)
@@ -367,8 +379,15 @@ def _edge_row_worker(sym: str, vix_val, use_quant: bool):
     }
 
 
-def scan_watchlist_edge_rows(watch_items: list[str], vix_val, use_quant: bool) -> tuple[list[dict], list[str]]:
+def scan_watchlist_edge_rows(
+    watch_items: list[str],
+    vix_val,
+    use_quant: bool,
+    panel_raw=None,
+) -> tuple[list[dict], list[str]]:
     """Fetch daily bars for **every** watchlist symbol (one task each), then sort by Quant (desc), Delta (desc), Ticker.
+
+    When ``panel_raw`` is set (multi-ticker ``yf.download`` frame), workers slice OHLC from it instead of ``fetch_stock``.
 
     Returns ``(rows, failed_tickers)`` where ``failed_tickers`` are symbols with no usable OHLC after fetch.
     """
@@ -379,7 +398,9 @@ def scan_watchlist_edge_rows(watch_items: list[str], vix_val, use_quant: bool) -
     rows: list[dict] = []
     ts = datetime.now().strftime("%H:%M:%S")
     with make_script_ctx_pool(n_workers) as pool:
-        futures = [submit_with_script_ctx(pool, _edge_row_worker, sym, vix_val, use_quant) for sym in syms]
+        futures = [
+            submit_with_script_ctx(pool, _edge_row_worker, sym, vix_val, use_quant, panel_raw) for sym in syms
+        ]
         for fut in as_completed(futures):
             try:
                 r = fut.result()
@@ -979,13 +1000,30 @@ def evaluate_asymmetric_convexity_sieve(
     return {"hit": hit, "gates": gates, "bbw_pctile": bbw_pctile, "vol_z": vol_z}
 
 
-def scan_single_ticker(tkr, correlation_haircut=1.0, cluster_peers=None, corr_matrix=None, spy_df=None):
+def scan_single_ticker(
+    tkr,
+    correlation_haircut=1.0,
+    cluster_peers=None,
+    corr_matrix=None,
+    spy_df=None,
+    panel_raw=None,
+):
     """Fetch data and compute all scores for a single ticker (for the scanner)."""
     try:
-        df = fetch_stock(tkr, "1y", "1d")
+        df = None
+        df_wk = None
+        if panel_raw is not None:
+            ad, aw, _ = active_ticker_frames_from_panel(panel_raw, tkr)
+            if ad is not None and len(ad) >= 60:
+                df = ad
+                if aw is not None and len(aw) >= 26:
+                    df_wk = aw
+        if df is None:
+            df = fetch_stock(tkr, "1y", "1d")
         if df is None or len(df) < 60:
             return None
-        df_wk = fetch_stock(tkr, "2y", "1wk")
+        if df_wk is None:
+            df_wk = fetch_stock(tkr, "2y", "1wk")
         price = df["Close"].iloc[-1]
         prev = df["Close"].iloc[-2] if len(df) >= 2 else price
         chg_pct = (price / prev - 1) * 100

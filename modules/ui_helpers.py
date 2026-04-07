@@ -661,8 +661,10 @@ def _fragment_rolling_edge_capture():
         st.info("Add tickers under **Edit watchlist symbols** to populate the edge matrix.")
         return
 
+    _gb = st.session_state.get("_cf_global_market_bundle")
+    _panel = _gb.raw_panel if _gb is not None else None
     with st.spinner("Scanning watchlist for edge scores…"):
-        rows, failed_syms = scan_watchlist_edge_rows(wl, vix_arg, use_q)
+        rows, failed_syms = scan_watchlist_edge_rows(wl, vix_arg, use_q, panel_raw=_panel)
     if rows:
         st.session_state.edge_log = pd.DataFrame(rows)
         st.session_state["_edge_matrix_updated"] = datetime.now().strftime("%H:%M:%S")

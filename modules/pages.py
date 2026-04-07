@@ -12,7 +12,7 @@ from datetime import datetime
 
 from .ta import TA
 from .data import (
-    fetch_stock, fetch_options, fetch_macro, DeskMarketSnapshot,
+    fetch_stock, fetch_options, fetch_macro, DeskMarketSnapshot, GlobalMarketSnapshot,
     fetch_news_headlines, fetch_earnings_date, fetch_earnings_calendar_display,
     _PLOTLY_UI_CONFIG, _PLOTLY_GRID, _PLOTLY_FONT_MAIN,
     _PLOTLY_PAPER_BG, _PLOTLY_PLOT_BG, _PLOTLY_CASH_UP, _PLOTLY_CASH_DOWN,
@@ -134,32 +134,66 @@ def build_context(
     ticker: str,
     cfg: dict,
     desk_snapshot: Optional[DeskMarketSnapshot] = None,
+    global_snapshot: Optional[GlobalMarketSnapshot] = None,
 ) -> Optional[DashContext]:
     """Fetch all data and compute all scores. Returns None if data unavailable."""
     ctx = DashContext(ticker=ticker, cfg=cfg)
     ctx.mini_mode = bool(st.session_state.get("sb_mini_mode", False))
     ctx.mobile_chart_layout = _client_suggests_mobile_chart()
 
-    if desk_snapshot is not None:
+    if global_snapshot is not None:
+        ctx.macro = global_snapshot.desk.macro
+        ctx.vix_1mo_df = global_snapshot.desk.vix_1mo_df
+    elif desk_snapshot is not None:
         ctx.macro = desk_snapshot.macro
         ctx.vix_1mo_df = desk_snapshot.vix_1mo_df
     else:
         ctx.macro, ctx.vix_1mo_df = fetch_macro()
 
+    gs = global_snapshot
+    use_panel_daily = (
+        gs is not None
+        and gs.active_daily_df is not None
+        and not gs.active_daily_df.empty
+        and len(gs.active_daily_df) >= 60
+    )
+    use_panel_wk = (
+        gs is not None
+        and gs.active_weekly_df is not None
+        and not gs.active_weekly_df.empty
+        and len(gs.active_weekly_df) >= 26
+    )
+
     # ── Parallel fetch ──
     with st.spinner(f"Loading {ticker}..."):
         with make_script_ctx_pool(5) as pool:
-            f_df = submit_with_script_ctx(pool, fetch_stock, ticker, "1y", "1d")
-            f_wk = submit_with_script_ctx(pool, fetch_stock, ticker, "2y", "1wk")
-            f_1mo = submit_with_script_ctx(pool, fetch_stock, ticker, "1mo", "1d")
             f_news = submit_with_script_ctx(pool, fetch_news_headlines, ticker)
             f_earn = submit_with_script_ctx(pool, fetch_earnings_date, ticker)
+            f_df = f_wk = f_1mo = None
+            if not use_panel_daily:
+                f_df = submit_with_script_ctx(pool, fetch_stock, ticker, "1y", "1d")
+                f_wk = submit_with_script_ctx(pool, fetch_stock, ticker, "2y", "1wk")
+                f_1mo = submit_with_script_ctx(pool, fetch_stock, ticker, "1mo", "1d")
+            elif not use_panel_wk:
+                f_wk = submit_with_script_ctx(pool, fetch_stock, ticker, "2y", "1wk")
 
-            ctx.df = f_df.result()
-            ctx.df_wk = f_wk.result()
-            ctx.df_1mo_spark = f_1mo.result()
             ctx.news = f_news.result()
             ctx.earnings_date_raw = f_earn.result()
+
+            if use_panel_daily:
+                ctx.df = gs.active_daily_df
+                if gs.active_1mo_df is not None and not gs.active_1mo_df.empty:
+                    ctx.df_1mo_spark = gs.active_1mo_df
+                else:
+                    ctx.df_1mo_spark = gs.active_daily_df.iloc[-30:].copy()
+                if use_panel_wk:
+                    ctx.df_wk = gs.active_weekly_df
+                else:
+                    ctx.df_wk = f_wk.result() if f_wk is not None else None
+            else:
+                ctx.df = f_df.result()
+                ctx.df_wk = f_wk.result()
+                ctx.df_1mo_spark = f_1mo.result()
 
     if ctx.df is None or ctx.df.empty:
         return None
