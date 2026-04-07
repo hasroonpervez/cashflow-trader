@@ -692,10 +692,15 @@ def _parse_watchlist_string(s):
     """Split user paste (commas, newlines, semicolons) into unique uppercase tickers."""
     if not s:
         return []
+    alias_map = {
+        "BTC": "BTC-USD",
+        "ETH": "ETH-USD",
+    }
     s = str(s).replace("\n", ",").replace(";", ",")
     items, seen = [], set()
     for raw in s.split(","):
         t = raw.strip().upper()
+        t = alias_map.get(t, t)
         if t and t not in seen:
             items.append(t)
             seen.add(t)

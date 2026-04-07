@@ -1727,7 +1727,7 @@ def render_intel_tab(d: DeskLocals) -> None:
         )
 
     # ── WATCHLIST EARNINGS HEAT MAP ──
-    _wl_items = [t.strip().upper() for t in (d.scanner_watchlist or "").split(",") if t.strip()]
+    _wl_items = _parse_watchlist_string(d.scanner_watchlist or "")
     if _wl_items:
         with st.expander("📅 Watchlist Earnings Calendar", expanded=False):
             st.caption(
@@ -1786,7 +1786,7 @@ def render_intel_tab(d: DeskLocals) -> None:
     _section("🔎 Market Scanner", "One pass across the list for Diamonds, confluence stacks, and Gold Zone distance.",
              tip_plain="Sort mentally by confluence, then hunt for a live Blue Diamond. If nothing clears the bar, flat is a position.")
 
-    watchlist_tickers = [t.strip().upper() for t in scanner_watchlist.split(",") if t.strip()]
+    watchlist_tickers = _parse_watchlist_string(scanner_watchlist)
     if watchlist_tickers:
         auto_scan_interval = max(0, int(auto_scan_interval or DEFAULT_CONFIG.get("auto_scan_interval", 300)))
         from modules.config import load_config, save_config
