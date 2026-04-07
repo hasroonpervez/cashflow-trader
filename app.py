@@ -76,6 +76,14 @@ def _is_script_health_probe() -> bool:
         ua = low.get("user-agent", "")
         if "kube-probe" in ua:
             return True
+        # Cloud probes are typically non-browser requests with minimal headers.
+        # Avoid false positives by requiring several "not a browser" signals.
+        accept = low.get("accept", "")
+        sec_ch = low.get("sec-ch-ua", "")
+        sec_fetch = low.get("sec-fetch-dest", "")
+        is_browser_ua = any(tok in ua for tok in ("mozilla/", "chrome/", "safari/", "firefox/"))
+        if (not is_browser_ua) and (not sec_ch) and (not sec_fetch) and ("text/html" not in accept):
+            return True
     except Exception:
         return False
     return False
