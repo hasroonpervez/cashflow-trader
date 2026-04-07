@@ -133,6 +133,7 @@ for _import_try in range(_IMPORT_KEYERROR_RETRIES):
                 traders_note_markdown,
                 bento_box_html,
                 suggested_shares_atr_risk,
+                institutional_heatmap_ribbon_html,
             )
         break
     except KeyError:
@@ -769,7 +770,11 @@ def main():
     d_wr = ctx.d_wr; d_avg = ctx.d_avg; d_n = ctx.d_n
     daily_struct = ctx.daily_struct; weekly_struct = ctx.weekly_struct
 
-    _consensus = compute_desk_consensus(ctx, df)
+    _tku_rs = str(ticker).upper().strip()
+    _rs_map = getattr(_global_snap, "rs_spy_ratio_map", None) or {}
+    _rs_row = _rs_map.get(_tku_rs) if isinstance(_rs_map, dict) else None
+    _rs_for_desk = float(_rs_row) if _rs_row is not None and np.isfinite(float(_rs_row)) else None
+    _consensus = compute_desk_consensus(ctx, df, rs_spy_ratio=_rs_for_desk)
 
     render_mode_badge(use_quant_models)
     st.markdown(
@@ -858,6 +863,7 @@ def main():
     else:
         st.markdown(consensus_banner_html(ticker, _consensus), unsafe_allow_html=True)
         st.markdown(traders_note_markdown(ticker, ctx, df, _consensus))
+        st.markdown(institutional_heatmap_ribbon_html(_consensus), unsafe_allow_html=True)
         _b1 = bento_box_html(
             "THE SETUP",
             "Is the spring coiled?",
@@ -876,22 +882,33 @@ def main():
             st.markdown(_b2, unsafe_allow_html=True)
         with bc3:
             st.markdown(_b3, unsafe_allow_html=True)
-        with st.expander("Calculate position size (illustrative 1% risk vs ATR stop)", expanded=False):
+        with st.expander("Calculate position size (conviction × Kelly-style risk vs ATR stop)", expanded=False):
+            _cm = float(_consensus.get("conviction_multiplier") or 1.0)
+            _cl = str(_consensus.get("conviction_label") or "")
             st.caption(
-                "Not connected to your broker. Enter **account size** and **risk %**; stop distance uses "
-                "~**1.5× 14d ATR** below spot (same anchor as the trader's note)."
+                "Not connected to your broker. Enter **account size** and **base risk %**; stop distance uses "
+                "~**1.5× 14d ATR** below spot. **Conviction multiplier** (COIL / ICEBERG / SWEEP from the heatmap) "
+                "scales effective risk: **1.0×** baseline, **1.25×** COIL and/or absorption, **1.5×** VWAP urgency, **2.0×** all three."
+            )
+            st.markdown(
+                f"<div style='font-size:0.78rem;color:#a5b4fc;margin:0 0 10px 0;padding:8px 12px;border-radius:10px;"
+                f"border:1px solid rgba(129,140,248,0.35);background:rgba(67,56,202,0.12)'>"
+                f"<strong style='color:#c4b5fd'>Active conviction</strong> · ×{_cm:.2f} — {_html_mod.escape(_cl)}</div>",
+                unsafe_allow_html=True,
             )
             _pc1, _pc2 = st.columns(2)
             with _pc1:
                 _acct = st.number_input("Account ($)", min_value=0.0, value=100000.0, step=1000.0, key="cf_pos_acct")
             with _pc2:
-                _rpct = st.number_input("Risk per trade (%)", min_value=0.1, max_value=5.0, value=1.0, step=0.1, key="cf_pos_risk")
+                _rpct = st.number_input("Base risk per trade (%)", min_value=0.1, max_value=5.0, value=1.0, step=0.1, key="cf_pos_risk")
             _atr_u = float(_consensus.get("atr_last") or 0)
-            _sh = suggested_shares_atr_risk(_acct, _rpct, float(price), _atr_u, 1.5)
+            _eff_r = float(_rpct) * _cm
+            _sh = suggested_shares_atr_risk(_acct, _eff_r, float(price), _atr_u, 1.5)
             if _sh is not None and _sh > 0 and _atr_u > 0:
                 _stop = float(price) - 1.5 * _atr_u
                 st.success(
-                    f"~**{_sh:,}** shares risks ~**{_rpct:.1f}%** of `${_acct:,.0f}` if stop ≈ **${_stop:,.2f}** "
+                    f"~**{_sh:,}** shares ≈ **{_eff_r:.2f}%** effective risk of `${_acct:,.0f}` "
+                    f"(**{_rpct:.1f}%** × **{_cm:.2f}** conviction) if stop ≈ **${_stop:,.2f}** "
                     f"(**1.5× ATR** ≈ `${1.5 * _atr_u:,.2f}` below **${price:,.2f}**)."
                 )
             else:

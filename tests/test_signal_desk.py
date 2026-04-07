@@ -5,7 +5,9 @@ import pandas as pd
 
 from modules.signal_desk import (
     compute_desk_consensus,
+    desk_conviction_multiplier,
     institutional_absorption,
+    institutional_heatmap_ribbon_html,
     last_bar_volume_zscore,
     suggested_shares_atr_risk,
     vwap_distance_stats,
@@ -67,6 +69,11 @@ def test_consensus_score_in_range():
     assert "vwap_z" in c
     assert "vwap_detail" in c
     assert "vwap_urgency" in c and isinstance(c["vwap_urgency"], bool)
+    assert "coil_active" in c and isinstance(c["coil_active"], bool)
+    assert "conviction_multiplier" in c and 1.0 <= c["conviction_multiplier"] <= 2.0
+    assert "conviction_label" in c and isinstance(c["conviction_label"], str)
+    assert "rs_spy_ratio" in c
+    assert "market_leader" in c and isinstance(c["market_leader"], bool)
 
 
 def test_institutional_absorption_triggers_on_flat_close():
@@ -109,6 +116,61 @@ def test_vwap_z_extreme_positive_on_gap_close():
     df.loc[df.index[-1], "Open"] = base * 1.01
     z = vwap_distance_stats(df).get("vwap_z")
     assert z is not None and float(z) > 2.0
+
+
+def test_desk_conviction_multiplier_tiers():
+    assert desk_conviction_multiplier(coil_active=False, absorption=False, vwap_urgency=False) == (
+        1.0,
+        "Baseline (no elite microstructure gates)",
+    )
+    assert desk_conviction_multiplier(coil_active=True, absorption=False, vwap_urgency=False)[0] == 1.25
+    assert desk_conviction_multiplier(coil_active=False, absorption=True, vwap_urgency=False)[0] == 1.25
+    assert desk_conviction_multiplier(coil_active=False, absorption=False, vwap_urgency=True)[0] == 1.5
+    assert desk_conviction_multiplier(coil_active=True, absorption=True, vwap_urgency=True)[0] == 2.0
+
+
+def test_institutional_heatmap_ribbon_html_smoke():
+    html = institutional_heatmap_ribbon_html(
+        {
+            "coil_active": True,
+            "absorption": True,
+            "vwap_urgency": True,
+            "conviction_multiplier": 2.0,
+            "conviction_label": "test",
+        }
+    )
+    assert "INSTITUTIONAL HEATMAP" in html
+    assert "COIL" in html and "ICEBERG" in html and "SWEEP" in html
+    assert "LEADER" in html
+
+
+def test_market_leader_when_rs_and_whale_volume():
+    df = _dummy_df(80)
+    tail = df.index[-21:-1]
+    df.loc[tail, "Volume"] = np.linspace(900_000, 1_100_000, len(tail)).astype(np.int64)
+    df.loc[df.index[-1], "Volume"] = 50_000_000
+    c_prev = float(df["Close"].iloc[-2])
+    df.loc[df.index[-1], "Close"] = c_prev * 1.02
+    ctx = SimpleNamespace(
+        qs=55.0,
+        cp_score=5,
+        cp_max=9,
+        fg=50.0,
+        struct="BULLISH",
+        wk_label="BULLISH",
+        macd_bull=True,
+        obv_up=True,
+        price=float(df["Close"].iloc[-1]),
+        gold_zone_price=float(df["Close"].iloc[-1]) * 0.98,
+        rsi_v=55.0,
+        chg_pct=1.0,
+    )
+    c = compute_desk_consensus(ctx, df, rs_spy_ratio=1.08)
+    assert c["volume_z"] is not None and c["volume_z"] > 4.0
+    assert c["market_leader"] is True
+    assert c["rs_spy_ratio"] == 1.08
+    html = institutional_heatmap_ribbon_html(c)
+    assert "MARKET LEADER" in html
 
 
 def test_suggested_shares():

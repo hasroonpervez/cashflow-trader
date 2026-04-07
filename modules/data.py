@@ -13,6 +13,9 @@ from curl_cffi import requests as curl_requests
 from datetime import datetime, timedelta
 from typing import NamedTuple, Optional
 
+# ~90 trading sessions RS vs SPY (growth-factor ratio) on date-aligned closes from the batch panel.
+_RS_SPY_LOOKBACK_SESSIONS = 90
+
 # yfinance 0.2+ requires curl_cffi sessions for Yahoo (TLS fingerprinting). One shared
 # session for all Tickers, ``yf.download``, and direct JSON calls — connection reuse and
 # consistent cookies. Community Cloud empty bars + “possibly delisted” are usually
@@ -335,6 +338,59 @@ def _yf_close_matrix_from_raw(raw, download_syms: list) -> Optional[pd.DataFrame
     return close if isinstance(close, pd.DataFrame) else None
 
 
+def rs_spy_ratio_map_from_close_matrix(
+    close: Optional[pd.DataFrame],
+    symbols: tuple,
+    *,
+    sessions: int = _RS_SPY_LOOKBACK_SESSIONS,
+) -> dict[str, Optional[float]]:
+    """
+    For each symbol: (Close_t / Close_{t-n}) / (SPY_t / SPY_{t-n}) on **inner-aligned** dates.
+    Values **> 1** mean the stock outperformed SPY over the window. **SPY** and unknown columns → ``None``.
+    """
+    out: dict[str, Optional[float]] = {}
+    if close is None or getattr(close, "empty", True) or "SPY" not in close.columns:
+        for sym in symbols:
+            su = str(sym).upper().strip()
+            if su:
+                out[su] = None
+        return out
+    spy_all = pd.to_numeric(close["SPY"], errors="coerce")
+    for sym in symbols:
+        su = str(sym).upper().strip()
+        if not su:
+            continue
+        if su == "SPY":
+            out[su] = None
+            continue
+        if su not in close.columns:
+            out[su] = None
+            continue
+        st_all = pd.to_numeric(close[su], errors="coerce")
+        j = pd.concat([spy_all.rename("_spy"), st_all.rename("_stk")], axis=1, join="inner").dropna()
+        if len(j) < sessions + 1:
+            out[su] = None
+            continue
+        try:
+            spy_b = float(j["_spy"].iloc[-1 - sessions])
+            spy_e = float(j["_spy"].iloc[-1])
+            stk_b = float(j["_stk"].iloc[-1 - sessions])
+            stk_e = float(j["_stk"].iloc[-1])
+        except (TypeError, ValueError, IndexError):
+            out[su] = None
+            continue
+        if spy_b <= 0 or stk_b <= 0 or not all(np.isfinite(x) for x in (spy_b, spy_e, stk_b, stk_e)):
+            out[su] = None
+            continue
+        spy_f = spy_e / spy_b
+        stk_f = stk_e / stk_b
+        if spy_f <= 0 or not np.isfinite(spy_f) or not np.isfinite(stk_f):
+            out[su] = None
+            continue
+        out[su] = float(stk_f / spy_f)
+    return out
+
+
 def _tape_pcts_from_close_matrix(close: pd.DataFrame, syms: tuple) -> dict:
     out = {s: None for s in syms}
     for sym in syms:
@@ -447,6 +503,7 @@ class GlobalMarketSnapshot(NamedTuple):
     raw_panel: Optional[pd.DataFrame]
     universe_syms: tuple
     risk_syms: tuple
+    rs_spy_ratio_map: dict
 
 
 @st.cache_data(ttl=120)
@@ -474,6 +531,7 @@ def fetch_global_market_bundle(watch_syms: tuple, active_ticker: str) -> GlobalM
         None,
         tuple(universe),
         tuple(risk),
+        {},
     )
     try:
         raw = yf.download(
@@ -502,6 +560,7 @@ def fetch_global_market_bundle(watch_syms: tuple, active_ticker: str) -> GlobalM
             raw,
             tuple(universe),
             tuple(risk),
+            {},
         )
     tape = _tape_pcts_from_close_matrix(close, wl)
     macro, vix_df = _macro_bundle_from_close_matrix(close)
@@ -512,8 +571,11 @@ def fetch_global_market_bundle(watch_syms: tuple, active_ticker: str) -> GlobalM
     if risk_cols:
         risk_df = close[risk_cols].iloc[-260:].apply(pd.to_numeric, errors="coerce").dropna(how="all")
 
+    rs_syms = tuple(sorted(set(risk) | set(wl)))
+    rs_map = rs_spy_ratio_map_from_close_matrix(close, rs_syms, sessions=_RS_SPY_LOOKBACK_SESSIONS)
+
     ad, aw, am = active_ticker_frames_from_panel(raw, act)
-    return GlobalMarketSnapshot(desk, risk_df, ad, aw, am, raw, tuple(universe), tuple(risk))
+    return GlobalMarketSnapshot(desk, risk_df, ad, aw, am, raw, tuple(universe), tuple(risk), rs_map)
 
 
 def fetch_desk_market_snapshot(watch_syms: tuple) -> DeskMarketSnapshot:

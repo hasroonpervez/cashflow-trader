@@ -18,6 +18,93 @@ from .ta import TA
 _VWAP_ROLL_BARS = 20
 _VWAP_Z_PRIOR_BARS = 20
 
+# BBW percentile at or below this = tight "coil" for ribbon + conviction (bottom ~5%).
+_COIL_BBW_PCTILE_MAX = 0.05
+
+
+def desk_conviction_multiplier(*, coil_active: bool, absorption: bool, vwap_urgency: bool) -> tuple[float, str]:
+    """
+    Position-size conviction tier: 1.0 baseline, 1.25 COIL and/or ICEBERG, 1.5 SWEEP, 2.0 all three.
+    """
+    if coil_active and absorption and vwap_urgency:
+        return 2.0, "Perfect desk: COIL · ICEBERG · SWEEP"
+    if vwap_urgency:
+        return 1.5, "SWEEP — VWAP urgency (volume + stretch)"
+    if coil_active or absorption:
+        return 1.25, "COIL and/or ICEBERG (squeeze ≤5% BBW and/or absorption)"
+    return 1.0, "Baseline (no elite microstructure gates)"
+
+
+def institutional_heatmap_ribbon_html(c: dict) -> str:
+    """
+    Institutional strip: COIL (purple), ICEBERG (cyan), SWEEP (gold), LEADER (emerald).
+    Segments light only when their gate is active; inactive slots stay low-contrast slate.
+    """
+    coil = bool(c.get("coil_active"))
+    if "coil_active" not in c:
+        bbwp = c.get("bbw_pctile")
+        coil = bool(bbwp is not None and float(bbwp) <= _COIL_BBW_PCTILE_MAX)
+    ice = bool(c.get("absorption"))
+    sweep = bool(c.get("vwap_urgency"))
+    leader = bool(c.get("market_leader"))
+
+    def seg(label: str, active: bool, active_bg: str, active_border: str, active_text: str) -> str:
+        lab = html_mod.escape(label)
+        if active:
+            return f"""<div style="flex:1;min-width:72px;text-align:center;padding:10px 8px;border-radius:10px;
+border:1px solid {active_border};background:{active_bg};box-shadow:0 0 18px {active_border}55;
+font-size:0.62rem;font-weight:800;letter-spacing:0.14em;color:{active_text}">{lab}</div>"""
+        return f"""<div style="flex:1;min-width:72px;text-align:center;padding:10px 8px;border-radius:10px;
+border:1px solid rgba(71,85,105,0.45);background:rgba(30,41,59,0.65);
+font-size:0.62rem;font-weight:700;letter-spacing:0.12em;color:#64748b">{lab}</div>"""
+
+    s1 = seg(
+        "COIL",
+        coil,
+        "linear-gradient(145deg,rgba(109,40,217,0.95),rgba(168,85,247,0.88))",
+        "rgba(168,85,247,0.85)",
+        "#f5f3ff",
+    )
+    s2 = seg(
+        "ICEBERG",
+        ice,
+        "linear-gradient(145deg,rgba(6,182,212,0.9),rgba(34,211,238,0.82))",
+        "rgba(34,211,238,0.75)",
+        "#ecfeff",
+    )
+    s3 = seg(
+        "SWEEP",
+        sweep,
+        "linear-gradient(165deg,rgba(234,179,8,0.95),rgba(202,138,4,0.88),rgba(250,204,21,0.55))",
+        "rgba(234,179,8,0.9)",
+        "#1c1917",
+    )
+    s4 = seg(
+        "LEADER",
+        leader,
+        "linear-gradient(145deg,rgba(5,150,105,0.95),rgba(16,185,129,0.88),rgba(52,211,153,0.65))",
+        "rgba(52,211,153,0.85)",
+        "#ecfdf5",
+    )
+    mult, why = desk_conviction_multiplier(coil_active=coil, absorption=ice, vwap_urgency=sweep)
+    sub = html_mod.escape(f"Conviction ×{mult:.2f} — {why}")
+    lead_line = ""
+    if leader:
+        rs_d = c.get("rs_spy_ratio")
+        vz_d = c.get("volume_z")
+        rs_s = f"{float(rs_d):.2f}" if rs_d is not None and np.isfinite(float(rs_d)) else "—"
+        vz_s = f"{float(vz_d):+.1f}σ" if vz_d is not None and np.isfinite(float(vz_d)) else "—"
+        lead_line = (
+            f"<div style=\"margin-top:6px;font-size:0.72rem;color:#6ee7b7;font-weight:700;letter-spacing:0.06em\">"
+            f"MARKET LEADER · RS {html_mod.escape(rs_s)} &gt; 1 vs SPY · Whale volume {html_mod.escape(vz_s)}</div>"
+        )
+    return f"""<div style="margin:0 0 14px 0;padding:0">
+<div style="font-size:0.65rem;color:#94a3b8;font-weight:800;letter-spacing:0.16em;margin:0 0 8px 0">
+INSTITUTIONAL HEATMAP</div>
+<div style="display:flex;gap:8px;align-items:stretch;flex-wrap:wrap">{s1}{s2}{s3}{s4}</div>
+<div style="margin-top:8px;font-size:0.72rem;color:#94a3b8;line-height:1.45">{sub}</div>{lead_line}
+</div>"""
+
 
 def vwap_distance_stats(
     df: pd.DataFrame,
@@ -197,8 +284,12 @@ def _wk_score(label: str) -> float:
     return 50.0
 
 
-def compute_desk_consensus(ctx: Any, df: pd.DataFrame) -> dict:
-    """Return score 0–100, traffic-light band, UI hints, and bento strings."""
+def compute_desk_consensus(ctx: Any, df: pd.DataFrame, *, rs_spy_ratio: Optional[float] = None) -> dict:
+    """Return score 0–100, traffic-light band, UI hints, and bento strings.
+
+    ``rs_spy_ratio``: optional **~90-session** growth-factor ratio vs SPY from the global close matrix
+    (> 1 ⇒ outperformance). Combined with **volume Z > 4** → **market leader** ribbon.
+    """
     qs = float(getattr(ctx, "qs", 0) or 0)
     qs = max(0.0, min(100.0, qs))
     cp_max = max(1, int(getattr(ctx, "cp_max", 9) or 9))
@@ -214,6 +305,12 @@ def compute_desk_consensus(ctx: Any, df: pd.DataFrame) -> dict:
     tape = tape + 6.0 if obv_up else -4.0
     tape = max(0.0, min(100.0, tape))
     vz = last_bar_volume_zscore(df)
+    rs_f: Optional[float] = None
+    if rs_spy_ratio is not None and np.isfinite(float(rs_spy_ratio)):
+        rs_f = float(rs_spy_ratio)
+    rs_outperf = rs_f is not None and rs_f > 1.0
+    vz_whale = vz is not None and float(vz) > 4.0
+    market_leader = bool(rs_outperf and vz_whale)
     absorb = institutional_absorption(df, volume_z=vz)
     vwap_st = vwap_distance_stats(df)
     vwap_z = vwap_st.get("vwap_z")
@@ -254,9 +351,12 @@ def compute_desk_consensus(ctx: Any, df: pd.DataFrame) -> dict:
         color = "#34d399"
         ring_bg = "rgba(52,211,153,0.14)"
     bbwp = _bbw_last_pctile(df)
+    coil_active = bool(bbwp is not None and float(bbwp) <= _COIL_BBW_PCTILE_MAX)
     setup_hint = "Volatility: "
     if bbwp is not None:
-        if bbwp <= 0.15:
+        if bbwp <= _COIL_BBW_PCTILE_MAX:
+            setup_hint += f"Bollinger bandwidth in the **extreme lower** range (≤**{_COIL_BBW_PCTILE_MAX:.0%}** tile — **COIL** / spring risk)."
+        elif bbwp <= 0.15:
             setup_hint += "Bollinger bandwidth in the **lower** range (squeeze / coil risk)."
         elif bbwp >= 0.85:
             setup_hint += "Bollinger bandwidth **expanded** (trend or event vol)."
@@ -271,6 +371,9 @@ def compute_desk_consensus(ctx: Any, df: pd.DataFrame) -> dict:
     ]
     if vz is not None:
         mom_parts.append(f"Volume Z today **{vz:+.1f}**")
+    if rs_f is not None:
+        _rs_tag = "outperforming SPY" if rs_f > 1.0 else "lagging SPY"
+        mom_parts.append(f"RS vs SPY (~90d ratio) **{rs_f:.2f}** ({_rs_tag})")
     if vwap_z is not None and np.isfinite(float(vwap_z)):
         dp = vwap_st.get("deviation_pct")
         if dp is not None and np.isfinite(float(dp)):
@@ -301,6 +404,17 @@ def compute_desk_consensus(ctx: Any, df: pd.DataFrame) -> dict:
         atr_last = float(TA.atr(df).iloc[-1]) if df is not None and len(df) >= 15 else 0.0
     except Exception:
         atr_last = 0.0
+    vwap_urgency = bool(
+        vz is not None
+        and vwap_z is not None
+        and float(vz) >= 2.0
+        and float(vwap_z) >= 2.0
+    )
+    conv_mult, conv_lbl = desk_conviction_multiplier(
+        coil_active=coil_active,
+        absorption=bool(absorb.get("active")),
+        vwap_urgency=vwap_urgency,
+    )
     return {
         "score": score,
         "band": band,
@@ -309,6 +423,7 @@ def compute_desk_consensus(ctx: Any, df: pd.DataFrame) -> dict:
         "ring_bg": ring_bg,
         "volume_z": vz,
         "bbw_pctile": bbwp,
+        "coil_active": coil_active,
         "atr_last": atr_last,
         "setup_hint": setup_hint,
         "momentum_hint": momentum_hint,
@@ -317,12 +432,11 @@ def compute_desk_consensus(ctx: Any, df: pd.DataFrame) -> dict:
         "absorption_detail": absorb,
         "vwap_z": vwap_st.get("vwap_z"),
         "vwap_detail": vwap_st,
-        "vwap_urgency": bool(
-            vz is not None
-            and vwap_z is not None
-            and float(vz) >= 2.0
-            and float(vwap_z) >= 2.0
-        ),
+        "vwap_urgency": vwap_urgency,
+        "conviction_multiplier": float(conv_mult),
+        "conviction_label": conv_lbl,
+        "rs_spy_ratio": rs_f,
+        "market_leader": market_leader,
     }
 
 
@@ -410,6 +524,18 @@ def traders_note_markdown(ticker: str, ctx: Any, df: pd.DataFrame, c: dict) -> s
         parts.append("Price is in a **tight Bollinger squeeze** (potential energy building).")
     elif bbwp is not None and bbwp >= 0.85:
         parts.append("Bollinger bandwidth is **wide** (realized range expanded).")
+    if c.get("market_leader"):
+        rsv = c.get("rs_spy_ratio")
+        vzv = c.get("volume_z")
+        if rsv is not None and vzv is not None and np.isfinite(float(rsv)) and np.isfinite(float(vzv)):
+            parts.append(
+                f"**Market leader:** **RS vs SPY (~90d batch ratio) {float(rsv):.2f}** (>1 = outperformance) **and** "
+                f"**volume Z {float(vzv):+.1f}** (whale, >4σ vs 20d) — leadership on the global snapshot benchmark."
+            )
+        else:
+            parts.append(
+                "**Market leader:** RS outperformance vs SPY on the batch benchmark plus whale volume — see momentum row."
+            )
     if c.get("absorption"):
         ad = c.get("absorption_detail") or {}
         rp = ad.get("last_return_pct")
