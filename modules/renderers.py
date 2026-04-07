@@ -39,6 +39,7 @@ from modules.options import (
     build_chain_mc_dataframe,
     calc_ev,
     calc_skew_regime,
+    calc_vol_skew,
     fetch_options,
     kelly_criterion,
     quant_edge_score,
