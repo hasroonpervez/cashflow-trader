@@ -22,7 +22,7 @@ from .data import (
 )
 from .sentiment import Sentiment
 from .streamlit_threading import make_script_ctx_pool, submit_with_script_ctx
-from .utils import log_warn
+from .utils import log_warn, safe_float, safe_last
 
 try:
     from scipy.stats import norm
@@ -308,7 +308,7 @@ def quant_edge_score(df, vix_val=None, options_data=None, use_quant=False):
             regime_probs = QuantSentiment.regime_detection(df)
             high_vol_regime = float(regime_probs.get(1, 0.0))
             ffd_series = TA.apply_ffd(df["Close"], d=0.4)
-            ffd_last = float(ffd_series.iloc[-1]) if ffd_series is not None and len(ffd_series) > 0 else 0.0
+            ffd_last = safe_float(safe_last(ffd_series), 0.0)
             edge = 50.0 + (ffd_last * 10.0) - (high_vol_regime * 20.0)
             mc_boost, mc_avg_top = _quant_edge_mc_pop_boost(options_data)
             edge = float(max(0.0, min(100.0, edge + mc_boost)))
@@ -323,22 +323,27 @@ def quant_edge_score(df, vix_val=None, options_data=None, use_quant=False):
         except Exception as e:
             log_warn("quant_edge_score use_quant path", e)
 
-    sc = {}; close = df["Close"].iloc[-1]
+    sc = {}
+    close = safe_float(safe_last(df["Close"]), 0.0)
     # 1. TREND (equal 20% weight in composite; important for premium sellers)
     if len(df) >= 200:
-        e20, e50, e200 = [TA.ema(df["Close"], p).iloc[-1] for p in (20, 50, 200)]
+        e20, e50, e200 = [
+            safe_float(safe_last(TA.ema(df["Close"], p)), 0.0) for p in (20, 50, 200)
+        ]
         sc["trend"] = 95 if close > e20 > e50 > e200 else (75 if close > e50 > e200 else (55 if close > e200 else 25))
     else: sc["trend"] = 60
     # 2. MOMENTUM (single indicator: RSI — avoids collinearity with MACD/CCI)
-    rv = TA.rsi(df["Close"]).iloc[-1]
+    rv = safe_float(safe_last(TA.rsi(df["Close"])), 0.0)
     sc["momentum"] = 85 if 40 <= rv <= 60 else (65 if 30 <= rv <= 70 else 25)
     # 3. VOLUME (OBV — measures accumulation/distribution, orthogonal to price momentum)
     obv_s = TA.obv(df)
-    sc["volume"] = (85 if obv_s.iloc[-1] > obv_s.iloc[-20] else 35) if len(obv_s) >= 20 else 50
+    sc["volume"] = (
+        85 if safe_float(safe_last(obv_s), 0.0) > obv_s.iloc[-20] else 35
+    ) if len(obv_s) >= 20 else 50
     # 4. VOLATILITY (ATR regime + VIX — for premium sellers, higher = better)
     if len(df) >= 20:
         atr_s = TA.atr(df)
-        cur_atr = atr_s.iloc[-1]
+        cur_atr = safe_float(safe_last(atr_s), 0.0)
         avg_atr = atr_s.iloc[-60:].mean() if len(df) >= 60 else cur_atr
         atr_ratio = cur_atr / avg_atr if avg_atr > 0 else 1
         vol_score = min(100, max(20, 50 + (atr_ratio - 1) * 30))
@@ -450,9 +455,9 @@ def weekly_trend_label(df_wk):
         if len(close) < 26:
             return "UNKNOWN", "#64748b"
         ml, sl, _ = TA.macd(close, 12, 26, 9)
-        e20 = TA.ema(close, 20).iloc[-1]
-        above_ema = close.iloc[-1] > e20
-        macd_bull = ml.iloc[-1] > sl.iloc[-1]
+        e20 = safe_float(safe_last(TA.ema(close, 20)), 0.0)
+        above_ema = safe_float(safe_last(close), 0.0) > e20
+        macd_bull = safe_float(safe_last(ml), 0.0) > safe_float(safe_last(sl), 0.0)
         if above_ema and macd_bull:
             return "BULLISH", "#10b981"
         if not above_ema and not macd_bull:
@@ -473,7 +478,7 @@ def calc_gold_zone(df, df_wk=None, gamma_flip_price=None):
     Nearest HVN within 2% of spot is fused as a primary anchor alongside POC/Fib.
     ``df_wk`` is accepted for API compatibility; SMA 200 replaces weekly S/R in the blend.
     When ``gamma_flip_price`` is within 5% of spot, it is fused as **Gamma Flip** support."""
-    price = df["Close"].iloc[-1]
+    price = safe_float(safe_last(df["Close"]), 0.0)
     components = {}
 
     try:
@@ -494,7 +499,7 @@ def calc_gold_zone(df, df_wk=None, gamma_flip_price=None):
         components["Fib 61.8%"] = hi - (hi - lo) * 0.618
 
     if len(df) >= 200:
-        components["SMA 200"] = float(df["Close"].rolling(200).mean().iloc[-1])
+        components["SMA 200"] = safe_float(safe_last(df["Close"].rolling(200).mean()), 0.0)
 
     gann = TA.gann_sq9(price)
     if gann:
@@ -525,32 +530,37 @@ def _calc_confluence_points_core(df, df_wk=None, vix_val=None, gold_zone_price=N
     Pass ``gold_zone_price`` when the caller already computed Gold Zone on the same frame to avoid duplicate work."""
     score = 0
     breakdown = {}
-    price = df["Close"].iloc[-1]
+    price = safe_float(safe_last(df["Close"]), 0.0)
 
     st_l, st_d = TA.supertrend(df)
-    bull = st_d.iloc[-1] == 1
+    bull = safe_float(safe_last(st_d), 0.0) == 1
     pts = 2 if bull else 0
     score += pts
     breakdown["Supertrend"] = {"pts": pts, "max": 2, "detail": "Bullish" if bull else "Bearish"}
 
     _, _, sa, sb, _ = TA.ichimoku(df)
-    above_cloud = (not pd.isna(sa.iloc[-1]) and not pd.isna(sb.iloc[-1])
-                   and price > max(sa.iloc[-1], sb.iloc[-1]))
+    sa_last = safe_last(sa, np.nan)
+    sb_last = safe_last(sb, np.nan)
+    above_cloud = (
+        not pd.isna(sa_last)
+        and not pd.isna(sb_last)
+        and price > max(float(sa_last), float(sb_last))
+    )
     pts = 2 if above_cloud else 0
     score += pts
     breakdown["Ichimoku"] = {"pts": pts, "max": 2, "detail": "Above Cloud" if above_cloud else "In/Below Cloud"}
 
     adx_v, dip, din = TA.adx(df)
-    adx_val = adx_v.iloc[-1] if not pd.isna(adx_v.iloc[-1]) else 0
-    dip_val = dip.iloc[-1] if not pd.isna(dip.iloc[-1]) else 0
-    din_val = din.iloc[-1] if not pd.isna(din.iloc[-1]) else 0
+    adx_val = safe_float(safe_last(adx_v), 0.0)
+    dip_val = safe_float(safe_last(dip), 0.0)
+    din_val = safe_float(safe_last(din), 0.0)
     adx_bull = adx_val > 25 and dip_val > din_val
     pts = 1 if adx_bull else 0
     score += pts
     breakdown["ADX DI"] = {"pts": pts, "max": 1, "detail": f"ADX {adx_val:.0f}, plus DI leading minus DI" if adx_bull else f"ADX {adx_val:.0f}"}
 
     obv_s = TA.obv(df)
-    obv_up = obv_s.iloc[-1] > obv_s.iloc[-20] if len(obv_s) >= 20 else False
+    obv_up = safe_float(safe_last(obv_s), 0.0) > obv_s.iloc[-20] if len(obv_s) >= 20 else False
     pts = 1 if obv_up else 0
     score += pts
     breakdown["OBV"] = {"pts": pts, "max": 1, "detail": "Accumulation" if obv_up else "Distribution"}
@@ -595,7 +605,7 @@ def _blue_diamond_volume_gate(sub):
     """Blue Diamond participation: last bar volume at or above 90% of the 20-day volume SMA."""
     if len(sub) < 20 or "Volume" not in sub.columns:
         return False
-    vol = float(sub["Volume"].iloc[-1])
+    vol = safe_float(safe_last(sub["Volume"]), 0.0)
     vma = float(sub["Volume"].iloc[-20:].mean())
     if vma <= 0:
         return False
@@ -610,11 +620,11 @@ def _blue_diamond_institutional_ok(sub):
         return False
     if not _blue_diamond_volume_gate(sub):
         return False
-    vol = float(sub["Volume"].iloc[-1])
+    vol = safe_float(safe_last(sub["Volume"]), 0.0)
     vma = float(sub["Volume"].iloc[-20:].mean())
 
     atr = TA.atr(sub)
-    ai = float(atr.iloc[-1])
+    ai = safe_float(safe_last(atr), 0.0)
     if pd.isna(ai) or ai <= 0:
         return True
     win = min(252, len(atr))
@@ -645,7 +655,7 @@ def optimal_pyramid_size(df, capital=10000.0, target_vol=0.15):
     """
     if len(df) < 20:
         return 0
-    price = float(df["Close"].iloc[-1])
+    price = safe_float(safe_last(df["Close"]), 0.0)
     if price <= 0:
         return 0
     # 20-day annualized realized volatility
@@ -664,7 +674,7 @@ def quant_trailing_exit(df, atr_multiplier=3.0):
     Formula: E_t = Max(High_22) - (k * ATR_22)
     """
     if len(df) < 22:
-        return float(df["Close"].iloc[-1]) * 0.95
+        return safe_float(safe_last(df["Close"]), 0.0) * 0.95
     high_22 = float(df["High"].tail(22).max())
 
     # Calculate simple ATR
@@ -789,7 +799,12 @@ def detect_diamonds(
                 if is_blue_diamond:
                     size_suggestion = optimal_pyramid_size(sub)
                     quant_exit_price = quant_trailing_exit(sub)
-            except Exception:
+            except Exception as _e:
+                log_warn(
+                    "blue diamond quant sizing / trailing exit",
+                    _e,
+                    ticker=str(ticker_symbol or ""),
+                )
                 size_suggestion = 0
                 quant_exit_price = 0.0
 
@@ -798,13 +813,14 @@ def detect_diamonds(
             try:
                 _dp = TA.get_dark_pool_proxy(sub)
                 if _dp is not None and not _dp.empty and "volume_z_score" in _dp.columns:
-                    zlv = float(_dp["volume_z_score"].iloc[-1])
+                    zlv = safe_float(safe_last(_dp["volume_z_score"]), 0.0)
                     if np.isfinite(zlv):
                         if zlv > 3.0:
                             whale_bonus = 2
                         elif zlv > 2.0:
                             whale_bonus = 1
-            except Exception:
+            except Exception as _e:
+                log_warn("blue diamond dark pool z-score", _e, ticker=str(ticker_symbol or ""))
                 whale_bonus = 0
             magnet = 0
             try:
@@ -814,12 +830,14 @@ def detect_diamonds(
                     if not vp_sub.empty
                     else None
                 )
-            except Exception:
+            except Exception as _e:
+                log_warn("blue diamond volume profile POC", _e, ticker=str(ticker_symbol or ""))
                 poc_sub = None
             try:
                 nodes_sub = TA.get_volume_nodes(sub)
                 hvn_p, _ = nearest_hvn_within_pct(pi, nodes_sub, 0.02)
-            except Exception:
+            except Exception as _e:
+                log_warn("blue diamond volume nodes HVN", _e, ticker=str(ticker_symbol or ""))
                 hvn_p = None
             if poc_sub is not None and hvn_p is not None:
                 lo, hi = min(poc_sub, hvn_p), max(poc_sub, hvn_p)
@@ -854,7 +872,8 @@ def detect_diamonds(
                                     if np.isfinite(rho) and rho > 0.75:
                                         cluster_penalty = -2
                                         break
-            except Exception:
+            except Exception as _e:
+                log_warn("blue diamond cluster correlation penalty", _e, ticker=str(ticker_symbol or ""))
                 cluster_penalty = 0
             diamonds.append({
                 "date": df.index[i],
@@ -992,7 +1011,7 @@ def evaluate_asymmetric_convexity_sieve(
             lb = min(bbw_lookback, len(bbw.dropna()))
             if lb >= 30:
                 tail = bbw.dropna().tail(lb)
-                bbw_pctile = float(tail.rank(pct=True).iloc[-1])
+                bbw_pctile = safe_float(safe_last(tail.rank(pct=True)), 0.0)
                 gates["bbw"]["pctile"] = bbw_pctile
                 if bbw_pctile <= max_bbw_percentile:
                     gates["bbw"]["ok"] = True
@@ -1007,7 +1026,7 @@ def evaluate_asymmetric_convexity_sieve(
             vm = float(tail_v.mean())
             vs = float(tail_v.std(ddof=1))
             if vs > 0 and np.isfinite(vs):
-                vol_z = float((vol.iloc[-1] - vm) / vs)
+                vol_z = float((safe_float(safe_last(vol), 0.0) - vm) / vs)
                 gates["vol_z"]["z"] = vol_z
                 if vol_z >= min_volume_z:
                     gates["vol_z"]["ok"] = True
@@ -1045,7 +1064,7 @@ def scan_single_ticker(
             return None
         if df_wk is None:
             df_wk = fetch_stock(tkr, "2y", "1wk")
-        price = df["Close"].iloc[-1]
+        price = safe_float(safe_last(df["Close"]), 0.0)
         prev = df["Close"].iloc[-2] if len(df) >= 2 else price
         chg_pct = (price / prev - 1) * 100
 
@@ -1214,7 +1233,7 @@ def scan_single_ticker(
             whale_ok = (
                 _dp_s is not None
                 and not _dp_s.empty
-                and bool(_dp_s["dark_pool_alert"].iloc[-1])
+                and bool(safe_last(_dp_s["dark_pool_alert"], False))
             )
         except Exception as e:
             log_warn("scan_single_ticker dark_pool_proxy", e, ticker=str(tkr))
@@ -1295,7 +1314,7 @@ def scan_single_ticker(
             "reference_prem_100": float(prem_scan),
             "pre_diamond_status": pre_diamond,
             "stock_stop_price": (
-                round(price - (1.5 * df["ATR"].iloc[-1]), 2)
+                round(price - (1.5 * safe_float(safe_last(df["ATR"]), 0.0)), 2)
                 if "ATR" in df.columns and not df.empty
                 else round(price * 0.95, 2)
             ),
@@ -1304,7 +1323,8 @@ def scan_single_ticker(
             "fundamental_sieve": _fund_sieve,
             "fcf_yield_pct": (_fund_sieve or {}).get("fcf_yield_pct"),
         }
-    except Exception:
+    except Exception as _e:
+        log_warn("scan_single_ticker", _e, ticker=str(tkr))
         return None
 
 
@@ -1330,22 +1350,24 @@ class Opt:
             if confluence_series is None or len(confluence_series) < 3 or df is None or df.empty or 'Close' not in df.columns:
                 return {"is_pre_diamond": False, "signal_strength": "—"}
 
-            current_score = confluence_series.iloc[-1]
+            current_score = safe_float(safe_last(confluence_series), 0.0)
             prev_score = confluence_series.iloc[-2]
-            close = df['Close'].iloc[-1]
+            close = safe_float(safe_last(df['Close']), 0.0)
 
             # Volatility Squeeze (coil)
             squeeze = True
             if 'ATR' in df.columns and len(df) >= 60:
-                squeeze = (df['ATR'].tail(60).rank(pct=True).iloc[-1] <= 0.25)
+                squeeze = (safe_float(safe_last(df['ATR'].tail(60).rank(pct=True)), 1.0) <= 0.25)
             elif 'BBW' in df.columns and len(df) >= 60:
-                squeeze = (df['BBW'].tail(60).rank(pct=True).iloc[-1] <= 0.25)
+                squeeze = (safe_float(safe_last(df['BBW'].tail(60).rank(pct=True)), 1.0) <= 0.25)
 
             # Relative Strength vs SPY (3-day return)
             rs_strong = True
             if spy_df is not None and not spy_df.empty and len(df) >= 3 and len(spy_df) >= 3:
                 ticker_3d = (close / df['Close'].iloc[-3]) - 1
-                spy_3d = (spy_df['Close'].iloc[-1] / spy_df['Close'].iloc[-3]) - 1
+                spy_3d = (
+                    safe_float(safe_last(spy_df['Close']), 0.0) / float(spy_df['Close'].iloc[-3])
+                ) - 1
                 rs_strong = ticker_3d > spy_3d
 
             # Volume ramping (accumulation)
@@ -1381,7 +1403,8 @@ class Opt:
                     "support_proximity": round(support_dist, 1)
                 }
             return {"is_pre_diamond": False, "signal_strength": "—"}
-        except Exception:
+        except Exception as _e:
+            log_warn("Opt.detect_pre_diamond", _e)
             return {"is_pre_diamond": False, "signal_strength": "—"}
 
     @staticmethod
@@ -1451,7 +1474,8 @@ class Opt:
                 * liq
             )
             return merged.groupby("strike", sort=True)["GEX"].sum()
-        except Exception:
+        except Exception as _e:
+            log_warn("Opt.calc_gamma_exposure", _e)
             return pd.Series(dtype=float)
 
     @staticmethod
@@ -1485,7 +1509,8 @@ class Opt:
                     t = -c0 / (c1 - c0)
                     return float(k0 + t * (k1 - k0))
             return None
-        except Exception:
+        except Exception as _e:
+            log_warn("Opt.find_gamma_flip", _e)
             return None
 
     @staticmethod
@@ -1537,7 +1562,8 @@ class Opt:
             w = float(np.clip(tg / 2.0, 0.42, 0.97))
             pin = w * wall + (1.0 - w) * S
             return float(pin) if np.isfinite(pin) else None
-        except Exception:
+        except Exception as _e:
+            log_warn("Opt.predict_opex_pin", _e)
             return None
 
     @staticmethod
@@ -1556,11 +1582,13 @@ class Opt:
                 v = float(em.reshape(-1)[0])
                 return v if np.isfinite(v) else 0.0
             return em
-        except Exception:
+        except Exception as _e:
+            log_warn("Opt.calc_expected_move outer", _e)
             try:
                 sz = np.asarray(price).size
                 return 0.0 if sz <= 1 else np.zeros_like(np.asarray(price, dtype=float))
-            except Exception:
+            except Exception as _e2:
+                log_warn("Opt.calc_expected_move fallback", _e2)
                 return 0.0
 
     @staticmethod
@@ -1583,7 +1611,8 @@ class Opt:
             info = fetch_info(sym) or {}
             s = info.get("sector") or info.get("industry") or "Unknown"
             cache[sym] = str(s).strip() or "Unknown"
-        except Exception:
+        except Exception as _e:
+            log_warn("Opt._ticker_sector_cached fetch_info", _e, ticker=sym)
             cache[sym] = "Unknown"
         return cache[sym]
 
@@ -1637,7 +1666,8 @@ class Opt:
                 continue
             try:
                 mx = max(mx, abs(float(corr_df.loc[s, pu])))
-            except Exception:
+            except Exception as _e:
+                log_warn("Opt._max_abs_corr_vs_peers cell", _e, ticker=s)
                 continue
         return mx
 
@@ -1733,7 +1763,8 @@ class Opt:
             if not np.isfinite(avg_corr):
                 return 1.0
             return float(max(0.35, 1.0 - avg_corr))
-        except Exception:
+        except Exception as _e:
+            log_warn("Opt._simple_corr_haircut", _e, ticker=str(symbol))
             return 1.0
 
     @staticmethod
@@ -1751,7 +1782,8 @@ class Opt:
     def _safe_mc_pop(**kwargs):
         try:
             return float(MonteCarloEngine.calc_pop(**kwargs))
-        except Exception:
+        except Exception as _e:
+            log_warn("Opt._safe_mc_pop", _e)
             return 50.0
 
     @staticmethod
@@ -1976,7 +2008,8 @@ class PortfolioRisk:
             if mat is None or getattr(mat, "empty", True):
                 return None
             return mat
-        except Exception:
+        except Exception as _e:
+            log_warn("PortfolioRisk.build_correlation_matrix", _e)
             return None
 
     @staticmethod
@@ -2154,7 +2187,8 @@ def build_chain_mc_dataframe(price, calls_df, puts_df, dte, rfr=0.045):
                         "MC PoP %": round(float(mc), 1),
                     }
                 )
-            except Exception:
+            except Exception as _e:
+                log_warn("build_chain_mc_dataframe strike row", _e)
                 continue
     out = pd.DataFrame(rows)
     if out.empty:
