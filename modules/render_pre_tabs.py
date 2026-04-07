@@ -326,11 +326,15 @@ def render_mission_control_hud(cfg_tx: ConfigTransaction, cfg: dict, saved_scann
             with col_cap:
                 equity_capital = 10000
                 if scanner_mode == "🎯 Equity Radar":
+                    if "sb_equity_capital" not in st.session_state:
+                        st.session_state["sb_equity_capital"] = int(
+                            cfg.get("equity_capital", 10000)
+                        )
                     equity_capital = st.select_slider(
                         "Capital Base per Trade ($)",
                         options=[5000, 10000, 25000, 50000, 100000],
-                        value=10000,
-                        help="Scales Suggested Shares dynamically.",
+                        key="sb_equity_capital",
+                        help="Scales Suggested Shares dynamically. Remembered across sessions.",
                     )
 
             st.session_state["_cf_scanner_mode"] = scanner_mode
@@ -486,6 +490,7 @@ def render_tape_open_editor_flush(
         "strat_focus": st.session_state.get("sb_strat_radio", DEFAULT_CONFIG["strat_focus"]),
         "strat_horizon": st.session_state.get("sb_horizon_radio", DEFAULT_CONFIG["strat_horizon"]),
         "mini_mode": bool(st.session_state.get("sb_mini_mode", cfg_tx.current.get("mini_mode", False))),
+        "equity_capital": int(st.session_state.get("sb_equity_capital", 10000)),
         "use_quant_models": bool(
             st.session_state.get(
                 "sb_use_quant", cfg_tx.current.get("use_quant_models", DEFAULT_CONFIG["use_quant_models"])
@@ -497,6 +502,7 @@ def render_tape_open_editor_flush(
             strat_focus=prefs_cfg["strat_focus"],
             strat_horizon=prefs_cfg["strat_horizon"],
             mini_mode=prefs_cfg["mini_mode"],
+            equity_capital=prefs_cfg["equity_capital"],
             use_quant_models=prefs_cfg["use_quant_models"],
         )
 

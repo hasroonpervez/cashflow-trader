@@ -17,6 +17,7 @@ DEFAULT_CONFIG = {
     ),
     "scanner_sort_mode": "Custom watchlist order",
     "scanner_mode": "📈 Options Yield",
+    "equity_capital": 10000,
     "auto_scan_interval": 300,
     "strat_focus": "Hybrid",
     "strat_horizon": "30 DTE",
