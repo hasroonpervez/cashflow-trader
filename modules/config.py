@@ -13,8 +13,7 @@ CONFIG_PATH = Path(__file__).parent.parent / "config.json"
 
 DEFAULT_CONFIG = {
     "watchlist": (
-        "PLTR,BMNR,HIMS,RIVN,TSLA,QS,LCID,NIO,OPEN,ZETA,CIFR,KEEL,RXRX,ABCL,IBRX,"
-        "DNA,ABSI,SRFM,BYND,SOFI,SPY,QQQ,BTC,ETH"
+        "PLTR,HIMS,TSLA,SOFI,CIFR,KEEL,SPY,QQQ"
     ),
     "scanner_sort_mode": "Custom watchlist order",
     "scanner_mode": "📈 Options Yield",
@@ -32,7 +31,7 @@ DEFAULT_CONFIG = {
     "overlay_gold": True,
     "use_quant_models": True,
     # When true, `build_context` skips Yahoo headline + next-earnings fetch; news tab uses `@st.fragment`.
-    "defer_headlines_earnings": False,
+    "defer_headlines_earnings": True,
     # When true, skip options-chain hydration on the first session render to improve Cloud cold boot.
     "defer_options_first_pass": True,
 }
