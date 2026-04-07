@@ -503,6 +503,20 @@ background:rgba(15,23,42,0.9);font-size:0.82rem;color:#cbd5e1">
 <strong style="color:{col};font-family:JetBrains Mono,monospace">{pct}</strong>/100 consensus · {tk} — <span style="color:#e2e8f0">{lab}</span>{_abs}</div>"""
 
 
+def _recent_resistance_high(df: pd.DataFrame, bars: int = 20) -> Optional[float]:
+    """Tactical resistance proxy: max High over last ``bars`` sessions (OHLCV desk)."""
+    if df is None or getattr(df, "empty", True) or "High" not in df.columns:
+        return None
+    if len(df) < 2:
+        return None
+    tail = df["High"].tail(min(bars, len(df)))
+    tail = pd.to_numeric(tail, errors="coerce").dropna()
+    if tail.empty:
+        return None
+    v = float(tail.max())
+    return v if np.isfinite(v) else None
+
+
 def traders_note_markdown(ticker: str, ctx: Any, df: pd.DataFrame, c: dict) -> str:
     """Plain-language paragraph (markdown); deterministic, no LLM."""
     tk = str(ticker).upper()
@@ -516,15 +530,40 @@ def traders_note_markdown(ticker: str, ctx: Any, df: pd.DataFrame, c: dict) -> s
     atr = float(c.get("atr_last") or 0)
     stop_px = px - 1.5 * atr if px > 0 and atr > 0 else None
     squeeze = bbwp is not None and bbwp <= 0.15
+    perfect_storm = bool(c.get("coil_active") and c.get("absorption") and c.get("market_leader"))
     parts = [
         f"**Trader's note — {tk}** is trading near **${px:,.2f}** ({chg:+.2f}% vs prior close). "
         f"Daily structure reads **{st}**; weekly bias **{wk}**. Quant Edge sits near **{qs:.0f}/100**."
     ]
-    if squeeze:
+    if perfect_storm:
+        rsv = c.get("rs_spy_ratio")
+        vzv = c.get("volume_z")
+        ad = c.get("absorption_detail") or {}
+        rp = ad.get("last_return_pct")
+        thr = ad.get("flat_threshold_pct")
+        rs_s = f"{float(rsv):.2f}" if rsv is not None and np.isfinite(float(rsv)) else "—"
+        vz_s = f"{float(vzv):+.1f}" if vzv is not None and np.isfinite(float(vzv)) else "—"
+        coil_s = f"≤{_COIL_BBW_PCTILE_MAX:.0%} BBW tile (COIL)"
+        abs_s = (
+            f"quiet close **{float(rp):+.2f}%** vs ≤**{float(thr):.2f}%** band"
+            if rp is not None and thr is not None and np.isfinite(rp) and np.isfinite(thr)
+            else "muted close vs volume (Iceberg)"
+        )
+        rh = _recent_resistance_high(df, 20)
+        res_s = f"**${rh:,.2f}** (20d high)" if rh is not None and np.isfinite(rh) else "**the nearest structural high**"
+        parts.append(
+            f"**Unicorn alert — high-conviction stack:** **{tk}** is a **market leader** "
+            f"(**RS ≈ {rs_s}** vs SPY on the ~90d batch; **volume Z {vz_s}** whale) **and** shows **institutional absorption** "
+            f"(Iceberg: {abs_s}). **COIL** is live (**{coil_s}**) — often **compressed energy** while size trades "
+            "without marking price. **If price clears** "
+            f"{res_s}, the tape is set up for a **sharp resolution**; it is **not** a promise of direction — "
+            "confirm with your levels and **size** using the desk **conviction** tier."
+        )
+    elif squeeze:
         parts.append("Price is in a **tight Bollinger squeeze** (potential energy building).")
     elif bbwp is not None and bbwp >= 0.85:
         parts.append("Bollinger bandwidth is **wide** (realized range expanded).")
-    if c.get("market_leader"):
+    if not perfect_storm and c.get("market_leader"):
         rsv = c.get("rs_spy_ratio")
         vzv = c.get("volume_z")
         if rsv is not None and vzv is not None and np.isfinite(float(rsv)) and np.isfinite(float(vzv)):
@@ -536,7 +575,7 @@ def traders_note_markdown(ticker: str, ctx: Any, df: pd.DataFrame, c: dict) -> s
             parts.append(
                 "**Market leader:** RS outperformance vs SPY on the batch benchmark plus whale volume — see momentum row."
             )
-    if c.get("absorption"):
+    if not perfect_storm and c.get("absorption"):
         ad = c.get("absorption_detail") or {}
         rp = ad.get("last_return_pct")
         thr = ad.get("flat_threshold_pct")
@@ -551,7 +590,7 @@ def traders_note_markdown(ticker: str, ctx: Any, df: pd.DataFrame, c: dict) -> s
             parts.append(
                 "**Whale trap / absorption:** extreme volume with a muted daily close — watch for a volatility release."
             )
-    elif vz is not None:
+    elif not perfect_storm and vz is not None:
         if vz >= 4.0:
             parts.append(
                 f"Today's volume is roughly **{vz:.1f}σ** above its recent norm — watch for **institutional footprint**."

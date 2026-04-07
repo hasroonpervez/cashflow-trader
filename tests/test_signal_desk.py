@@ -10,6 +10,7 @@ from modules.signal_desk import (
     institutional_heatmap_ribbon_html,
     last_bar_volume_zscore,
     suggested_shares_atr_risk,
+    traders_note_markdown,
     vwap_distance_stats,
     whale_session_x_for_chart,
 )
@@ -171,6 +172,37 @@ def test_market_leader_when_rs_and_whale_volume():
     assert c["rs_spy_ratio"] == 1.08
     html = institutional_heatmap_ribbon_html(c)
     assert "MARKET LEADER" in html
+
+
+def test_traders_note_unicorn_perfect_storm():
+    idx = pd.date_range("2024-01-01", periods=100, freq="B")
+    df = pd.DataFrame(
+        {
+            "High": np.linspace(100, 118, 100),
+            "Low": np.linspace(99, 117, 100),
+            "Open": np.linspace(99.5, 117.5, 100),
+            "Close": np.linspace(100, 118, 100),
+            "Volume": np.full(100, 1_000_000),
+        },
+        index=idx,
+    )
+    ctx = SimpleNamespace(price=118.0, chg_pct=0.4, qs=62.0, struct="BULLISH", wk_label="BULLISH")
+    c = {
+        "coil_active": True,
+        "absorption": True,
+        "market_leader": True,
+        "rs_spy_ratio": 1.2,
+        "volume_z": 4.6,
+        "absorption_detail": {"last_return_pct": 0.08, "flat_threshold_pct": 0.45, "volume_z": 4.6},
+        "bbw_pctile": 0.03,
+        "atr_last": 2.0,
+    }
+    md = traders_note_markdown("PLTR", ctx, df, c)
+    assert "Unicorn alert" in md
+    assert "market leader" in md
+    assert "Iceberg" in md
+    assert "COIL" in md
+    assert "20d high" in md
 
 
 def test_suggested_shares():
