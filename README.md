@@ -117,6 +117,7 @@ On Cloud, if the filesystem is **read-only**, use Secrets `watchlist` and expect
 cashflow-trader/
 ├── app.py                 # Entry: imports, CSS/nav, main() orchestration
 ├── config.json            # Defaults for watchlist & UI (optional on Cloud)
+├── manifest.json          # PWA install manifest
 ├── requirements.txt
 ├── requirements-dev.txt
 ├── .streamlit/config.toml # Theme

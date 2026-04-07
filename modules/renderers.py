@@ -2059,11 +2059,22 @@ def render_intel_tab(d: DeskLocals) -> None:
                     if _webhook and _do_alert:
                         import threading
 
+                        _eq_cap = float(_cfg_alerts_live.get("equity_capital", 10000) or 10000)
                         for r in _conviction:
+                            _supp = (r.get("pre_diamond_status") or {}).get("support_proximity")
+                            _supp_txt = (
+                                f"{float(_supp):.1f}%"
+                                if _supp is not None and np.isfinite(float(_supp))
+                                else "—"
+                            )
+                            _px = max(1e-9, float(r.get("price") or 0.0))
+                            _kelly = max(0.0, float(r.get("Adj. Kelly %") or 0.0))
+                            _sugg = int(max(0.0, (_eq_cap * (_kelly / 100.0)) / _px))
                             _msg = (
                                 f"💎 **CONVICTION ALERT** — **{r['ticker']}** @ ${float(r['price']):.2f}\n"
                                 f"Blue Diamond + 10x Score {int(r.get('10x Potential', 0) or 0)}/10\n"
                                 f"QE {float(r['qs']):.0f} · Confluence {int(r['cp_score'])} · {str(r.get('struct', ''))}\n"
+                                f"Support proximity: {_supp_txt} · Suggested shares: {_sugg}\n"
                                 f"Flow: {str(r.get('Flow / Bias', '—'))}"
                             )
                             threading.Thread(

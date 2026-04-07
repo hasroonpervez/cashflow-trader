@@ -161,6 +161,17 @@ def main():
 
     saved_scanner_mode = cfg.get("scanner_mode", "📈 Options Yield")
 
+    if not st.session_state.get("_cf_pwa_toast_shown"):
+        try:
+            _hdrs = st.context.headers
+            _h = _hdrs.to_dict() if _hdrs is not None else {}
+            _ua = str({str(k).lower(): v for k, v in _h.items()}.get("user-agent") or "").lower()
+            if any(tok in _ua for tok in ("iphone", "ipad", "ipod", "android", "mobile")):
+                st.toast("Tip: install CashFlow from your browser menu (Add to Home Screen).", icon="📲")
+        except Exception as e:
+            log_warn("pwa install toast hint", e)
+        st.session_state["_cf_pwa_toast_shown"] = True
+
     st.caption("Predictive Pinning, Bayesian News Nuance, & Shadow Liquidity Architecture.")
     render_watchlist_editor_fragment(cfg_tx)
     apply_auto_watchlist_to_cfg_tx(cfg_tx)
