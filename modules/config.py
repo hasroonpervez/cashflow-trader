@@ -13,7 +13,7 @@ CONFIG_PATH = Path(__file__).parent.parent / "config.json"
 
 DEFAULT_CONFIG = {
     "watchlist": (
-        "PLTR,HIMS,TSLA,SOFI,CIFR,KEEL,SPY,QQQ"
+        "PLTR,HIMS,TSLA,SOFI,RIVN,CIFR,SPY,QQQ"
     ),
     "scanner_sort_mode": "Custom watchlist order",
     "scanner_mode": "📈 Options Yield",

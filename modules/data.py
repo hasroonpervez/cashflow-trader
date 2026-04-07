@@ -759,7 +759,7 @@ def fetch_global_market_bundle(watch_syms: tuple, active_ticker: str) -> GlobalM
             universe,
             period="2y",
             interval="1d",
-            threads=False,
+            threads=True,
             progress=False,
             auto_adjust=True,
             session=_YAHOO_SESSION,

@@ -380,9 +380,47 @@ def render_tape_open_editor_flush(
     scanner_watchlist = hud.scanner_watchlist
     scanner_sort_mode = hud.scanner_sort_mode
 
-    _global_snap = fetch_global_market_bundle(tuple(watch_items), ticker)
+    _BUNDLE_WALL_TIMEOUT = 18
+    _cache_key = (tuple(watch_items), str(ticker).strip().upper())
+    _prev_snap = st.session_state.get("_cf_global_market_bundle")
+    _prev_key = st.session_state.get("_cf_global_market_key")
+    _global_snap = None
+    try:
+        from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FTE
+
+        with ThreadPoolExecutor(max_workers=1) as _tp:
+            _fut = _tp.submit(fetch_global_market_bundle, tuple(watch_items), ticker)
+            _global_snap = _fut.result(timeout=_BUNDLE_WALL_TIMEOUT)
+    except _FTE:
+        log_warn(
+            f"global bundle wall timeout ({_BUNDLE_WALL_TIMEOUT}s)",
+            TimeoutError("yf.download too slow for Cloud health check"),
+        )
+        _global_snap = _prev_snap if _prev_key == _cache_key else _prev_snap
+    except Exception as _e:
+        log_warn("global bundle fetch", _e)
+        _global_snap = _prev_snap
+
+    if _global_snap is None:
+        from modules.data import GlobalMarketSnapshot, DeskMarketSnapshot, _macro_defaults_tuple
+
+        _m0, _v0 = _macro_defaults_tuple()
+        _global_snap = GlobalMarketSnapshot(
+            DeskMarketSnapshot({s: None for s in watch_items}, _m0, _v0),
+            pd.DataFrame(),
+            None,
+            None,
+            None,
+            None,
+            tuple(watch_items),
+            tuple(watch_items[:20]),
+            {},
+            {},
+        )
+        st.toast("Yahoo data still loading — tape prices may be stale. Refresh in ~30s.", icon="⏳")
+
     st.session_state["_cf_global_market_bundle"] = _global_snap
-    st.session_state["_cf_global_market_key"] = (tuple(watch_items), str(ticker).strip().upper())
+    st.session_state["_cf_global_market_key"] = _cache_key
 
     if watch_items:
         st.markdown('<p class="cf-tape-title">Watchlist tape</p>', unsafe_allow_html=True)
