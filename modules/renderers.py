@@ -1409,6 +1409,7 @@ def render_intel_tab(d: DeskLocals) -> None:
     risk_closes_df = d.risk_closes_df
     simple_corr_mult = d.simple_corr_mult
     cm_cached = d.cm_cached
+    scanner_mode = st.session_state.get("_cf_scanner_mode", DEFAULT_CONFIG["scanner_mode"])
 
     #  SECTION 5 \u2014 PSYCHOLOGY & RISK MANAGEMENT
     # ══════════════════════════════════════════════════════════════════
