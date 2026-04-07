@@ -883,7 +883,8 @@ function cfFindMainDashTabButtons(){
   var lists=pd.querySelectorAll('[data-baseweb="tab-list"]');
   for(var i=0;i<lists.length;i++){
     var tabs=lists[i].querySelectorAll('[role="tab"]');
-    if(tabs.length!==3)continue;
+    /* v22: four main tabs (Setup, Cashflow, Risk/Intel, Sentinel Ledger). Older builds used three. */
+    if(tabs.length!==3&&tabs.length!==4)continue;
     var a=(tabs[0].textContent||'').trim();
     var b=(tabs[1].textContent||'').trim();
     if(a.indexOf('Setup')>=0&&b.indexOf('Cashflow')>=0)return tabs;
@@ -899,7 +900,8 @@ function cfClickMainDashTab(idx,cb,retries){
     return;
   }
   try{tabs[idx].click();}catch(e1){}
-  setTimeout(function(){if(cb)cb();},480);
+  /* Extra delay so Streamlit mounts tab panel before scroll (Cloud + 4-tab bar). */
+  setTimeout(function(){if(cb)cb();},620);
 }
 function cfOpenQuickReference(){
   var exps=pd.querySelectorAll('[data-testid="stExpander"]');
@@ -935,6 +937,13 @@ function cfOnStickyNavClick(ev){
   var href=a.getAttribute('href')||'';
   var id=href.slice(1);
   if(!id)return;
+  /* Execution + Charts live above st.tabs — scroll only, no tab switch. */
+  if(id==='execution'||id==='charts'){
+    ev.preventDefault();
+    ev.stopPropagation();
+    cfScrollToHashId(id);
+    return;
+  }
   var map={setup:0,'quant-dashboard':0,strategies:1,risk:2,scanner:2,news:2,guide:2};
   if(map[id]===undefined)return;
   ev.preventDefault();

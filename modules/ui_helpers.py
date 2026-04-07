@@ -976,7 +976,7 @@ def _fragment_technical_zone(
         _persist_overlay_prefs()
         return
 
-    st.markdown('<div id="charts" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
+    # Anchor id="charts" is emitted once in app.py before this fragment (avoids duplicate IDs in full mode).
     _section(
         "Technical Chart",
         f"{ticker} gets four dedicated panels: price, volume, RSI, and MACD. Zoom each one on its own. "
