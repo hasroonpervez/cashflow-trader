@@ -11,6 +11,7 @@ from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
+import streamlit as st
 
 from .ta import TA
 
@@ -21,15 +22,36 @@ _VWAP_Z_PRIOR_BARS = 20
 # BBW percentile at or below this = tight "coil" for ribbon + conviction (bottom ~5%).
 _COIL_BBW_PCTILE_MAX = 0.05
 
+_HURST_WINDOW = 100
 
-def desk_conviction_multiplier(*, coil_active: bool, absorption: bool, vwap_urgency: bool) -> tuple[float, str]:
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _cached_hurst_rs(symbol: str, closes_tuple: tuple) -> Optional[float]:
+    """1h memo of R/S Hurst on the last 100 closes (tuple hash = bar path)."""
+    if not closes_tuple or len(closes_tuple) < 60:
+        return None
+    arr = np.asarray(closes_tuple, dtype=float)
+    if arr.size < _HURST_WINDOW:
+        return None
+    return TA.calculate_hurst_exponent(arr, window=min(_HURST_WINDOW, arr.size))
+
+
+def desk_conviction_multiplier(
+    *,
+    coil_active: bool,
+    absorption: bool,
+    vwap_urgency: bool,
+    whale_sweep: bool = False,
+) -> tuple[float, str]:
     """
     Position-size conviction tier: 1.0 baseline, 1.25 COIL and/or ICEBERG, 1.5 SWEEP, 2.0 all three.
+    ``whale_sweep`` counts like VWAP urgency for the SWEEP tier.
     """
-    if coil_active and absorption and vwap_urgency:
+    sweep_gate = bool(vwap_urgency or whale_sweep)
+    if coil_active and absorption and sweep_gate:
         return 2.0, "Perfect desk: COIL · ICEBERG · SWEEP"
-    if vwap_urgency:
-        return 1.5, "SWEEP — VWAP urgency (volume + stretch)"
+    if sweep_gate:
+        return 1.5, "SWEEP — VWAP urgency and/or whale sweep (volume + ask-side proxy)"
     if coil_active or absorption:
         return 1.25, "COIL and/or ICEBERG (squeeze ≤5% BBW and/or absorption)"
     return 1.0, "Baseline (no elite microstructure gates)"
@@ -45,7 +67,10 @@ def institutional_heatmap_ribbon_html(c: dict) -> str:
         bbwp = c.get("bbw_pctile")
         coil = bool(bbwp is not None and float(bbwp) <= _COIL_BBW_PCTILE_MAX)
     ice = bool(c.get("absorption"))
-    sweep = bool(c.get("vwap_urgency"))
+    if "ribbon_sweep_active" in c:
+        sweep = bool(c.get("ribbon_sweep_active"))
+    else:
+        sweep = bool(c.get("vwap_urgency"))
     leader = bool(c.get("market_leader"))
 
     def seg(label: str, active: bool, active_bg: str, active_border: str, active_text: str) -> str:
@@ -86,8 +111,28 @@ font-size:0.62rem;font-weight:700;letter-spacing:0.12em;color:#64748b">{lab}</di
         "rgba(52,211,153,0.85)",
         "#ecfdf5",
     )
-    mult, why = desk_conviction_multiplier(coil_active=coil, absorption=ice, vwap_urgency=sweep)
+    mult, why = desk_conviction_multiplier(
+        coil_active=coil,
+        absorption=ice,
+        vwap_urgency=bool(c.get("vwap_urgency")),
+        whale_sweep=bool(c.get("whale_sweep")),
+    )
     sub = html_mod.escape(f"Conviction ×{mult:.2f} — {why}")
+    regime = str(c.get("hurst_regime_label") or "").strip()
+    mode = str(c.get("trading_mode_recommendation") or "").strip()
+    reg_line = ""
+    if regime or mode:
+        reg_line = (
+            f"<div style=\"margin-top:6px;font-size:0.72rem;color:#a5b4fc;font-weight:700;letter-spacing:0.08em\">"
+            f"REGIME · {html_mod.escape(regime or '—')}"
+            f"{(' · ' + html_mod.escape(mode)) if mode else ''}</div>"
+        )
+    dom_line = ""
+    if c.get("institutional_dominance"):
+        dom_line = (
+            "<div style=\"margin-top:6px;font-size:0.72rem;color:#fde047;font-weight:800;letter-spacing:0.1em\">"
+            "TOTAL INSTITUTIONAL DOMINANCE · SWEEP + ICEBERG</div>"
+        )
     lead_line = ""
     if leader:
         rs_d = c.get("rs_spy_ratio")
@@ -102,7 +147,7 @@ font-size:0.62rem;font-weight:700;letter-spacing:0.12em;color:#64748b">{lab}</di
 <div style="font-size:0.65rem;color:#94a3b8;font-weight:800;letter-spacing:0.16em;margin:0 0 8px 0">
 INSTITUTIONAL HEATMAP</div>
 <div style="display:flex;gap:8px;align-items:stretch;flex-wrap:wrap">{s1}{s2}{s3}{s4}</div>
-<div style="margin-top:8px;font-size:0.72rem;color:#94a3b8;line-height:1.45">{sub}</div>{lead_line}
+<div style="margin-top:8px;font-size:0.72rem;color:#94a3b8;line-height:1.45">{sub}</div>{reg_line}{dom_line}{lead_line}
 </div>"""
 
 
@@ -238,6 +283,59 @@ def daily_aggressor_proxy(df: pd.DataFrame, *, tail_bars: int = 3) -> dict:
     return out
 
 
+def detect_whale_sweep(
+    df: pd.DataFrame,
+    *,
+    vwap_detail: dict,
+    volume_z: Optional[float],
+    ofi_detail: dict,
+    absorption_active: bool,
+) -> dict:
+    """
+    Aggressive urgency proxy: last close **above** rolling VWAP, **volume Z > 4**, and
+    **daily aggressor proxy > 0.7** (buy-side pressure in range). If **absorption** is also
+    active, flags **TOTAL INSTITUTIONAL DOMINANCE** (sweep + iceberg).
+    """
+    out: dict = {"active": False, "dominance": False}
+    if df is None or getattr(df, "empty", True) or "Close" not in df.columns:
+        return out
+    rv = vwap_detail.get("rolling_vwap") if isinstance(vwap_detail, dict) else None
+    try:
+        last_c = float(pd.to_numeric(df["Close"], errors="coerce").iloc[-1])
+    except Exception:
+        return out
+    rvf = float(rv) if rv is not None and np.isfinite(float(rv)) else None
+    price_ok = rvf is not None and rvf > 0 and last_c > rvf
+    vz_ok = volume_z is not None and np.isfinite(float(volume_z)) and float(volume_z) > 4.0
+    op = ofi_detail.get("ofi_proxy") if isinstance(ofi_detail, dict) else None
+    agg_ok = op is not None and np.isfinite(float(op)) and float(op) > 0.7
+    out["active"] = bool(price_ok and vz_ok and agg_ok)
+    out["dominance"] = bool(out["active"] and absorption_active)
+    return out
+
+
+def ffd_stationarity_proxy(df: pd.DataFrame, *, d: float = 0.4, tail: int = 60) -> bool:
+    """True when FFD innovations are materially calmer than raw log returns (memory shaved)."""
+    if df is None or getattr(df, "empty", True) or "Close" not in df.columns or len(df) < 80:
+        return False
+    try:
+        close = pd.to_numeric(df["Close"], errors="coerce").dropna()
+        if len(close) < 80:
+            return False
+        fd = TA.apply_ffd(close, d=d)
+        dfd = fd.diff().dropna().tail(tail)
+        lr = np.log(close).replace([np.inf, -np.inf], np.nan).diff().dropna().tail(tail)
+        if len(dfd) < 25 or len(lr) < 25:
+            return False
+        sf = float(dfd.std(ddof=1))
+        sr = float(lr.std(ddof=1))
+        if not np.isfinite(sf) or not np.isfinite(sr) or sr < 1e-12:
+            return False
+        return bool(sf < sr * 0.92)
+    except Exception:
+        return False
+
+
 def blend_unified_probability(
     qs: float,
     conf_pct: float,
@@ -263,6 +361,11 @@ _BENTO_ACCENTS: dict[str, tuple[str, str, str]] = {
     "bearish": ("rgba(248,113,113,0.42)", "rgba(127,29,29,0.22)", "#fca5a5"),
     "warning": ("rgba(251,191,36,0.48)", "rgba(120,53,15,0.22)", "#fcd34d"),
     "elite": ("rgba(168,85,247,0.5)", "rgba(76,29,149,0.28)", "#ddd6fe"),
+    "sweep_gold": (
+        "rgba(234,179,8,0.72)",
+        "rgba(120,53,15,0.42)",
+        "#fde047",
+    ),
 }
 
 
@@ -273,7 +376,9 @@ def bento_accents_from_consensus(c: dict) -> dict:
     setup = "elite" if coil else ("warning" if bbwp is not None and float(bbwp) >= 0.85 else "neutral")
     rsf = c.get("rs_spy_ratio")
     mom = "neutral"
-    if c.get("market_leader"):
+    if c.get("whale_sweep"):
+        mom = "sweep_gold"
+    elif c.get("market_leader"):
         mom = "elite"
     elif c.get("vwap_urgency"):
         mom = "warning"
@@ -411,11 +516,19 @@ def _wk_score(label: str) -> float:
     return 50.0
 
 
-def compute_desk_consensus(ctx: Any, df: pd.DataFrame, *, rs_spy_ratio: Optional[float] = None) -> dict:
+def compute_desk_consensus(
+    ctx: Any,
+    df: pd.DataFrame,
+    *,
+    rs_spy_ratio: Optional[float] = None,
+    fundamental_sieve: Optional[dict] = None,
+) -> dict:
     """Return score 0–100, traffic-light band, UI hints, and bento strings.
 
     ``rs_spy_ratio``: optional **~90-session** growth-factor ratio vs SPY from the global close matrix
     (> 1 ⇒ outperformance). Combined with **volume Z > 4** → **market leader** ribbon.
+
+    ``fundamental_sieve``: optional output of ``data.evaluate_fundamental_sieve`` for narrative / GOD-tier logic.
     """
     qs = float(getattr(ctx, "qs", 0) or 0)
     qs = max(0.0, min(100.0, qs))
@@ -428,9 +541,7 @@ def compute_desk_consensus(ctx: Any, df: pd.DataFrame, *, rs_spy_ratio: Optional
     wk_s = _wk_score(str(getattr(ctx, "wk_label", "") or ""))
     macd_bull = bool(getattr(ctx, "macd_bull", False))
     obv_up = bool(getattr(ctx, "obv_up", True))
-    tape = 58.0 if macd_bull else 44.0
-    tape = tape + 6.0 if obv_up else -4.0
-    tape = max(0.0, min(100.0, tape))
+    rsi_v = float(getattr(ctx, "rsi_v", 50) or 50)
     vz = last_bar_volume_zscore(df)
     rs_f: Optional[float] = None
     if rs_spy_ratio is not None and np.isfinite(float(rs_spy_ratio)):
@@ -443,14 +554,62 @@ def compute_desk_consensus(ctx: Any, df: pd.DataFrame, *, rs_spy_ratio: Optional
     ofi_st = daily_aggressor_proxy(df)
     vwap_st = vwap_distance_stats(df)
     vwap_z = vwap_st.get("vwap_z")
+    bbwp = _bbw_last_pctile(df)
+    coil_active = bool(bbwp is not None and float(bbwp) <= _COIL_BBW_PCTILE_MAX)
+
+    sym_u = str(getattr(ctx, "ticker", "") or "").upper().strip()
+    hurst_h: Optional[float] = None
+    if sym_u and df is not None and "Close" in df.columns and len(df) >= _HURST_WINDOW:
+        tail = pd.to_numeric(df["Close"], errors="coerce").dropna().tail(_HURST_WINDOW)
+        if len(tail) >= _HURST_WINDOW:
+            tup = tuple(round(float(x), 6) for x in tail.tolist())
+            hurst_h = _cached_hurst_rs(sym_u, tup)
+
+    hurst_regime = "neutral"
+    hurst_regime_label = "Neutral / random-walk"
+    trading_mode = "Balanced"
+    tape = 58.0 if macd_bull else 44.0
+    tape = tape + 6.0 if obv_up else -4.0
+    tape = max(0.0, min(100.0, tape))
+    vol_w_rsi = 0.05
+    vol_w_flow = 1.0 - vol_w_rsi
+    if hurst_h is not None:
+        if hurst_h < 0.45:
+            hurst_regime = "mean_reverting"
+            hurst_regime_label = "Mean reverting"
+            trading_mode = "Options Yield"
+            tape = float(np.clip(40.0 + min(abs(rsi_v - 50.0), 40.0) * 1.35, 0.0, 100.0))
+            if bbwp is not None:
+                tape = float(min(100.0, tape + max(0.0, 0.22 - float(bbwp)) * 95.0))
+            vol_w_rsi = 0.09
+            vol_w_flow = 0.91
+        elif hurst_h > 0.55:
+            hurst_regime = "trending"
+            hurst_regime_label = "Trending"
+            trading_mode = "Equity Radar"
+            tape = 58.0 if macd_bull else 44.0
+            tape = tape + 6.0 if obv_up else -4.0
+            if rs_outperf:
+                tape = float(min(100.0, tape + 12.0))
+            tape = max(0.0, min(100.0, tape))
+            vol_w_rsi = 0.03
+            vol_w_flow = 0.97
+
+    rsi_bb_blend = float(np.clip(50.0 + (rsi_v - 50.0) * 1.1, 0.0, 100.0))
+    if bbwp is not None:
+        rsi_bb_blend = float(0.55 * rsi_bb_blend + 0.45 * float(np.clip(100.0 * (1.0 - bbwp), 0.0, 100.0)))
+
     if vz is None:
         vol_s = 50.0
     else:
-        vol_s = float(np.clip(50.0 + vz * 9.0, 0.0, 100.0))
+        vol_s = float(np.clip(50.0 + float(vz) * 9.0, 0.0, 100.0))
     if vwap_z is not None and np.isfinite(float(vwap_z)):
         vz_f = float(vwap_z)
         vwap_s = float(np.clip(50.0 + vz_f * 8.0, 0.0, 100.0))
-        vol_s = float(0.5 * vol_s + 0.5 * vwap_s)
+        vol_s = float(vol_w_flow * (0.5 * vol_s + 0.5 * vwap_s) + vol_w_rsi * rsi_bb_blend)
+    else:
+        vol_s = float(vol_w_flow * vol_s + vol_w_rsi * rsi_bb_blend)
+
     # Weights sum to 1.0
     score = (
         0.28 * qs
@@ -479,8 +638,6 @@ def compute_desk_consensus(ctx: Any, df: pd.DataFrame, *, rs_spy_ratio: Optional
         label = "Stronger alignment"
         color = "#34d399"
         ring_bg = "rgba(52,211,153,0.14)"
-    bbwp = _bbw_last_pctile(df)
-    coil_active = bool(bbwp is not None and float(bbwp) <= _COIL_BBW_PCTILE_MAX)
     setup_hint = "Volatility: "
     if bbwp is not None:
         if bbwp <= _COIL_BBW_PCTILE_MAX:
@@ -493,6 +650,37 @@ def compute_desk_consensus(ctx: Any, df: pd.DataFrame, *, rs_spy_ratio: Optional
             setup_hint += "Bollinger bandwidth **mid-range**."
     else:
         setup_hint += "Not enough history for a squeeze read."
+    if hurst_h is not None and np.isfinite(float(hurst_h)):
+        setup_hint += (
+            f" **Hurst** (100-bar R/S, 1h cache) **{float(hurst_h):.2f}** → **{hurst_regime_label}**; "
+            f"desk suggests **{trading_mode}**."
+        )
+
+    sweep_d = detect_whale_sweep(
+        df,
+        vwap_detail=vwap_st,
+        volume_z=vz,
+        ofi_detail=ofi_st,
+        absorption_active=bool(absorb.get("active")),
+    )
+    whale_sweep = bool(sweep_d.get("active"))
+    institutional_dominance = bool(sweep_d.get("dominance"))
+    ffd_ok = ffd_stationarity_proxy(df)
+    fund = fundamental_sieve if isinstance(fundamental_sieve, dict) else None
+    fundamental_fcf_strong = False
+    if fund:
+        fundamental_fcf_strong = bool(
+            bool(fund.get("ten_x_candidate"))
+            or float(fund.get("fcf_yield") or 0) > 0.10
+        )
+    god_tier_unicorn = bool(
+        ffd_ok
+        and hurst_h is not None
+        and float(hurst_h) > 0.55
+        and fundamental_fcf_strong
+        and whale_sweep
+    )
+
     mom_parts = [
         f"RSI ~{getattr(ctx, 'rsi_v', 0):.0f}",
         "MACD bull" if macd_bull else "MACD bearish cross risk",
@@ -525,6 +713,16 @@ def compute_desk_consensus(ctx: Any, df: pd.DataFrame, *, rs_spy_ratio: Optional
             )
         else:
             mom_parts.append("**Institutional absorption** (whale trap): extreme volume vs muted close")
+    if hurst_h is not None and np.isfinite(float(hurst_h)):
+        mom_parts.append(
+            f"Hurst **{float(hurst_h):.2f}** ({hurst_regime_label}) — flow blend tilts **RSI/Bollinger** vs **MACD/RS** by regime."
+        )
+    if whale_sweep:
+        mom_parts.append(
+            "**Whale sweep:** spot above rolling VWAP, volume Z >4, aggressor proxy >0.7 — urgency / ask-side pressure (proxy)."
+        )
+    if institutional_dominance:
+        mom_parts.append("**TOTAL INSTITUTIONAL DOMINANCE:** sweep plus **Iceberg absorption** simultaneously.")
     momentum_hint = " · ".join(mom_parts)
     gz = float(getattr(ctx, "gold_zone_price", 0) or 0)
     px = float(getattr(ctx, "price", 0) or 0)
@@ -544,10 +742,12 @@ def compute_desk_consensus(ctx: Any, df: pd.DataFrame, *, rs_spy_ratio: Optional
         and float(vz) >= 2.0
         and float(vwap_z) >= 2.0
     )
+    ribbon_sweep_active = bool(whale_sweep or vwap_urgency)
     conv_mult, conv_lbl = desk_conviction_multiplier(
         coil_active=coil_active,
         absorption=bool(absorb.get("active")),
         vwap_urgency=vwap_urgency,
+        whale_sweep=whale_sweep,
     )
     return {
         "score": score,
@@ -573,6 +773,17 @@ def compute_desk_consensus(ctx: Any, df: pd.DataFrame, *, rs_spy_ratio: Optional
         "market_leader": market_leader,
         "unified_probability": unified,
         "ofi_detail": ofi_st,
+        "hurst_exponent": hurst_h,
+        "hurst_regime": hurst_regime,
+        "hurst_regime_label": hurst_regime_label,
+        "trading_mode_recommendation": trading_mode,
+        "whale_sweep": whale_sweep,
+        "institutional_dominance": institutional_dominance,
+        "ribbon_sweep_active": ribbon_sweep_active,
+        "ffd_stationary_ok": ffd_ok,
+        "fundamental_sieve": fund,
+        "fundamental_fcf_strong": fundamental_fcf_strong,
+        "god_tier_unicorn": god_tier_unicorn,
     }
 
 
@@ -634,9 +845,18 @@ def consensus_compact_html(ticker: str, c: dict) -> str:
     _abs = ""
     if c.get("absorption"):
         _abs = " · <span style=\"color:#22d3ee;font-weight:700\">ABSORPTION</span>"
+    _sw = ""
+    if c.get("whale_sweep"):
+        _sw = " · <span style=\"color:#facc15;font-weight:800\">SWEEP</span>"
+    if c.get("institutional_dominance"):
+        _sw += " · <span style=\"color:#fde047;font-weight:800\">DOMINANCE</span>"
+    _rg = ""
+    hr = str(c.get("hurst_regime_label") or "").strip()
+    if hr:
+        _rg = f" · <span style=\"color:#a5b4fc;font-weight:700\">{html_mod.escape(hr[:24])}</span>"
     return f"""<div style="margin:0 0 10px 0;padding:8px 12px;border-radius:10px;border:1px solid rgba(148,163,184,0.2);
 background:rgba(15,23,42,0.9);font-size:0.82rem;color:#cbd5e1">
-<strong style="color:{col};font-family:JetBrains Mono,monospace">{pct}</strong>/100 consensus · {tk} — <span style="color:#e2e8f0">{lab}</span>{_abs}</div>"""
+<strong style="color:{col};font-family:JetBrains Mono,monospace">{pct}</strong>/100 consensus · {tk} — <span style="color:#e2e8f0">{lab}</span>{_abs}{_sw}{_rg}</div>"""
 
 
 def _recent_resistance_high(df: pd.DataFrame, bars: int = 20) -> Optional[float]:
@@ -653,8 +873,19 @@ def _recent_resistance_high(df: pd.DataFrame, bars: int = 20) -> Optional[float]
     return v if np.isfinite(v) else None
 
 
-def traders_note_markdown(ticker: str, ctx: Any, df: pd.DataFrame, c: dict) -> str:
-    """Plain-language paragraph (markdown); deterministic, no LLM."""
+def traders_note_markdown(
+    ticker: str,
+    ctx: Any,
+    df: pd.DataFrame,
+    c: dict,
+    *,
+    alpha_realization_pct: Optional[float] = None,
+    turbo_desk: bool = False,
+) -> str:
+    """Plain-language paragraph (markdown); deterministic, no LLM.
+
+    ``turbo_desk``: when True, return a **single** tight paragraph (Mission Control Turbo / mini).
+    """
     tk = str(ticker).upper()
     px = float(getattr(ctx, "price", 0) or 0)
     chg = float(getattr(ctx, "chg_pct", 0) or 0)
@@ -671,6 +902,36 @@ def traders_note_markdown(ticker: str, ctx: Any, df: pd.DataFrame, c: dict) -> s
         f"**Trader's note — {tk}** is trading near **${px:,.2f}** ({chg:+.2f}% vs prior close). "
         f"Daily structure reads **{st}**; weekly bias **{wk}**. Quant Edge sits near **{qs:.0f}/100**."
     ]
+    if turbo_desk:
+        return " ".join(parts)
+    if alpha_realization_pct is not None and np.isfinite(float(alpha_realization_pct)):
+        ar = float(alpha_realization_pct)
+        if ar >= 105.0:
+            parts.append(
+                f"**Alpha realization** (~**{ar:.0f}%** of **qs_at_entry** on tracked Sentinel legs): Quant Edge is **strengthening** vs when you booked the trade."
+            )
+        elif ar <= 92.0:
+            parts.append(
+                f"**Alpha realization** (~**{ar:.0f}%**): the live edge looks **soft vs entry** — signal may be **rotting**; revisit size and thesis."
+            )
+        else:
+            parts.append(
+                f"**Alpha realization** ~**{ar:.0f}%** vs **qs_at_entry** — roughly **in line** with the score at track time."
+            )
+    if c.get("god_tier_unicorn"):
+        hh = c.get("hurst_exponent")
+        hs = f"{float(hh):.2f}" if hh is not None and np.isfinite(float(hh)) else "—"
+        parts.append(
+            "**GOD TIER UNICORN — 10x sieve:** FFD shows **stationary memory** vs raw returns, Hurst is **trending**, **FCF / fundamental** gate is **on**, and a **whale sweep** is live — "
+            f"all four institutional filters aligned (Hurst **{hs}**). **Rare tape**; still not a forecast — manage **gap** and **headline** risk."
+        )
+    elif c.get("fundamental_fcf_strong") and isinstance(c.get("fundamental_sieve"), dict):
+        fs = c.get("fundamental_sieve") or {}
+        fy = fs.get("fcf_yield_pct")
+        fy_s = f"{float(fy):.2f}%" if fy is not None and np.isfinite(float(fy)) else "strong"
+        parts.append(
+            f"**Fundamental sieve (cash / EV):** FCF yield proxy **{fy_s}** with **efficiency** tilt — you are not only trading prints; see scanner **fundamental_sieve** for detail."
+        )
     if perfect_storm:
         rsv = c.get("rs_spy_ratio")
         vzv = c.get("volume_z")
@@ -763,12 +1024,15 @@ def traders_note_markdown(ticker: str, ctx: Any, df: pd.DataFrame, c: dict) -> s
 def bento_box_html(title: str, question: str, body_md: str, *, accent: str = "neutral") -> str:
     """One bento cell; body_md is short HTML-safe text (we escape). ``accent`` tints border/title from desk state."""
     border, bg, title_c = _BENTO_ACCENTS.get(accent, _BENTO_ACCENTS["neutral"])
+    sh = "box-shadow:0 4px 18px rgba(0,0,0,0.2);"
+    if accent == "sweep_gold":
+        sh = "box-shadow:0 0 28px rgba(250,204,21,0.48),0 6px 24px rgba(0,0,0,0.35);"
     t = html_mod.escape(title)
     q = html_mod.escape(question)
     b = html_mod.escape(body_md)
     b = b.replace("\n", "<br/>")
     return f"""<div style="border-radius:12px;border:1px solid {border};
-background:{bg};padding:12px 14px;min-height:120px;box-shadow:0 4px 18px rgba(0,0,0,0.2)">
+background:{bg};padding:12px 14px;min-height:120px;{sh}">
 <div style="font-size:0.65rem;color:{title_c};font-weight:800;letter-spacing:0.12em;margin-bottom:4px">{t}</div>
 <div style="font-size:0.95rem;color:#f1f5f9;font-weight:600;margin-bottom:8px;line-height:1.35">{q}</div>
 <div style="font-size:0.8rem;color:#cbd5e1;line-height:1.5">{b}</div>

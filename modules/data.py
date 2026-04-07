@@ -282,6 +282,124 @@ def _alphavantage_api_key() -> Optional[str]:
         return None
 
 
+def _coerce_finite_float(x) -> Optional[float]:
+    if x is None:
+        return None
+    try:
+        v = float(x)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(v):
+        return None
+    return v
+
+
+def _alphavantage_query(params: dict) -> Optional[dict]:
+    key = _alphavantage_api_key()
+    if not key:
+        return None
+    try:
+        r = requests.get(
+            "https://www.alphavantage.co/query",
+            params={**params, "apikey": key},
+            timeout=20,
+        )
+        r.raise_for_status()
+        payload = r.json()
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if payload.get("Error Message") or payload.get("Note") or payload.get("Information"):
+        return None
+    return payload
+
+
+def _fcf_from_av_cash_flow_report(report: dict) -> Optional[float]:
+    if not isinstance(report, dict):
+        return None
+    ocf = _coerce_finite_float(report.get("operatingCashflow"))
+    if ocf is None:
+        return None
+    capex = _coerce_finite_float(report.get("capitalExpenditures"))
+    if capex is None:
+        return ocf
+    # Alpha Vantage typically reports capex as a negative cash outflow.
+    if capex <= 0:
+        return ocf + capex
+    return ocf - capex
+
+
+def _merge_alphavantage_fundamentals_into_info(sym: str, info: dict) -> None:
+    """Fill ``freeCashflow``, ``enterpriseValue``, ``ebitda`` from OVERVIEW / CASH_FLOW when Yahoo omits them."""
+    need_fcf = _coerce_finite_float(info.get("freeCashflow")) is None
+    need_ev = _coerce_finite_float(info.get("enterpriseValue")) is None
+    need_ebitda = _coerce_finite_float(info.get("ebitda")) is None
+    if not (need_fcf or need_ev or need_ebitda):
+        return
+
+    overview = _alphavantage_query({"function": "OVERVIEW", "symbol": sym})
+    if isinstance(overview, dict) and overview.get("Symbol"):
+        if need_ebitda:
+            eb = _coerce_finite_float(overview.get("EBITDA"))
+            if eb is not None:
+                info["ebitda"] = eb
+        if need_ev:
+            ev_direct = _coerce_finite_float(overview.get("EnterpriseValue"))
+            if ev_direct is not None and ev_direct > 0:
+                info["enterpriseValue"] = ev_direct
+            else:
+                ev_ratio = _coerce_finite_float(overview.get("EVToEBITDA"))
+                eb2 = _coerce_finite_float(info.get("ebitda"))
+                if ev_ratio is not None and eb2 is not None and ev_ratio > 0 and eb2 != 0:
+                    ev_est = ev_ratio * eb2
+                    if ev_est > 0:
+                        info["enterpriseValue"] = ev_est
+
+    if _coerce_finite_float(info.get("freeCashflow")) is None:
+        cf = _alphavantage_query({"function": "CASH_FLOW", "symbol": sym})
+        reports = cf.get("annualReports") if isinstance(cf, dict) else None
+        if isinstance(reports, list) and reports:
+            fcf = _fcf_from_av_cash_flow_report(reports[0])
+            if fcf is not None:
+                info["freeCashflow"] = fcf
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _alphavantage_efficiency_yoy(sym: str) -> Optional[tuple]:
+    """Most recent YoY growth: EBITDA and total assets (annual), for efficiency ratio."""
+    s = str(sym).upper().strip()
+    if not s:
+        return None
+    inc = _alphavantage_query({"function": "INCOME_STATEMENT", "symbol": s})
+    bal = _alphavantage_query({"function": "BALANCE_SHEET", "symbol": s})
+    if not isinstance(inc, dict) or not isinstance(bal, dict):
+        return None
+    ar = inc.get("annualReports")
+    br = bal.get("annualReports")
+    if not isinstance(ar, list) or len(ar) < 2:
+        return None
+    if not isinstance(br, list) or len(br) < 2:
+        return None
+
+    e0 = _coerce_finite_float(ar[0].get("ebitda"))
+    e1 = _coerce_finite_float(ar[1].get("ebitda"))
+    a0 = _coerce_finite_float(br[0].get("totalAssets"))
+    a1 = _coerce_finite_float(br[1].get("totalAssets"))
+
+    if e0 is None or e1 is None or a0 is None or a1 is None:
+        return None
+    if abs(e1) < 1e-9 or abs(a1) < 1e-9:
+        return None
+    ebitda_yoy = (e0 - e1) / abs(e1)
+    asset_yoy = (a0 - a1) / abs(a1)
+    if not np.isfinite(ebitda_yoy) or not np.isfinite(asset_yoy):
+        return None
+    if abs(asset_yoy) < 1e-12:
+        return None
+    return (float(ebitda_yoy), float(asset_yoy))
+
+
 def _fetch_stock_alphavantage(sym: str, period: str, interval: str) -> Optional[pd.DataFrame]:
     """Fallback daily bars when Yahoo throttles; needs ``ALPHAVANTAGE_API_KEY`` (env or Streamlit secrets)."""
     if interval != "1d":
@@ -591,6 +709,7 @@ class GlobalMarketSnapshot(NamedTuple):
     universe_syms: tuple
     risk_syms: tuple
     rs_spy_ratio_map: dict
+    fundamental_sieve_map: dict
 
 
 @st.cache_data(ttl=120)
@@ -618,6 +737,7 @@ def fetch_global_market_bundle(watch_syms: tuple, active_ticker: str) -> GlobalM
         None,
         tuple(universe),
         tuple(risk),
+        {},
         {},
     )
     try:
@@ -648,6 +768,7 @@ def fetch_global_market_bundle(watch_syms: tuple, active_ticker: str) -> GlobalM
             tuple(universe),
             tuple(risk),
             {},
+            {},
         )
     tape = _tape_pcts_from_close_matrix(close, wl)
     macro, vix_df = _macro_bundle_from_close_matrix(close)
@@ -662,7 +783,15 @@ def fetch_global_market_bundle(watch_syms: tuple, active_ticker: str) -> GlobalM
     rs_map = rs_spy_ratio_map_from_close_matrix(close, rs_syms, sessions=_RS_SPY_LOOKBACK_SESSIONS)
 
     ad, aw, am = active_ticker_frames_from_panel(raw, act)
-    return GlobalMarketSnapshot(desk, risk_df, ad, aw, am, raw, tuple(universe), tuple(risk), rs_map)
+    sieve_map: dict = {}
+    for sym in risk:
+        try:
+            sieve_map[str(sym).upper().strip()] = evaluate_fundamental_sieve(sym)
+        except Exception:
+            sieve_map[str(sym).upper().strip()] = None
+    return GlobalMarketSnapshot(
+        desk, risk_df, ad, aw, am, raw, tuple(universe), tuple(risk), rs_map, sieve_map
+    )
 
 
 def fetch_desk_market_snapshot(watch_syms: tuple) -> DeskMarketSnapshot:
@@ -742,15 +871,59 @@ def fetch_intraday_series(symbol, period="5d", interval="1h"):
 
 @st.cache_data(ttl=300)
 def fetch_info(ticker):
-    """Yahoo quote summary fields; never raises (empty dict on failure)."""
+    """Yahoo quote summary fields, with Alpha Vantage gap-fill for cash/EV/EBITDA; never raises."""
     try:
         sym = str(ticker).upper().strip()
         if not sym:
             return {}
-        info = _yfinance_ticker(sym).info
-        return info if isinstance(info, dict) else {}
+        raw_info = _yfinance_ticker(sym).info
+        info = dict(raw_info) if isinstance(raw_info, dict) else {}
+        _merge_alphavantage_fundamentals_into_info(sym, info)
+        return info
     except Exception:
         return {}
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def evaluate_fundamental_sieve(ticker: str) -> Optional[dict]:
+    """FCF yield vs EV and EBITDA/asset efficiency; ``None`` if inputs missing (no synthetic zeros).
+
+    **10x guard:** ``ten_x_candidate`` when FCF yield > 10% and efficiency ratio (EBITDA YoY / asset YoY) > 1.
+    """
+    sym = str(ticker).upper().strip()
+    if not sym:
+        return None
+    try:
+        info = fetch_info(sym)
+        if not info:
+            info = {}
+        fcf = _coerce_finite_float(info.get("freeCashflow"))
+        ev = _coerce_finite_float(info.get("enterpriseValue"))
+        if fcf is None or ev is None or ev <= 0:
+            return None
+        fcf_yield = float(fcf / ev)
+        if not np.isfinite(fcf_yield):
+            return None
+
+        yoy = _alphavantage_efficiency_yoy(sym)
+        if yoy is None:
+            return None
+        ebitda_yoy, asset_yoy = yoy
+        efficiency_ratio = float(ebitda_yoy / asset_yoy)
+        if not np.isfinite(efficiency_ratio):
+            return None
+
+        ten_x = bool(fcf_yield > 0.10 and efficiency_ratio > 1.0)
+        return {
+            "fcf_yield": fcf_yield,
+            "fcf_yield_pct": round(fcf_yield * 100.0, 2),
+            "efficiency_ratio": efficiency_ratio,
+            "ebitda_yoy": ebitda_yoy,
+            "asset_yoy": asset_yoy,
+            "ten_x_candidate": ten_x,
+        }
+    except Exception:
+        return None
 
 @st.cache_data(ttl=90)
 def list_option_expiration_dates(ticker: str) -> tuple:

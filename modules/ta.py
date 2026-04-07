@@ -8,6 +8,7 @@ import pandas as pd
 import numpy as np
 import math
 from datetime import timedelta
+from typing import Optional
 from numpy.lib.stride_tricks import sliding_window_view
 
 class TA:
@@ -433,6 +434,38 @@ class TA:
             "width": width,
             "n_whale_bars": int(len(whale)),
         }
+
+    @staticmethod
+    def calculate_hurst_exponent(close_prices, window: int = 100) -> Optional[float]:
+        """Rescaled-range (R/S) Hurst estimate on the last ``window`` closes (log returns).
+
+        Single-window **log(R/S) / log(n)** on *n* returns; fast O(n). Returns ``None`` if data
+        are insufficient. **H > 0.55** ≈ trending, **H < 0.45** ≈ mean-reverting.
+        """
+        try:
+            s = np.asarray(
+                pd.Series(close_prices, dtype=float).dropna().values[-int(window) :], dtype=float
+            )
+            w = int(window)
+            if s.size < max(40, min(w, 60)) or s.size < 40:
+                return None
+            lr = np.diff(np.log(s))
+            lr = lr[np.isfinite(lr)]
+            n = int(lr.size)
+            if n < 30:
+                return None
+            mu = float(np.mean(lr))
+            y = np.cumsum(lr - mu)
+            r_rng = float(np.max(y) - np.min(y))
+            sig = float(np.std(lr, ddof=1))
+            if sig < 1e-12 or r_rng <= 0 or n < 2:
+                return None
+            h = float(np.log(r_rng / sig) / np.log(float(n)))
+            if not math.isfinite(h):
+                return None
+            return float(np.clip(h, 0.0, 1.0))
+        except Exception:
+            return None
 
     @staticmethod
     def hurst(series):

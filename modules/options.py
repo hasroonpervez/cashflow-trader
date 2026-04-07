@@ -17,6 +17,7 @@ from .data import (
     fetch_options,
     fetch_news_headlines,
     fetch_info,
+    evaluate_fundamental_sieve,
     active_ticker_frames_from_panel,
 )
 from .sentiment import Sentiment
@@ -1246,7 +1247,16 @@ def scan_single_ticker(
             _short_pct,
             skew_ratio,
         )
-        convexity_label = "💎 10x Sieve" if _sieve.get("hit") else "—"
+        _fund_sieve = evaluate_fundamental_sieve(tkr)
+        _fcf_ten = bool(_fund_sieve and _fund_sieve.get("ten_x_candidate"))
+        if _sieve.get("hit") and _fcf_ten:
+            convexity_label = "💎 10x Sieve · FCF"
+        elif _sieve.get("hit"):
+            convexity_label = "💎 10x Sieve"
+        elif _fcf_ten:
+            convexity_label = "💎 FCF 10x"
+        else:
+            convexity_label = "—"
 
         return {
             "ticker": tkr,
@@ -1283,6 +1293,8 @@ def scan_single_ticker(
             ),
             "10x Convexity": convexity_label,
             "convexity_sieve": _sieve,
+            "fundamental_sieve": _fund_sieve,
+            "fcf_yield_pct": (_fund_sieve or {}).get("fcf_yield_pct"),
         }
     except Exception:
         return None
@@ -1544,14 +1556,95 @@ class Opt:
                 return 0.0
 
     @staticmethod
+    def _ledger_premium_notional(row: dict) -> float:
+        try:
+            p = float(row.get("premium_100") or 0)
+            c = int(row.get("contracts") or 0)
+            return abs(p) * max(1, c)
+        except (TypeError, ValueError):
+            return 0.0
+
+    @staticmethod
+    def _ticker_sector_cached(tkr: str, cache: dict) -> str:
+        sym = str(tkr).upper().strip()
+        if not sym:
+            return "Unknown"
+        if sym in cache:
+            return cache[sym]
+        try:
+            info = fetch_info(sym) or {}
+            s = info.get("sector") or info.get("industry") or "Unknown"
+            cache[sym] = str(s).strip() or "Unknown"
+        except Exception:
+            cache[sym] = "Unknown"
+        return cache[sym]
+
+    @staticmethod
+    def _ledger_sector_exposure_fractions(ledger: list, capital_base: float, sector_cache: dict) -> dict:
+        if capital_base <= 0 or not ledger:
+            return {}
+        by_sec: dict = {}
+        for row in ledger:
+            if not isinstance(row, dict):
+                continue
+            sym = str(row.get("ticker", "")).upper().strip()
+            if not sym:
+                continue
+            sec = Opt._ticker_sector_cached(sym, sector_cache)
+            by_sec[sec] = by_sec.get(sec, 0.0) + Opt._ledger_premium_notional(row)
+        return {k: float(v) / float(capital_base) for k, v in by_sec.items()}
+
+    @staticmethod
+    def _top3_ledger_tickers(ledger: list) -> list:
+        if not ledger:
+            return []
+        scored = []
+        for row in ledger:
+            if not isinstance(row, dict):
+                continue
+            t = str(row.get("ticker", "")).upper().strip()
+            if not t:
+                continue
+            scored.append((t, Opt._ledger_premium_notional(row)))
+        scored.sort(key=lambda x: -x[1])
+        out: list = []
+        for t, _ in scored:
+            if t not in out:
+                out.append(t)
+            if len(out) >= 3:
+                break
+        return out
+
+    @staticmethod
+    def _max_abs_corr_vs_peers(sym: str, peers: list, corr_df: pd.DataFrame) -> float:
+        if corr_df is None or getattr(corr_df, "empty", True) or not peers:
+            return 0.0
+        s = str(sym).upper().strip()
+        if s not in corr_df.columns:
+            return 0.0
+        mx = 0.0
+        for p in peers:
+            pu = str(p).upper().strip()
+            if pu == s or pu not in corr_df.columns:
+                continue
+            try:
+                mx = max(mx, abs(float(corr_df.loc[s, pu])))
+            except Exception:
+                continue
+        return mx
+
+    @staticmethod
     def portfolio_allocation(
         diamond_list,
         total_capital=50000,
         watchlist_tickers=None,
         log_returns_df=None,
+        sentinel_ledger=None,
+        ffd_correlation_matrix=None,
     ):
         """Size capital across scanner ``diamond`` rows: weight ∝ (Quant Edge × MC PoP %), then
-        ``_simple_corr_haircut`` on each line’s notional."""
+        ``_simple_corr_haircut``, **Sentinel sector cluster** (0.5× if sector book >20% of capital),
+        and **top-3 ρ** halving when FFD correlation vs largest ledger legs **> 0.8**."""
         if not diamond_list:
             return []
         wl = list(watchlist_tickers or [])
@@ -1575,19 +1668,38 @@ class Opt:
             sw = float(len(rows_in))
         out = []
         cap = float(total_capital)
+        led = list(sentinel_ledger or [])
+        sector_cache: dict = {}
+        sector_frac = Opt._ledger_sector_exposure_fractions(led, cap, sector_cache) if led else {}
+        top3 = Opt._top3_ledger_tickers(led)
+        cm = ffd_correlation_matrix
         for tkr, wt, prem, _src in rows_in:
             raw_frac = float(wt) / float(sw)
             alloc_pre = raw_frac * cap
             haircut = 1.0
             if log_returns_df is not None and wl and tkr:
                 haircut = float(Opt._simple_corr_haircut(wl, tkr, log_returns_df))
-            alloc = max(0.0, alloc_pre * haircut)
+            sector_pen = 1.0
+            rho_pen = 1.0
+            if led and cap > 0:
+                sec = Opt._ticker_sector_cached(tkr, sector_cache)
+                if float(sector_frac.get(sec, 0.0)) > 0.20:
+                    sector_pen = 0.5
+            if top3 and cm is not None and tkr:
+                rho = float(Opt._max_abs_corr_vs_peers(tkr, top3, cm))
+                if rho > 0.80:
+                    rho_pen = 0.5
+            combo = float(haircut * sector_pen * rho_pen)
+            alloc = max(0.0, alloc_pre * combo)
             n_contracts = int(alloc // max(prem, 1e-9))
             out.append(
                 {
                     "ticker": tkr,
                     "weight_raw": round(raw_frac, 4),
                     "correlation_haircut": round(haircut, 4),
+                    "sector_cluster_penalty": round(sector_pen, 4),
+                    "top3_corr_penalty": round(rho_pen, 4),
+                    "portfolio_guards_product": round(combo, 4),
                     "capital_allocation": round(alloc, 2),
                     "contracts": int(n_contracts),
                     "premium_per_contract": round(prem, 2),

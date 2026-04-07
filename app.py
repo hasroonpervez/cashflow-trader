@@ -814,7 +814,26 @@ def main():
     _rs_map = getattr(_global_snap, "rs_spy_ratio_map", None) or {}
     _rs_row = _rs_map.get(_tku_rs) if isinstance(_rs_map, dict) else None
     _rs_for_desk = float(_rs_row) if _rs_row is not None and np.isfinite(float(_rs_row)) else None
-    _consensus = compute_desk_consensus(ctx, df, rs_spy_ratio=_rs_for_desk)
+    _er_note = None
+    try:
+        _led_note = st.session_state.get("_cf_ledger") or []
+        _, _sum_note = sentinel_ledger_table_rows(
+            _led_note,
+            active_ticker=_tku_rs,
+            active_qs=float(qs),
+            pin_map=st.session_state.get("_cf_opex_pin_map") or {},
+            rfr=float(getattr(ctx, "rfr", 0.045)),
+        )
+        _er_note = _sum_note.get("avg_edge_realization")
+    except Exception:
+        _er_note = None
+    try:
+        _fund_sieve = (getattr(_global_snap, "fundamental_sieve_map", None) or {}).get(_tku_rs)
+    except Exception:
+        _fund_sieve = None
+    _consensus = compute_desk_consensus(
+        ctx, df, rs_spy_ratio=_rs_for_desk, fundamental_sieve=_fund_sieve
+    )
 
     render_mode_badge(use_quant_models)
     st.markdown(
@@ -940,7 +959,16 @@ def main():
         st.markdown(consensus_compact_html(ticker, _consensus), unsafe_allow_html=True)
     else:
         st.markdown(consensus_banner_html(ticker, _consensus), unsafe_allow_html=True)
-        st.markdown(traders_note_markdown(ticker, ctx, df, _consensus))
+        st.markdown(
+            traders_note_markdown(
+                ticker,
+                ctx,
+                df,
+                _consensus,
+                alpha_realization_pct=_er_note,
+                turbo_desk=False,
+            )
+        )
         st.markdown(institutional_heatmap_ribbon_html(_consensus), unsafe_allow_html=True)
         _acc = bento_accents_from_consensus(_consensus)
         _b1 = bento_box_html(
@@ -2964,11 +2992,15 @@ def main():
                                     total_capital=50000,
                                     watchlist_tickers=watchlist_tickers_scn,
                                     log_returns_df=log_returns_df,
+                                    sentinel_ledger=st.session_state.get("_cf_ledger"),
+                                    ffd_correlation_matrix=_cm_cached,
                                 )
                                 if _alloc_rows:
                                     with st.expander("$50k Kelly-style mix (Blue Diamonds only)", expanded=False):
                                         st.caption(
-                                            "Weights scale with Quant Edge × MC PoP %; each name’s notional is scaled by `_simple_corr_haircut` vs the watchlist (FFD-return correlations when history is sufficient)."
+                                            "Weights scale with Quant Edge × MC PoP %; each name is scaled by `_simple_corr_haircut`, "
+                                            "then **Sentinel sector guard** (0.5× when that sector is already **>20%** of this capital base), "
+                                            "then **top-3 ledger ρ** (0.5× when FFD correlation vs your three largest legs exceeds **0.80**)."
                                         )
                                         _adf = pd.DataFrame(_alloc_rows)
                                         streamlit_show_dataframe(
@@ -3093,6 +3125,8 @@ def main():
                                         total_capital=float(equity_capital),
                                         watchlist_tickers=watchlist_tickers_scn,
                                         log_returns_df=log_returns_df,
+                                        sentinel_ledger=st.session_state.get("_cf_ledger"),
+                                        ffd_correlation_matrix=_cm_cached,
                                     )
                                     for row in _eq_alloc:
                                         _alloc_by_tkr[row["ticker"]] = int(row.get("contracts") or 0)

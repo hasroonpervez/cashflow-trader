@@ -52,6 +52,7 @@ def test_whale_marker_only_when_spike():
 def test_consensus_score_in_range():
     df = _dummy_df()
     ctx = SimpleNamespace(
+        ticker="TEST",
         qs=55.0,
         cp_score=5,
         cp_max=9,
@@ -99,6 +100,7 @@ def test_daily_aggressor_proxy_finite():
 def test_bento_accents_keys():
     df = _dummy_df()
     ctx = SimpleNamespace(
+        ticker="TEST",
         qs=55.0,
         cp_score=5,
         cp_max=9,
@@ -168,6 +170,9 @@ def test_desk_conviction_multiplier_tiers():
     assert desk_conviction_multiplier(coil_active=False, absorption=True, vwap_urgency=False)[0] == 1.25
     assert desk_conviction_multiplier(coil_active=False, absorption=False, vwap_urgency=True)[0] == 1.5
     assert desk_conviction_multiplier(coil_active=True, absorption=True, vwap_urgency=True)[0] == 2.0
+    assert desk_conviction_multiplier(
+        coil_active=False, absorption=False, vwap_urgency=False, whale_sweep=True
+    )[0] == 1.5
 
 
 def test_institutional_heatmap_ribbon_html_smoke():
@@ -193,6 +198,7 @@ def test_market_leader_when_rs_and_whale_volume():
     c_prev = float(df["Close"].iloc[-2])
     df.loc[df.index[-1], "Close"] = c_prev * 1.02
     ctx = SimpleNamespace(
+        ticker="TEST",
         qs=55.0,
         cp_score=5,
         cp_max=9,
