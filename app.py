@@ -74,7 +74,7 @@ def _is_script_health_probe() -> bool:
         if "/script-health-check" in blob:
             return True
         ua = low.get("user-agent", "")
-        if "kube-probe" in ua or "health" in ua:
+        if "kube-probe" in ua:
             return True
     except Exception:
         return False
@@ -169,12 +169,6 @@ if isinstance(_el, pd.DataFrame) and not _el.empty and "Preview" not in _el.colu
 inject_css_and_navbar()
 
 def main():
-    # Ultra-early cold-start fast path: keep first run minimal so Cloud health checks
-    # do not time out before the app reaches a healthy state.
-    if not st.session_state.get("_cf_boot_fastpath_done", False):
-        st.session_state["_cf_boot_fastpath_done"] = True
-        st.stop()
-
     cfg_tx = ConfigTransaction()
     cfg = cfg_tx.current
 
@@ -205,12 +199,6 @@ def main():
     cfg = cfg_tx.current
 
     hud = render_mission_control_hud(cfg_tx, cfg, saved_scanner_mode)
-
-    # One-shot session warm-up gate for Cloud health-check stability.
-    # Uses session_state (not module globals) so it does not re-arm every rerun.
-    if not st.session_state.get("_cf_boot_warmup_done", False):
-        st.session_state["_cf_boot_warmup_done"] = True
-        st.rerun()
 
     cfg, _global_snap = render_tape_open_editor_flush(cfg_tx, hud)
 
