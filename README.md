@@ -10,12 +10,14 @@
 - **Equity Radar** — Stock-focused scan: pre-diamond signals, actionable targets, Delta-One setup (same scan payload; options chrome hidden until you switch back).
 - **Sentinel Ledger** — Track legs; pin distance, edge realization, portfolio delta/theta/vega + 1d VaR, and “golden zone” style maturity hints.
 - **10x scanner + conviction** — `10x Potential` score, score>=5 screener, and `💎 CONVICTION` when Blue Diamond aligns with 10x.
+- **Market Explosion Radar** — New `🌎 Market Explosion Radar` tab: Tier 1 broad batch filter + Tier 2 deep scan of survivors, ranked by `explosion_score`.
 - **Intraday confirmation gate** — IMMINENT pre-diamond calls are now checked against 1h RSI + OBV before final upgrade.
 - **Auto scanner refresh** — Scanner can auto-rerun on a timer (`auto_scan_interval`, default 300s) after first manual scan.
 - **Watchlist earnings heat map** — Intel tab shows 30-day earnings urgency buckets (`this_week`, `next_week`, `this_month`, `clear`, `reported`, `unknown`).
 - **Persistent trade journal** — `trade_journal.json` survives browser restarts with close workflow and realized P&L stats.
 - **Walk-forward replay backtest** — Setup tab can replay point-in-time Blue Diamond-style triggers and report forward returns.
 - **Discord conviction alerts** — Optional webhook notifications for `💎 CONVICTION` scanner events.
+- **Radar hit persistence** — Radar and scanner conviction hits are stored in `radar_hits.json` and viewable in-tab.
 - **PWA install metadata** — Manifest + mobile meta tags for add-to-home-screen behavior.
 - **In-app glossary** — **Intel → Quick Reference Guide**.
 
@@ -91,6 +93,7 @@ Writes are **atomic** (temp file + replace). **Mission Control** fields are batc
 | `use_quant_models` | Institutional quant path (default on) |
 | `discord_webhook_url` | Optional Discord webhook endpoint for conviction alerts |
 | `alert_on_conviction` | Toggles webhook dispatch for `💎 CONVICTION` hits |
+| `radar_universe` | Comma-separated universe used by the Market Explosion Radar broad filter |
 | `defer_headlines_earnings` | Skip upfront news + earnings in `build_context` |
 | `defer_options_first_pass` | Skip options-chain hydration on the first session render (faster Cloud cold boot) |
 | `overlay_*` | Chart layers (EMA, Fib, Gann, etc.) |
@@ -117,6 +120,7 @@ On Cloud, if the filesystem is **read-only**, use Secrets `watchlist` and expect
 cashflow-trader/
 ├── app.py                 # Entry: imports, CSS/nav, main() orchestration
 ├── config.json            # Defaults for watchlist & UI (optional on Cloud)
+├── radar_hits.json        # Persistent Market Explosion Radar / conviction hit history (gitignored)
 ├── manifest.json          # PWA install manifest
 ├── requirements.txt
 ├── requirements-dev.txt
@@ -159,6 +163,8 @@ cashflow-trader/
 | Equity mode | Radar summary, actionable targets, Delta-One tabs; shared scanner cache |
 | Options | Vanna & charm on BS row; IV rank proxy; skew chart |
 | Scanner upgrades | `score_10x_potential` integrated into scanner rows (`10x Potential`, flags), Intel **10x Screener**, and Blue+10x **CONVICTION** banner |
+| Market Explosion Radar | New radar tab: Tier 1 batch squeeze/Hurst/RS/volume pre-filter -> Tier 2 deep `scan_single_ticker` pass; scores with `compute_explosion_score` |
+| Alert destination | Scanner conviction now logs to radar history first (`radar_hits.json`); Discord webhook remains optional |
 | Intraday gate | Pre-diamond `🔥 IMMINENT BREAKOUT` is conditionally downgraded when 1h RSI is overbought or OBV is declining |
 | Auto-monitoring | Intel scanner supports timer-driven reruns via `auto_scan_interval`; cache bundle stores last trigger/time |
 | Sentinel risk | Portfolio aggregates now include **total vega** and a simple **1-day 95% VaR** (delta-correlation approximation) |
