@@ -1,5 +1,5 @@
 {
-  "watchlist": "PLTR,BMNR,HIMS,TSLA,RIVN,LCID,NIO,QS,SOFI,CIFR,GPUS,SRFM.OPEN,RXRX,ABSI,ABCL,IBRX,DNA,SIDU,SATL,ZETA,SPY,QQQ,BTC-USD,ETH-USD",
+  "watchlist": "PLTR,BMNR,HIMS,TSLA,RIVN,LCID,NIO,QS,SOFI,CIFR,GPUS,SRFM,OPEN,RXRX,ABSI,ABCL,IBRX,DNA,SIDU,SATL,ZETA,SPY,QQQ,BTC-USD,ETH-USD",
   "scanner_sort_mode": "Custom watchlist order",
   "scanner_mode": "📈 Options Yield",
   "equity_capital": 10000,
