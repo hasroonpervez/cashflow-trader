@@ -386,7 +386,19 @@ def render_tape_open_editor_flush(
     scanner_sort_mode = hud.scanner_sort_mode
 
     _BUNDLE_WALL_TIMEOUT = 18
-    _cache_key = (tuple(watch_items), str(ticker).strip().upper())
+    _COLD_BOOT_WATCHLIST_CAP = 8
+    _boot_guard = not bool(st.session_state.get("_cf_first_pass_done", False))
+    _bundle_watch_items = list(watch_items)
+    if _boot_guard and len(_bundle_watch_items) > _COLD_BOOT_WATCHLIST_CAP:
+        _bundle_watch_items = _bundle_watch_items[:_COLD_BOOT_WATCHLIST_CAP]
+        _tk = str(ticker).strip().upper()
+        if _tk and _tk not in _bundle_watch_items:
+            _bundle_watch_items.append(_tk)
+    _cache_key = (
+        tuple(_bundle_watch_items),
+        str(ticker).strip().upper(),
+        "boot" if _boot_guard else "full",
+    )
     _prev_snap = st.session_state.get("_cf_global_market_bundle")
     _prev_key = st.session_state.get("_cf_global_market_key")
     _global_snap = None
@@ -396,7 +408,9 @@ def render_tape_open_editor_flush(
         from concurrent.futures import TimeoutError as _FTE
 
         _tp = make_script_ctx_pool(max_workers=1)
-        _fut = submit_with_script_ctx(_tp, fetch_global_market_bundle, tuple(watch_items), ticker)
+        _fut = submit_with_script_ctx(
+            _tp, fetch_global_market_bundle, tuple(_bundle_watch_items), ticker
+        )
         _global_snap = _fut.result(timeout=_BUNDLE_WALL_TIMEOUT)
     except _FTE:
         _timed_out = True
@@ -433,6 +447,11 @@ def render_tape_open_editor_flush(
             {},
         )
         st.toast("Yahoo data still loading — tape prices may be stale. Refresh in ~30s.", icon="⏳")
+    elif _boot_guard and len(_bundle_watch_items) < len(watch_items):
+        st.caption(
+            f"Cold boot protection active: loading {_bundle_watch_items.__len__()}/{len(watch_items)} watchlist symbols first. "
+            "Full watchlist loads after startup."
+        )
 
     st.session_state["_cf_global_market_bundle"] = _global_snap
     st.session_state["_cf_global_market_key"] = _cache_key
