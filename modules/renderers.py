@@ -956,6 +956,7 @@ def render_cashflow_tab(cfg: dict, d: DeskLocals) -> None:
     qs_status = d.qs_status
     scanner_watchlist = d.scanner_watchlist
     scanner_sort_mode = d.scanner_sort_mode
+    auto_scan_interval = d.auto_scan_interval
     equity_capital = d.equity_capital
     global_snap = d.global_snap
     defer_meta = d.defer_meta
