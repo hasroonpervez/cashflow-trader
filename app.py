@@ -55,10 +55,6 @@ from datetime import datetime
 import warnings, time
 warnings.filterwarnings("ignore")
 
-# Process-level cold-boot guard for Streamlit Cloud health checks.
-# First script run avoids all network-heavy sections, then flips warm state.
-_GLOBAL_COLD_BOOT_PENDING = True
-
 if "edge_log" not in st.session_state:
     st.session_state.edge_log = pd.DataFrame(columns=["Time", "Ticker", "Retail", "Quant", "Delta", "Preview"])
 if "bt_thresh" not in st.session_state:
@@ -153,7 +149,6 @@ if isinstance(_el, pd.DataFrame) and not _el.empty and "Preview" not in _el.colu
 inject_css_and_navbar()
 
 def main():
-    global _GLOBAL_COLD_BOOT_PENDING
     cfg_tx = ConfigTransaction()
     cfg = cfg_tx.current
 
@@ -185,12 +180,11 @@ def main():
 
     hud = render_mission_control_hud(cfg_tx, cfg, saved_scanner_mode)
 
-    if _GLOBAL_COLD_BOOT_PENDING:
-        _GLOBAL_COLD_BOOT_PENDING = False
-        st.info(
-            "Cold boot warm-up complete. Reload once to enter full dashboard mode."
-        )
-        st.stop()
+    # One-shot session warm-up gate for Cloud health-check stability.
+    # Uses session_state (not module globals) so it does not re-arm every rerun.
+    if not st.session_state.get("_cf_boot_warmup_done", False):
+        st.session_state["_cf_boot_warmup_done"] = True
+        st.rerun()
 
     cfg, _global_snap = render_tape_open_editor_flush(cfg_tx, hud)
 
