@@ -74,24 +74,40 @@ def bs_price(S, K, T, r, sigma, option_type="call"):
     return K*exp(-r*T)*_cdf(-d2) - S*_cdf(-d1)
 
 def bs_greeks(S, K, T, r, sigma, option_type="call"):
-    """Calculate Delta, Gamma, Theta (per day), Vega (per 1% IV move)."""
+    """Delta, Gamma, Theta (per day), Vega (per 1% IV), Vanna (Δ delta per 1% IV), Charm (Δ delta per day)."""
     S, K = float(S), float(K)
+    z = {"delta": 1.0 if option_type == "call" else -1.0, "gamma": 0, "theta": 0, "vega": 0, "vanna": 0, "charm": 0}
     if S <= 0 or K <= 0 or not math.isfinite(S) or not math.isfinite(K):
-        return {"delta": 1.0 if option_type == "call" else -1.0, "gamma": 0, "theta": 0, "vega": 0}
+        return z
     sigma = max(sigma, 0.001)
     if T <= 0:
-        return {"delta": 1.0 if option_type == "call" else -1.0, "gamma": 0, "theta": 0, "vega": 0}
-    d1 = (log(S/K) + (r + 0.5*sigma**2)*T) / (sigma*sqrt(T))
-    d2 = d1 - sigma*sqrt(T)
-    gamma = _pdf(d1) / (S * sigma * sqrt(T))
-    vega = S * _pdf(d1) * sqrt(T) / 100  # per 1% move
+        return z
+    sqrtT = sqrt(T)
+    d1 = (log(S/K) + (r + 0.5*sigma**2)*T) / (sigma*sqrtT)
+    d2 = d1 - sigma*sqrtT
+    phi_d1 = _pdf(d1)
+    gamma = phi_d1 / (S * sigma * sqrtT)
+    vega = S * phi_d1 * sqrtT / 100  # per 1% move
+    vanna = phi_d1 * d2 / sigma * 0.01  # ∂Δ/∂(σ+1%) scale
+    if T < 1e-4:
+        charm_day = 0.0
+    else:
+        charm = -phi_d1 * (2 * r * T - d2 * sigma * sqrtT) / (2 * T * sigma * sqrtT)
+        charm_day = charm / 365.0
     if option_type == "call":
         delta = _cdf(d1)
-        theta = (-S*_pdf(d1)*sigma/(2*sqrt(T)) - r*K*exp(-r*T)*_cdf(d2)) / 365
+        theta = (-S*phi_d1*sigma/(2*sqrtT) - r*K*exp(-r*T)*_cdf(d2)) / 365
     else:
         delta = _cdf(d1) - 1
-        theta = (-S*_pdf(d1)*sigma/(2*sqrt(T)) + r*K*exp(-r*T)*_cdf(-d2)) / 365
-    return {"delta": round(delta, 3), "gamma": round(gamma, 4), "theta": round(theta, 3), "vega": round(vega, 3)}
+        theta = (-S*phi_d1*sigma/(2*sqrtT) + r*K*exp(-r*T)*_cdf(-d2)) / 365
+    return {
+        "delta": round(delta, 3),
+        "gamma": round(gamma, 4),
+        "theta": round(theta, 3),
+        "vega": round(vega, 3),
+        "vanna": round(vanna, 5),
+        "charm": round(charm_day, 5),
+    }
 
 
 # ═════════════════════════════════════════════════════════════════════════

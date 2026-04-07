@@ -29,6 +29,8 @@ DEFAULT_CONFIG = {
     "overlay_diamonds": True,
     "overlay_gold": True,
     "use_quant_models": True,
+    # When true, `build_context` skips Yahoo headline + next-earnings fetch; news tab uses `@st.fragment`.
+    "defer_headlines_earnings": False,
 }
 
 _LEGACY_CONFIG_KEYS = frozenset({

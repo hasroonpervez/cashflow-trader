@@ -192,6 +192,133 @@ def whale_session_x_for_chart(df: pd.DataFrame, z_threshold: float = 4.0):
         return None
 
 
+def daily_aggressor_proxy(df: pd.DataFrame, *, tail_bars: int = 3) -> dict:
+    """
+    Daily-bar stand-in for order-flow imbalance (not true OFI): where the close prints inside the
+    range, weighted by recent volume intensity. Composite in roughly [-1, 1].
+    """
+    out: dict = {"ofi_proxy": None, "label": "—", "detail": {}}
+    if df is None or getattr(df, "empty", True) or len(df) < 5:
+        return out
+    needed = ("High", "Low", "Close", "Volume")
+    if any(c not in df.columns for c in needed):
+        return out
+    n = max(1, min(int(tail_bars), len(df)))
+    pressures: list[float] = []
+    for i in range(-n, 0):
+        sl = df.iloc[i]
+        try:
+            h = float(sl["High"])
+            lo = float(sl["Low"])
+            c = float(sl["Close"])
+        except (TypeError, ValueError):
+            continue
+        if not all(np.isfinite([h, lo, c])) or h <= lo:
+            continue
+        p = (2.0 * c - h - lo) / (h - lo)
+        pressures.append(float(np.clip(p, -1.0, 1.0)))
+    if not pressures:
+        return out
+    last_p = pressures[-1]
+    blend = float(np.mean(pressures))
+    raw = float(np.clip(0.65 * last_p + 0.35 * blend, -1.0, 1.0))
+    vz = last_bar_volume_zscore(df)
+    w = 1.0
+    if vz is not None and np.isfinite(float(vz)):
+        w = float(np.tanh(max(0.0, float(vz)) / 3.0))
+    ofi = float(raw * (0.35 + 0.65 * w))
+    out["ofi_proxy"] = ofi
+    out["detail"] = {"last_pressure": last_p, "tail_mean": blend, "volume_weight": w}
+    if ofi > 0.35:
+        out["label"] = "net buy pressure (proxy)"
+    elif ofi < -0.35:
+        out["label"] = "net sell pressure (proxy)"
+    else:
+        out["label"] = "balanced close-in-range (proxy)"
+    return out
+
+
+def blend_unified_probability(
+    qs: float,
+    conf_pct: float,
+    rs_spy_ratio: Optional[float],
+) -> float:
+    """Blend Quant Edge, confluence %, and RS vs SPY into a single 0–100 dial."""
+    qs = float(max(0.0, min(100.0, qs)))
+    conf_pct = float(max(0.0, min(100.0, conf_pct)))
+    rs_adj = 50.0
+    if rs_spy_ratio is not None and np.isfinite(float(rs_spy_ratio)):
+        x = float(rs_spy_ratio)
+        if x > 1.0:
+            rs_adj = float(np.clip(50.0 + (x - 1.0) * 80.0, 0.0, 100.0))
+        else:
+            rs_adj = float(np.clip(50.0 - (1.0 - x) * 80.0, 0.0, 100.0))
+    u = 0.42 * qs + 0.33 * conf_pct + 0.25 * rs_adj
+    return float(max(0.0, min(100.0, u)))
+
+
+_BENTO_ACCENTS: dict[str, tuple[str, str, str]] = {
+    "neutral": ("rgba(148,163,184,0.22)", "rgba(30,41,59,0.55)", "#94a3b8"),
+    "bullish": ("rgba(52,211,153,0.42)", "rgba(6,78,59,0.28)", "#6ee7b7"),
+    "bearish": ("rgba(248,113,113,0.42)", "rgba(127,29,29,0.22)", "#fca5a5"),
+    "warning": ("rgba(251,191,36,0.48)", "rgba(120,53,15,0.22)", "#fcd34d"),
+    "elite": ("rgba(168,85,247,0.5)", "rgba(76,29,149,0.28)", "#ddd6fe"),
+}
+
+
+def bento_accents_from_consensus(c: dict) -> dict:
+    """Traffic-light borders for the three bento cells (setup / momentum / exit)."""
+    bbwp = c.get("bbw_pctile")
+    coil = bool(c.get("coil_active"))
+    setup = "elite" if coil else ("warning" if bbwp is not None and float(bbwp) >= 0.85 else "neutral")
+    rsf = c.get("rs_spy_ratio")
+    mom = "neutral"
+    if c.get("market_leader"):
+        mom = "elite"
+    elif c.get("vwap_urgency"):
+        mom = "warning"
+    elif rsf is not None and np.isfinite(float(rsf)):
+        if float(rsf) > 1.02:
+            mom = "bullish"
+        elif float(rsf) < 0.98:
+            mom = "bearish"
+    vz = c.get("volume_z")
+    if mom == "neutral" and vz is not None and np.isfinite(float(vz)) and float(vz) > 3.0:
+        mom = "warning"
+    band = str(c.get("band") or "")
+    ex = "bearish" if band == "high_risk" else ("bullish" if band == "conviction" else "neutral")
+    return {"setup": setup, "momentum": mom, "exit": ex}
+
+
+def unified_probability_dial_html(
+    ticker: str,
+    unified: float,
+    *,
+    qs: float,
+    conf_pct: float,
+    rs_line: str,
+) -> str:
+    """Compact Mission Control dial: blended QS + confluence + RS."""
+    tk = html_mod.escape(str(ticker).upper())
+    u = float(max(0.0, min(100.0, unified)))
+    pct = int(round(u))
+    sub1 = html_mod.escape(f"QE {float(qs):.0f}/100 · Confluence {float(conf_pct):.0f}%")
+    sub2 = html_mod.escape(rs_line)
+    col = "#34d399" if u >= 62 else ("#fbbf24" if u >= 40 else "#f87171")
+    return f"""<div style="margin:0 0 12px 0;padding:12px 16px;border-radius:14px;border:1px solid rgba(148,163,184,0.25);
+background:linear-gradient(135deg,rgba(15,23,42,0.96),rgba(30,41,59,0.9));box-shadow:0 4px 22px rgba(0,0,0,0.28)">
+<div style="font-size:0.65rem;color:#94a3b8;font-weight:800;letter-spacing:0.14em;margin-bottom:6px">UNIFIED PROBABILITY · {tk}</div>
+<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+<div style="font-size:2rem;font-weight:800;color:{col};font-family:JetBrains Mono,monospace;line-height:1">{pct}</div>
+<div style="flex:1;min-width:180px">
+<div style="height:8px;border-radius:5px;background:rgba(51,65,85,0.9);overflow:hidden">
+<div style="height:100%;width:{pct}%;background:{col};border-radius:5px;opacity:0.92"></div></div>
+<div style="margin-top:8px;font-size:0.76rem;color:#94a3b8;line-height:1.45">{sub1}<br/>{sub2}</div>
+</div></div>
+<div style="margin-top:8px;font-size:0.7rem;color:#64748b">Weighted blend (42% QE · 33% confluence · 25% RS vs SPY tilt). Illustrative, not a forecast.</div>
+</div>"""
+
+
 def institutional_absorption(
     df: pd.DataFrame,
     volume_z: Optional[float] = None,
@@ -311,7 +438,9 @@ def compute_desk_consensus(ctx: Any, df: pd.DataFrame, *, rs_spy_ratio: Optional
     rs_outperf = rs_f is not None and rs_f > 1.0
     vz_whale = vz is not None and float(vz) > 4.0
     market_leader = bool(rs_outperf and vz_whale)
+    unified = blend_unified_probability(qs, conf_pct, rs_f)
     absorb = institutional_absorption(df, volume_z=vz)
+    ofi_st = daily_aggressor_proxy(df)
     vwap_st = vwap_distance_stats(df)
     vwap_z = vwap_st.get("vwap_z")
     if vz is None:
@@ -369,6 +498,11 @@ def compute_desk_consensus(ctx: Any, df: pd.DataFrame, *, rs_spy_ratio: Optional
         "MACD bull" if macd_bull else "MACD bearish cross risk",
         "OBV rising" if obv_up else "OBV fading",
     ]
+    _opx = ofi_st.get("ofi_proxy")
+    if _opx is not None and np.isfinite(float(_opx)) and abs(float(_opx)) >= 0.2:
+        mom_parts.append(
+            f"**Aggressor proxy** (daily OFI stand-in): **{float(_opx):+.2f}** — {ofi_st.get('label', '')}"
+        )
     if vz is not None:
         mom_parts.append(f"Volume Z today **{vz:+.1f}**")
     if rs_f is not None:
@@ -437,6 +571,8 @@ def compute_desk_consensus(ctx: Any, df: pd.DataFrame, *, rs_spy_ratio: Optional
         "conviction_label": conv_lbl,
         "rs_spy_ratio": rs_f,
         "market_leader": market_leader,
+        "unified_probability": unified,
+        "ofi_detail": ofi_st,
     }
 
 
@@ -624,15 +760,16 @@ def traders_note_markdown(ticker: str, ctx: Any, df: pd.DataFrame, c: dict) -> s
     return " ".join(parts)
 
 
-def bento_box_html(title: str, question: str, body_md: str) -> str:
-    """One bento cell; body_md is short HTML-safe text (we escape)."""
+def bento_box_html(title: str, question: str, body_md: str, *, accent: str = "neutral") -> str:
+    """One bento cell; body_md is short HTML-safe text (we escape). ``accent`` tints border/title from desk state."""
+    border, bg, title_c = _BENTO_ACCENTS.get(accent, _BENTO_ACCENTS["neutral"])
     t = html_mod.escape(title)
     q = html_mod.escape(question)
     b = html_mod.escape(body_md)
     b = b.replace("\n", "<br/>")
-    return f"""<div style="border-radius:12px;border:1px solid rgba(148,163,184,0.2);
-background:rgba(30,41,59,0.55);padding:12px 14px;min-height:120px;box-shadow:0 4px 18px rgba(0,0,0,0.2)">
-<div style="font-size:0.65rem;color:#94a3b8;font-weight:800;letter-spacing:0.12em;margin-bottom:4px">{t}</div>
+    return f"""<div style="border-radius:12px;border:1px solid {border};
+background:{bg};padding:12px 14px;min-height:120px;box-shadow:0 4px 18px rgba(0,0,0,0.2)">
+<div style="font-size:0.65rem;color:{title_c};font-weight:800;letter-spacing:0.12em;margin-bottom:4px">{t}</div>
 <div style="font-size:0.95rem;color:#f1f5f9;font-weight:600;margin-bottom:8px;line-height:1.35">{q}</div>
 <div style="font-size:0.8rem;color:#cbd5e1;line-height:1.5">{b}</div>
 </div>"""

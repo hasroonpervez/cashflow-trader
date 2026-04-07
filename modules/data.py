@@ -3,8 +3,10 @@ Data layer — yfinance fetchers with retry/backoff, caching, macro dashboard.
 """
 from __future__ import annotations
 
+import os
 import sys
 import streamlit as st
+import requests
 import pandas as pd
 import numpy as np
 import yfinance as yf
@@ -269,6 +271,88 @@ _PLOTLY_BLUE_DEEPER = "#1e40af"
 _PLOTLY_SLATE = "#64748b"
 
 
+def _alphavantage_api_key() -> Optional[str]:
+    k = os.environ.get("ALPHAVANTAGE_API_KEY", "").strip()
+    if k:
+        return k
+    try:
+        s = st.secrets.get("ALPHAVANTAGE_API_KEY", "")
+        return str(s).strip() or None
+    except Exception:
+        return None
+
+
+def _fetch_stock_alphavantage(sym: str, period: str, interval: str) -> Optional[pd.DataFrame]:
+    """Fallback daily bars when Yahoo throttles; needs ``ALPHAVANTAGE_API_KEY`` (env or Streamlit secrets)."""
+    if interval != "1d":
+        return None
+    key = _alphavantage_api_key()
+    if not key:
+        return None
+    av_sym = sym.replace("^", "").strip()
+    if not av_sym:
+        return None
+    output = "compact" if period in ("1d", "5d", "1mo", "3mo", "6mo") else "full"
+    try:
+        r = requests.get(
+            "https://www.alphavantage.co/query",
+            params={
+                "function": "TIME_SERIES_DAILY",
+                "symbol": av_sym,
+                "outputsize": output,
+                "apikey": key,
+            },
+            timeout=15,
+        )
+        r.raise_for_status()
+        payload = r.json()
+    except Exception:
+        return None
+    if not isinstance(payload, dict) or "Time Series (Daily)" not in payload:
+        return None
+    ts = payload["Time Series (Daily)"]
+    if not isinstance(ts, dict) or not ts:
+        return None
+    idx_list: list = []
+    rows: list = []
+    for date_s in sorted(ts.keys()):
+        bar = ts[date_s]
+        try:
+            rows.append(
+                {
+                    "Open": float(bar["1. open"]),
+                    "High": float(bar["2. high"]),
+                    "Low": float(bar["3. low"]),
+                    "Close": float(bar["4. close"]),
+                    "Volume": float(bar.get("5. volume", 0) or 0),
+                }
+            )
+            idx_list.append(date_s)
+        except (KeyError, TypeError, ValueError):
+            continue
+    if not rows:
+        return None
+    df = pd.DataFrame(rows, index=pd.to_datetime(idx_list))
+    df.index = pd.to_datetime(df.index)
+    if df.index.tz is not None:
+        df.index = df.index.tz_localize(None)
+    tail_map = {
+        "1d": 5,
+        "5d": 8,
+        "1mo": 24,
+        "3mo": 66,
+        "6mo": 128,
+        "1y": 270,
+        "2y": 540,
+        "5y": 1300,
+        "10y": 2600,
+        "max": len(df),
+    }
+    n = int(tail_map.get(period, 270))
+    df = df.tail(max(60, min(n, len(df))))
+    return df if not df.empty else None
+
+
 @st.cache_data(ttl=300)
 def fetch_stock(ticker, period="1y", interval="1d"):
     """Yahoo daily/intraday bars; never raises — returns ``None`` on any failure."""
@@ -301,7 +385,10 @@ def fetch_stock(ticker, period="1y", interval="1d"):
                 return None
             return df
 
-        return retry_fetch(_fetch)
+        out = retry_fetch(_fetch)
+        if out is not None:
+            return out
+        return _fetch_stock_alphavantage(sym, period, interval)
     except Exception:
         return None
 

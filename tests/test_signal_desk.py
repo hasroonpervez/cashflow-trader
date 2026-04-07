@@ -4,7 +4,10 @@ import numpy as np
 import pandas as pd
 
 from modules.signal_desk import (
+    blend_unified_probability,
+    bento_accents_from_consensus,
     compute_desk_consensus,
+    daily_aggressor_proxy,
     desk_conviction_multiplier,
     institutional_absorption,
     institutional_heatmap_ribbon_html,
@@ -75,6 +78,43 @@ def test_consensus_score_in_range():
     assert "conviction_label" in c and isinstance(c["conviction_label"], str)
     assert "rs_spy_ratio" in c
     assert "market_leader" in c and isinstance(c["market_leader"], bool)
+    assert "unified_probability" in c and 0 <= float(c["unified_probability"]) <= 100
+    assert "ofi_detail" in c and isinstance(c["ofi_detail"], dict)
+
+
+def test_blend_unified_probability_bounds():
+    u = blend_unified_probability(80.0, 70.0, 1.1)
+    assert 0 < u <= 100
+    u2 = blend_unified_probability(50.0, 50.0, None)
+    assert u2 == 50.0
+
+
+def test_daily_aggressor_proxy_finite():
+    df = _dummy_df()
+    d = daily_aggressor_proxy(df)
+    assert d["ofi_proxy"] is not None
+    assert -1.1 < float(d["ofi_proxy"]) < 1.1
+
+
+def test_bento_accents_keys():
+    df = _dummy_df()
+    ctx = SimpleNamespace(
+        qs=55.0,
+        cp_score=5,
+        cp_max=9,
+        fg=50.0,
+        struct="BULLISH",
+        wk_label="BULLISH",
+        macd_bull=True,
+        obv_up=True,
+        price=float(df["Close"].iloc[-1]),
+        gold_zone_price=float(df["Close"].iloc[-1]) * 0.98,
+        rsi_v=55.0,
+        chg_pct=1.0,
+    )
+    c = compute_desk_consensus(ctx, df, rs_spy_ratio=1.05)
+    acc = bento_accents_from_consensus(c)
+    assert set(acc.keys()) == {"setup", "momentum", "exit"}
 
 
 def test_institutional_absorption_triggers_on_flat_close():

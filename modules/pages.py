@@ -135,6 +135,7 @@ def build_context(
     cfg: dict,
     desk_snapshot: Optional[DeskMarketSnapshot] = None,
     global_snapshot: Optional[GlobalMarketSnapshot] = None,
+    defer_headlines_earnings: bool = False,
 ) -> Optional[DashContext]:
     """Fetch all data and compute all scores. Returns None if data unavailable."""
     ctx = DashContext(ticker=ticker, cfg=cfg)
@@ -167,8 +168,10 @@ def build_context(
     # ── Parallel fetch ──
     with st.spinner(f"Loading {ticker}..."):
         with make_script_ctx_pool(5) as pool:
-            f_news = submit_with_script_ctx(pool, fetch_news_headlines, ticker)
-            f_earn = submit_with_script_ctx(pool, fetch_earnings_date, ticker)
+            f_news = f_earn = None
+            if not defer_headlines_earnings:
+                f_news = submit_with_script_ctx(pool, fetch_news_headlines, ticker)
+                f_earn = submit_with_script_ctx(pool, fetch_earnings_date, ticker)
             f_df = f_wk = f_1mo = None
             if not use_panel_daily:
                 f_df = submit_with_script_ctx(pool, fetch_stock, ticker, "1y", "1d")
@@ -177,8 +180,12 @@ def build_context(
             elif not use_panel_wk:
                 f_wk = submit_with_script_ctx(pool, fetch_stock, ticker, "2y", "1wk")
 
-            ctx.news = f_news.result()
-            ctx.earnings_date_raw = f_earn.result()
+            if defer_headlines_earnings:
+                ctx.news = []
+                ctx.earnings_date_raw = None
+            else:
+                ctx.news = f_news.result()
+                ctx.earnings_date_raw = f_earn.result()
 
             if use_panel_daily:
                 ctx.df = gs.active_daily_df

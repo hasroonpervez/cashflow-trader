@@ -132,8 +132,11 @@ for _import_try in range(_IMPORT_KEYERROR_RETRIES):
                 consensus_compact_html,
                 traders_note_markdown,
                 bento_box_html,
+                bento_accents_from_consensus,
                 suggested_shares_atr_risk,
                 institutional_heatmap_ribbon_html,
+                unified_probability_dial_html,
+                whale_session_x_for_chart,
             )
         break
     except KeyError:
@@ -280,16 +283,50 @@ def _render_equity_setup_desk(scanner_results, selectbox_key: str, prefer_ticker
         _chart_data = pd.DataFrame({"Close": pd.to_numeric(_eq_df["Close"], errors="coerce")}).dropna().tail(60)
         if not _chart_data.empty:
             with st.container(border=True):
+                _wx = whale_session_x_for_chart(_eq_df, z_threshold=4.0)
                 try:
-                    st.line_chart(
-                        _chart_data,
-                        y="Close",
-                        color="#3b82f6",
-                        height=200,
-                        use_container_width=True,
+                    _fig_eq = go.Figure(
+                        data=[
+                            go.Scatter(
+                                x=_chart_data.index,
+                                y=_chart_data["Close"],
+                                mode="lines",
+                                name="Close",
+                                line=dict(color="#3b82f6", width=2),
+                            )
+                        ]
                     )
-                except TypeError:
-                    st.line_chart(_chart_data, height=200, use_container_width=True)
+                    if _wx is not None:
+                        _fig_eq.add_vline(
+                            x=_wx,
+                            line_width=1,
+                            line_dash="dash",
+                            line_color="#22d3ee",
+                            annotation_text="Whale vol",
+                            annotation_position="top",
+                        )
+                    _fig_eq.update_layout(
+                        height=220,
+                        margin=dict(l=8, r=8, t=28, b=8),
+                        template="plotly_dark",
+                        paper_bgcolor=_PLOTLY_PAPER_BG,
+                        plot_bgcolor=_PLOTLY_PLOT_BG,
+                        showlegend=False,
+                        xaxis=dict(showgrid=True, gridcolor=_PLOTLY_GRID),
+                        yaxis=dict(showgrid=True, gridcolor=_PLOTLY_GRID),
+                    )
+                    st.plotly_chart(_fig_eq, use_container_width=True, config=_PLOTLY_UI_CONFIG)
+                except Exception:
+                    try:
+                        st.line_chart(
+                            _chart_data,
+                            y="Close",
+                            color="#3b82f6",
+                            height=200,
+                            use_container_width=True,
+                        )
+                    except TypeError:
+                        st.line_chart(_chart_data, height=200, use_container_width=True)
         else:
             st.caption("Not enough clean close data for a spark window.")
     else:
@@ -722,7 +759,10 @@ def main():
 
     # ── BUILD CONTEXT (all fetches + computations in one shot) ──
     from modules.pages import build_context
-    ctx = build_context(ticker, cfg, global_snapshot=_global_snap)
+    _defer_meta = bool(cfg.get("defer_headlines_earnings", False))
+    ctx = build_context(
+        ticker, cfg, global_snapshot=_global_snap, defer_headlines_earnings=_defer_meta
+    )
     if ctx is None:
         _sym_e = _html_mod.escape(str(ticker))
         st.error(
@@ -801,12 +841,12 @@ def main():
     nc = ctx.nc; action_strat = ctx.action_strat; action_plain = ctx.action_plain
     mini_mode = ctx.mini_mode; mobile_chart_layout = ctx.mobile_chart_layout
 
+    _tku = str(ticker).strip().upper()
     _risk_closes_df = pd.DataFrame()
     _portfolio_lr_df = pd.DataFrame()
     _simple_corr_mult = 1.0
     try:
         _risk_syms = list(dict.fromkeys([str(t).strip().upper() for t in watch_items if t]))[:20]
-        _tku = str(ticker).strip().upper()
         if _tku not in _risk_syms:
             _risk_syms.append(_tku)
         _risk_closes_df = _global_snap.risk_closes_df
@@ -820,6 +860,7 @@ def main():
         _portfolio_lr_df = pd.DataFrame()
         _simple_corr_mult = 1.0
 
+    _cm_cached = None
     try:
         if len(_risk_closes_df.columns) >= 2:
             _cm_cached = watchlist_correlation_matrix_cached(_risk_closes_df)
@@ -832,6 +873,26 @@ def main():
                     _heat_main = build_correlation_heatmap(_cm_cached)
                     if _heat_main is not None:
                         st.plotly_chart(_heat_main, use_container_width=True, config=_PLOTLY_UI_CONFIG)
+    except Exception:
+        pass
+    try:
+        if (
+            _cm_cached is not None
+            and not _cm_cached.empty
+            and _tku in [str(c).strip().upper() for c in _cm_cached.columns]
+        ):
+            _colu = [str(c).strip().upper() for c in _cm_cached.columns]
+            if _tku in _colu:
+                _ser = _cm_cached[_tku]
+                _peers = _ser.drop(labels=[_tku], errors="ignore")
+                if len(_peers):
+                    _mx = float(_peers.max())
+                    _peer = str(_peers.idxmax())
+                    if _mx > 0.75:
+                        st.warning(
+                            f"**Correlated book risk:** `{_html_mod.escape(_tku)}` vs `{_html_mod.escape(_peer)}` "
+                            f"≈ **{_mx:.2f}** on this matrix — positions may move together; size and hedges accordingly."
+                        )
     except Exception:
         pass
 
@@ -857,6 +918,23 @@ def main():
         unsafe_allow_html=True,
     )
 
+    if not mini_mode:
+        _rs_u = _consensus.get("rs_spy_ratio")
+        if _rs_u is not None and np.isfinite(float(_rs_u)):
+            _rs_ln = f"RS vs SPY (~90d batch ratio) **{float(_rs_u):.2f}** — tilt in the blend"
+        else:
+            _rs_ln = "RS vs SPY: **not in batch map** — RS tilt neutral in the blend"
+        st.markdown(
+            unified_probability_dial_html(
+                ticker,
+                float(_consensus.get("unified_probability") or 0),
+                qs=float(qs),
+                conf_pct=float(100.0 * cp_score / max(1, int(cp_max))),
+                rs_line=_rs_ln,
+            ),
+            unsafe_allow_html=True,
+        )
+
     # ── CONSENSUS SIGNAL + TRADER'S NOTE + BENTO (information hierarchy) ──
     if mini_mode:
         st.markdown(consensus_compact_html(ticker, _consensus), unsafe_allow_html=True)
@@ -864,17 +942,25 @@ def main():
         st.markdown(consensus_banner_html(ticker, _consensus), unsafe_allow_html=True)
         st.markdown(traders_note_markdown(ticker, ctx, df, _consensus))
         st.markdown(institutional_heatmap_ribbon_html(_consensus), unsafe_allow_html=True)
+        _acc = bento_accents_from_consensus(_consensus)
         _b1 = bento_box_html(
             "THE SETUP",
             "Is the spring coiled?",
             _consensus["setup_hint"].replace("**", ""),
+            accent=_acc["setup"],
         )
         _b2 = bento_box_html(
             "THE MOMENTUM",
             "Is flow confirming?",
             _consensus["momentum_hint"].replace("**", ""),
+            accent=_acc["momentum"],
         )
-        _b3 = bento_box_html("THE EXIT", "Where is the plan?", _consensus["exit_hint"].replace("**", ""))
+        _b3 = bento_box_html(
+            "THE EXIT",
+            "Where is the plan?",
+            _consensus["exit_hint"].replace("**", ""),
+            accent=_acc["exit"],
+        )
         bc1, bc2, bc3 = st.columns(3)
         with bc1:
             st.markdown(_b1, unsafe_allow_html=True)
@@ -913,6 +999,13 @@ def main():
                 )
             else:
                 st.info("ATR or price unavailable — cannot size from this snapshot.")
+            if int(getattr(ctx, "d_n", 0) or 0) >= 3 and float(getattr(ctx, "d_wr", 0) or 0) > 0:
+                _w = float(max(1.0, min(99.0, ctx.d_wr)))
+                _kf, _kh = kelly_criterion(_w, 1.0, 1.0, use_quant=False)
+                st.caption(
+                    f"Illustrative **binary Kelly** from diamond win rate **{_w:.0f}%** vs **1:1** payoff: "
+                    f"full **{_kf}%** · half **{_kh}%** of bankroll — not a recommendation; use your own edge math."
+                )
 
     # ── EARNINGS AMBUSH CHECK ──
     if earnings_near and earnings_dt:
@@ -2378,7 +2471,7 @@ def main():
                                 fv = bs_price(price, b0["strike"], T_y, rfr, iv_d, "call")
                                 edge = b0["mid"] - fv
                                 edge_c = "#10b981" if edge > 0 else "#ef4444"
-                                st.markdown(f"<div class='tc'><div style='font-size:.7rem;color:#64748b;text-transform:uppercase'>TOP CC GREEKS (r={rfr * 100:.2f}%)</div><div style='margin-top:8px;color:#94a3b8;font-size:.85rem'>Delta: <strong style='color:#e2e8f0'>{gr['delta']:.3f}</strong><br>Theta: <strong style='color:#10b981'>${gr['theta']:.3f}/day</strong><br>Vega: <strong style='color:#e2e8f0'>${gr['vega']:.3f}/1%IV</strong><br>Fair: <strong style='color:#e2e8f0'>${fv:.2f}</strong> | Edge: <strong style='color:{edge_c}'>${edge:+.2f}</strong></div></div>", unsafe_allow_html=True)
+                                st.markdown(f"<div class='tc'><div style='font-size:.7rem;color:#64748b;text-transform:uppercase'>TOP CC GREEKS (r={rfr * 100:.2f}%)</div><div style='margin-top:8px;color:#94a3b8;font-size:.85rem'>Delta: <strong style='color:#e2e8f0'>{gr['delta']:.3f}</strong><br>Theta: <strong style='color:#10b981'>${gr['theta']:.3f}/day</strong><br>Vega: <strong style='color:#e2e8f0'>${gr['vega']:.3f}/1%IV</strong><br>Vanna: <strong style='color:#e2e8f0'>{gr.get('vanna', 0):.5f}</strong> (Δδ per 1% IV)<br>Charm: <strong style='color:#e2e8f0'>{gr.get('charm', 0):.5f}</strong> (Δδ/day)<br>Fair: <strong style='color:#e2e8f0'>${fv:.2f}</strong> | Edge: <strong style='color:{edge_c}'>${edge:+.2f}</strong></div></div>", unsafe_allow_html=True)
                             else:
                                 st.markdown("<div class='tc'><span style='color:#64748b'>No CC data for Greeks</span></div>", unsafe_allow_html=True)
                         with gk2:
@@ -3120,7 +3213,33 @@ def main():
             n_tab, m_tab, e_tab = st.tabs(["🗞️ Market News", "🌍 Macro & Yields", "📅 Upcoming Earnings"])
             with n_tab:
                 st.markdown(f"#### {ticker} News")
-                if news:
+                if _defer_meta:
+                    st.caption(
+                        "**Deferred headlines** — loaded in a fragment so the main desk can paint first. "
+                        "Set `defer_headlines_earnings: false` in config to bundle news in the initial fetch."
+                    )
+
+                    @st.fragment
+                    def _news_headlines_fragment(sym: str = str(ticker)):
+                        _hl = fetch_news_headlines(sym)
+                        if _hl:
+                            for item in _hl:
+                                lnk = (
+                                    f"<a href='{item['link']}' target='_blank' style='color:#06b6d4'>Read</a>"
+                                    if item["link"]
+                                    else ""
+                                )
+                                st.markdown(
+                                    f"<div class='ni'><strong style='color:#e2e8f0'>{item['title']}</strong><br>"
+                                    f"<span style='color:#64748b;font-size:.8rem'>{item['pub']} {item['time']}</span>"
+                                    f"{' | ' + lnk if lnk else ''}</div>",
+                                    unsafe_allow_html=True,
+                                )
+                        else:
+                            st.info("No news found.")
+
+                    _news_headlines_fragment()
+                elif news:
                     for item in news:
                         lnk = f"<a href='{item['link']}' target='_blank' style='color:#06b6d4'>Read</a>" if item["link"] else ""
                         st.markdown(f"<div class='ni'><strong style='color:#e2e8f0'>{item['title']}</strong><br><span style='color:#64748b;font-size:.8rem'>{item['pub']} {item['time']}</span>{' | ' + lnk if lnk else ''}</div>", unsafe_allow_html=True)
