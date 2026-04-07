@@ -66,7 +66,7 @@ from modules.ui_helpers import (
     streamlit_show_dataframe,
     walk_up_limit_sell_per_share,
 )
-from modules.chart import build_correlation_heatmap, build_skew_chart
+from modules.chart import _chart_hoverlabel, build_correlation_heatmap, build_skew_chart
 from modules.data import compute_iv_rank_proxy, fetch_earnings_calendar_display, fetch_news_headlines
 
 from .desk_locals import DeskLocals
