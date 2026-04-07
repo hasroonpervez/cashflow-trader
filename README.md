@@ -209,8 +209,6 @@ Live code builds BBW from Bollinger on closes; skew from `calc_vol_skew`; float/
 - **10x / fundamental sieve** — Data gaps yield “—”; not predictive of returns.
 - **Diamond win rate / backtests** — Heuristic labels on one price path; holdout scoring is stricter than raw in-sample but still not out-of-sample validation.
 
-Watchlist defaults include **KEEL** (former BITF / Bitfarms) for the rebranded AI-infrastructure thesis.
-
 Optional `hmmlearn` / `scipy` paths degrade gracefully if missing.
 
 ---
