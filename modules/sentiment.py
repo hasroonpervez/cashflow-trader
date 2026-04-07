@@ -12,6 +12,7 @@ from datetime import datetime
 
 from .ta import TA
 from .data import fetch_stock
+from .utils import log_warn
 
 try:
     from hmmlearn import hmm
@@ -136,7 +137,8 @@ class QuantSentiment:
             probabilities = model.predict_proba(X)
             current_probs = probabilities[-1]
             return {i: float(prob) for i, prob in enumerate(current_probs)}
-        except Exception:
+        except Exception as e:
+            log_warn("QuantSentiment.regime_detection HMM fit", e)
             return {0: 0.5, 1: 0.5}
         finally:
             hmm_log.setLevel(prev_lvl)

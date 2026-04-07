@@ -15,6 +15,8 @@ from curl_cffi import requests as curl_requests
 from datetime import datetime, timedelta
 from typing import NamedTuple, Optional
 
+from .utils import log_warn
+
 # ~90 trading sessions RS vs SPY (growth-factor ratio) on date-aligned closes from the batch panel.
 _RS_SPY_LOOKBACK_SESSIONS = 90
 
@@ -66,8 +68,8 @@ def _bind_yfdata_session() -> None:
         from yfinance.data import YfData
 
         YfData(session=_YAHOO_SESSION)
-    except Exception:
-        pass
+    except Exception as e:
+        log_warn("YfData session bind", e)
 
 
 def _patch_yfinance_data_layer_timeout() -> None:
@@ -205,16 +207,16 @@ def _option_expirations_yfinance(symbol: str, attempts: int = 5) -> list[str]:
             if attempt == 0:
                 try:
                     t.history(period="5d", interval="1d", timeout=_YAHOO_YF_TIMEOUT)
-                except Exception:
-                    pass
+                except Exception as e:
+                    log_warn(f"option expirations history prime ({sym})", e)
             raw = getattr(t, "options", None)
             if raw is not None:
                 lst = [_norm_option_expiry_str(x) for x in list(raw)]
                 lst = [e for e in lst if len(e) >= 10]
                 if lst:
                     return lst
-        except Exception:
-            pass
+        except Exception as e:
+            log_warn(f"option expirations yfinance attempt {attempt + 1}/{attempts} ({sym})", e)
         if attempt < attempts - 1:
             time.sleep(0.12 * (2**attempt))
     return []
@@ -1047,12 +1049,13 @@ def fetch_news(ticker):
                     pt = datetime.fromtimestamp(ts).strftime("%b %d, %H:%M")
                 elif isinstance(ts, str) and ts:
                     pt = ts[:16]
-            except Exception:
-                pass
+            except Exception as e:
+                log_warn("fetch_news item timestamp", e)
             if title:
                 items.append({"title": title, "link": link, "pub": pub, "time": pt})
         return items
-    except Exception:
+    except Exception as e:
+        log_warn("fetch_news", e, ticker=str(ticker))
         return []
 
 
@@ -1076,12 +1079,13 @@ def fetch_news_headlines(symbol: str):
                     pt = datetime.fromtimestamp(ts).strftime("%b %d, %H:%M")
                 elif isinstance(ts, str) and ts:
                     pt = ts[:16]
-            except Exception:
-                pass
+            except Exception as e:
+                log_warn("fetch_news_headlines item timestamp", e)
             if title:
                 out.append({"title": title, "link": link, "pub": pub, "time": pt})
         return out[:8] if out else []
-    except Exception:
+    except Exception as e:
+        log_warn("fetch_news_headlines", e, ticker=str(symbol))
         return []
 
 
@@ -1172,8 +1176,8 @@ def compute_iv_earnings_chart_overlay(
             rk = compute_iv_rank_proxy(str(symbol).upper().strip(), float(spot_price), iv)
             if rk is not None and float(rk.get("rank", 0)) >= 90.0:
                 out["vega_risk"] = True
-        except Exception:
-            pass
+        except Exception as e:
+            log_warn("compute_iv_earnings_chart_overlay iv_rank branch", e, ticker=str(symbol))
         if not out["vega_risk"]:
             try:
                 rv20 = (
@@ -1184,8 +1188,8 @@ def compute_iv_earnings_chart_overlay(
                     p90 = float(win.quantile(0.9))
                     if p90 > 0 and iv > p90:
                         out["vega_risk"] = True
-            except Exception:
-                pass
+            except Exception as e:
+                log_warn("compute_iv_earnings_chart_overlay rv20 quantile", e, ticker=str(symbol))
     return out
 
 def _earnings_date_from_quote_info(info: dict):
@@ -1225,8 +1229,8 @@ def _coerce_earnings_to_yyyy_mm_dd(raw) -> str | None:
     try:
         if isinstance(raw, float) and np.isnan(raw):
             return None
-    except Exception:
-        pass
+    except Exception as e:
+        log_warn("_coerce_earnings_to_yyyy_mm_dd nan check", e)
     try:
         if isinstance(raw, str):
             s = raw.strip()
@@ -1280,8 +1284,8 @@ def _earnings_next_from_yahoo_quotesummary(symbol: str) -> str | None:
                 if d is None and fmt:
                     try:
                         d = datetime.strptime(str(fmt)[:10], "%Y-%m-%d").date()
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log_warn("_earnings_next_from_yahoo_quotesummary fmt parse", e, ticker=sym)
                 if d is not None:
                     parsed.append(d)
             elif isinstance(item, (int, float)) and item > 1e9:
@@ -1349,8 +1353,8 @@ def _earnings_from_yfinance_calendar(symbol: str, attempts: int = 4) -> str | No
             s = _coerce_earnings_to_yyyy_mm_dd(raw)
             if s:
                 return s
-        except Exception:
-            pass
+        except Exception as e:
+            log_warn(f"_earnings_from_yfinance_calendar attempt {attempt + 1}/{attempts}", e, ticker=sym)
         if attempt < attempts - 1:
             time.sleep(0.1 * (2**attempt))
     return None
@@ -1400,15 +1404,15 @@ def _resolve_next_earnings_yyyy_mm_dd(symbol: str) -> str | None:
         got = _earnings_date_from_quote_info(info or {})
         if got:
             return got
-    except Exception:
-        pass
+    except Exception as e:
+        log_warn("_resolve_next_earnings .info path", e, ticker=sym)
 
     try:
         got = _earnings_date_from_quote_info(fetch_info(sym))
         if got:
             return got
-    except Exception:
-        pass
+    except Exception as e:
+        log_warn("_resolve_next_earnings fetch_info path", e, ticker=sym)
 
     return None
 
@@ -1515,8 +1519,8 @@ def fetch_earnings_calendar_display(ticker: str):
                             "Status": status,
                         }
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    log_warn("fetch_earnings_calendar_display fallback row", e, ticker=str(ticker))
 
         if not rows:
             return pd.DataFrame(), None
@@ -1533,7 +1537,8 @@ def fetch_earnings_calendar_display(ticker: str):
                 highlight_idx = int(hit[0])
 
         return df, highlight_idx
-    except Exception:
+    except Exception as e:
+        log_warn("fetch_earnings_calendar_display", e, ticker=str(ticker))
         return pd.DataFrame(), None
 
 

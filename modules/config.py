@@ -103,6 +103,40 @@ def save_config(cfg) -> bool:
         return False
 
 
+class ConfigTransaction:
+    """Accumulate config mutations, write once at flush."""
+
+    def __init__(self):
+        self._base = load_config()
+        self._mutations = {}
+        self._dirty = False
+
+    def update(self, **kwargs):
+        for k, v in kwargs.items():
+            if self._base.get(k) != v:
+                self._mutations[k] = v
+                self._dirty = True
+
+    def flush(self) -> bool:
+        if not self._dirty:
+            return True
+        merged = {**self._base, **self._mutations}
+        result = save_config(merged)
+        if result:
+            self._base = merged
+            self._mutations = {}
+            self._dirty = False
+        return result
+
+    @property
+    def current(self):
+        return {**self._base, **self._mutations}
+
+    @property
+    def pending_keys(self):
+        return frozenset(self._mutations.keys())
+
+
 def _overlay_prefs_from_session():
     """Chart overlay keys as stored in session_state (sb_* toggles)."""
     return {

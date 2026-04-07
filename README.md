@@ -246,7 +246,7 @@ The dashboard answers one question: **"What should I do right now?"**
 
 ```
 cashflow-trader/
-├── app.py                    # Thin entrypoint: global **`fetch_global_market_bundle`** → tape / context / risk / scanner panel; Yahoo miss → error + cache-clear retry
+├── app.py                    # Thin orchestrator: watchlist **`@st.fragment`**, Mission Control + tape (**`modules/render_pre_tabs.py`**), **`build_context`**, desk header through execution strip, chart fragment, tab dispatch
 ├── tests/                    # pytest — correlation, allocation, earnings spark, BS/EV
 ├── config.json               # Watchlist & UI preferences (atomic JSON writes)
 ├── requirements.txt
@@ -254,8 +254,11 @@ cashflow-trader/
 ├── .gitignore
 └── modules/
     ├── __init__.py
-    ├── config.py             # Config persistence, defaults, st.secrets overlay
-    ├── data.py               # Yahoo: `_ForcedTimeoutSession`, `YfData` timeout clamp; **`fetch_stock`** → optional **Alpha Vantage** daily fallback when **`ALPHAVANTAGE_API_KEY`** set; **`fetch_info`** + AV **fundamental** merge; **`evaluate_fundamental_sieve`**; `fetch_global_market_bundle` / `GlobalMarketSnapshot` (**`rs_spy_ratio_map`**, **`fundamental_sieve_map`**); **`rs_spy_ratio_map_from_close_matrix`**; `fetch_*` never-raise; tape + macro via desk slice
+    ├── config.py             # Config persistence, defaults, st.secrets overlay; **`ConfigTransaction`** batch flush
+    ├── desk_locals.py        # **`DeskLocals`** + **`build_desk_locals`** snapshot for tab renderers
+    ├── render_pre_tabs.py    # Pre-tab UI: watchlist fragment, HUD, tape, config flush; **`render_desk_after_context`** (consensus → execution strip → alerts)
+    ├── renderers.py          # Tab bodies (**`@st.fragment`** on major tabs), equity desk; **`_news_item_markdown_html`** (escaped headlines, http(s)-only links)
+    ├── data.py               # Yahoo: `_ForcedTimeoutSession`, `YfData` timeout clamp; **`fetch_stock`** → optional **Alpha Vantage** daily fallback when **`ALPHAVANTAGE_API_KEY`** set; **`fetch_info`** + AV **fundamental** merge; **`evaluate_fundamental_sieve`**; `fetch_global_market_bundle` / `GlobalMarketSnapshot` (**`rs_spy_ratio_map`**, **`fundamental_sieve_map`**); **`rs_spy_ratio_map_from_close_matrix`**; `fetch_*` never-raise; tape + macro via desk slice; swallowed exceptions → **`log_warn`** on stderr for key paths
     ├── ta.py                 # TA class — indicators, **`apply_ffd`**, **`calculate_hurst_exponent`** (R/S, 100-bar), **adaptive `get_dark_pool_proxy`**, **`get_shadow_move` (whale band)**, **`get_correlation_matrix`**, HVN / volume profile
     ├── options.py            # Black-Scholes (**`bs_greeks`**: δ, γ, θ, ν, **vanna**, **charm**), Corrado-Su, EV, Kelly, Quant Edge, **GEX / gamma flip / `predict_opex_pin`**, Diamonds, **`Opt.detect_pre_diamond`**, **`Opt.portfolio_allocation`** (+ **Sentinel sector** / **top-3 ρ** guards), **`scan_single_ticker`** (optional **`spy_df`**, **`panel_raw`**), **`scan_watchlist_edge_rows`** (optional **`panel_raw`**), **`watchlist_correlation_matrix_cached`**, **MC PoP**, **`PortfolioRisk`**
     ├── sentiment.py          # **Bayesian-style `analyze_news_bias`**, HMM (FFD), CC sim, Alerts, QuantBacktest
@@ -263,9 +266,15 @@ cashflow-trader/
     ├── ui_helpers.py         # Sparklines, fragments, **`sentinel_ledger_metrics`**, **`sentinel_ledger_table_rows`**, **`ledger_theta_desk_day`**, regime **Shadow breakout** banner, **expected_move_safety_html**, **Θ/Γ desk line**
     ├── signal_desk.py        # **`compute_desk_consensus`** (+ **Hurst regime**, **`whale_sweep`**, **`fundamental_sieve`**, **`unified_probability`**, **`ofi_detail`**, **`daily_aggressor_proxy`**, **`blend_unified_probability`**), **`detect_whale_sweep`**, **`ffd_stationarity_proxy`**, **`_cached_hurst_rs`**, **`unified_probability_dial_html`**, **`traders_note_markdown`** (Unicorn; **GOD TIER**; **Alpha realization**; **`turbo_desk`**), **`vwap_distance_stats`**, **`institutional_absorption`**, **`institutional_heatmap_ribbon_html`**, **`desk_conviction_multiplier`**, **`bento_box_html`**, **`bento_accents_from_consensus`**
     ├── pages.py              # **`build_context`** (optional **`global_snapshot`**, **`defer_headlines_earnings`**): options → GEX → **OpEx pin map** → **shadow move** → **shadow breakout** flag → fused Gold → confluence → diamonds
+    ├── utils.py              # **`safe_last`**, **`safe_float`**, **`safe_html`**, **`safe_href`** (http/https only for `href`), **`log_warn`** → stderr
     ├── streamlit_threading.py # Thread pools with ScriptRunContext re-attach per task
     └── css.py                # Full CSS theme + Mini Mode + sidebar toggle JS
 ```
+
+### Observability & HTML hygiene
+
+- **`modules.utils.log_warn`** — Prefer over bare `except: pass` for non-trivial failures; writes **`[cashflow-trader]`** / **`[cashflow-trader:TICKER]`** lines to **stderr** (visible in local terminals and Streamlit logs). **`data.py`**, **`options.py`**, and **`sentiment.py`** use it on previously silent handlers (e.g. news timestamps, earnings merge paths, quant/HMM fallbacks, scanner sub-blocks).
+- **`safe_html` / `safe_href`** — Any string that reaches **`st.markdown(..., unsafe_allow_html=True)`** should be escaped or validated. **`safe_href`** only allows **`http://`** / **`https://`** URLs in attributes (blocks **`javascript:`** etc.). **Intel → Market News** uses **`_news_item_markdown_html`** in **`renderers.py`**; macro row labels are escaped.
 
 **Why this split works with Streamlit:**
 
@@ -300,7 +309,7 @@ Desk upgrades from **raw metrics** toward **actionable signals** (ongoing).
 5. **Institutional heatmap ribbon** — **Shipped (detailed desk):** **`institutional_heatmap_ribbon_html`** — **COIL** / **ICEBERG** / **SWEEP** / **LEADER** segments plus **REGIME** / **DOMINANCE** lines and **conviction multiplier** subtitle; **SWEEP** when **`whale_sweep`** or **`vwap_urgency`**; **LEADER** when **RS > 1** vs SPY (batch map) **and** **volume Z > 4**.
 6. **One-touch workflow** — **Shipped (illustrative):** expander **Calculate position size** — account $, **base risk %** × **`conviction_multiplier`** (**2.0×** when **COIL + ICEBERG + SWEEP** including **`whale_sweep`**; **Unicorn** note can still appear with **LEADER** without **SWEEP**, giving **1.25×**), **~1.5× ATR** stop below spot → **`suggested_shares_atr_risk`**; optional **binary Kelly** caption from **`d_wr`** when diamond stats exist; not broker-connected.
 
-**Still optional later:** broader **CSS** pass, LLM-generated note, **Secrets**-default account size, breakout-candle callouts on chart, mini-mode heatmap strip parity.
+**Still optional later:** exhaustive **`log_warn`** on every inner **`continue`** in hot Yahoo loops, LLM-generated note, **Secrets**-default account size, breakout-candle callouts on chart, mini-mode heatmap strip parity.
 
 ---
 

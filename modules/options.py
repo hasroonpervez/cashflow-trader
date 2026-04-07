@@ -22,6 +22,7 @@ from .data import (
 )
 from .sentiment import Sentiment
 from .streamlit_threading import make_script_ctx_pool, submit_with_script_ctx
+from .utils import log_warn
 
 try:
     from scipy.stats import norm
@@ -57,7 +58,8 @@ def watchlist_correlation_matrix_cached(closes_wide: pd.DataFrame):
         if mat is None or getattr(mat, "empty", True):
             return None
         return mat
-    except Exception:
+    except Exception as e:
+        log_warn("watchlist_correlation_matrix_cached", e)
         return None
 
 def bs_price(S, K, T, r, sigma, option_type="call"):
@@ -285,7 +287,8 @@ def _quant_edge_mc_pop_boost(options_data, top_n=8):
             return 0.0, None
         avg = float(np.mean(arr))
         return float(0.25 * (avg / 100.0)), avg
-    except Exception:
+    except Exception as e:
+        log_warn("_quant_edge_mc_pop_boost", e)
         return 0.0, None
 
 
@@ -317,8 +320,8 @@ def quant_edge_score(df, vix_val=None, options_data=None, use_quant=False):
             if mc_avg_top is not None:
                 breakdown["mc_pop_top_avg"] = round(mc_avg_top, 1)
             return round(edge, 1), breakdown
-        except Exception:
-            pass
+        except Exception as e:
+            log_warn("quant_edge_score use_quant path", e)
 
     sc = {}; close = df["Close"].iloc[-1]
     # 1. TREND (equal 20% weight in composite; important for premium sellers)
@@ -424,8 +427,8 @@ def scan_watchlist_edge_rows(
                 if r:
                     r["Time"] = ts
                     rows.append(r)
-            except Exception:
-                pass
+            except Exception as e:
+                log_warn("edge_log_worker future", e)
     got = {r["Ticker"] for r in rows}
     failed = [s for s in syms if s not in got]
     rows.sort(key=lambda x: (-x["Quant"], -x["Delta"], x["Ticker"]))
@@ -455,7 +458,8 @@ def weekly_trend_label(df_wk):
         if not above_ema and not macd_bull:
             return "BEARISH", "#ef4444"
         return "MIXED", "#f59e0b"
-    except Exception:
+    except Exception as e:
+        log_warn("weekly_trend_label", e)
         return "UNKNOWN", "#64748b"
 
 
@@ -477,8 +481,8 @@ def calc_gold_zone(df, df_wk=None, gamma_flip_price=None):
         hvn_px, _hvn_w = nearest_hvn_within_pct(float(price), nodes, 0.02)
         if hvn_px is not None:
             components["HVN"] = round(float(hvn_px), 2)
-    except Exception:
-        pass
+    except Exception as e:
+        log_warn("calc_gold_zone HVN", e)
 
     vp = TA.volume_profile(df)
     if not vp.empty:
@@ -992,8 +996,8 @@ def evaluate_asymmetric_convexity_sieve(
                 gates["bbw"]["pctile"] = bbw_pctile
                 if bbw_pctile <= max_bbw_percentile:
                     gates["bbw"]["ok"] = True
-    except Exception:
-        pass
+    except Exception as e:
+        log_warn("evaluate_asymmetric_convexity_sieve bbw", e)
 
     vol_z = None
     try:
@@ -1007,8 +1011,8 @@ def evaluate_asymmetric_convexity_sieve(
                 gates["vol_z"]["z"] = vol_z
                 if vol_z >= min_volume_z:
                     gates["vol_z"]["ok"] = True
-    except Exception:
-        pass
+    except Exception as e:
+        log_warn("evaluate_asymmetric_convexity_sieve vol_z", e)
 
     if skew_ratio is not None and skew_ratio >= min_skew_ratio:
         gates["skew"]["ok"] = True
@@ -1083,8 +1087,8 @@ def scan_single_ticker(
                     if gf_s is not None and np.isfinite(float(gf_s)):
                         gamma_flip_sc = float(gf_s)
                         gex_regime = "🛡️ STABLE" if float(price) > gamma_flip_sc else "⚠️ TURBULENT"
-        except Exception:
-            pass
+        except Exception as e:
+            log_warn("scan_single_ticker gamma/GEX block", e, ticker=str(tkr))
 
         gold_zone, gz_comp = calc_gold_zone(df, df_wk, gamma_flip_price=gamma_flip_sc)
         cp_score, cp_max, cp_bd, _ = calc_confluence_points(df, df_wk, None, gold_zone_price=gold_zone)
@@ -1131,7 +1135,8 @@ def scan_single_ticker(
                 confluence_series=confluence_series,
                 spy_df=spy_df,
             )
-        except Exception:
+        except Exception as e:
+            log_warn("scan_single_ticker pre_diamond", e, ticker=str(tkr))
             pre_diamond = {"is_pre_diamond": False, "signal_strength": "—"}
 
         nodes_s = TA.get_volume_nodes(df)
@@ -1198,7 +1203,8 @@ def scan_single_ticker(
             k_put = float(K_scan)
             sp = float(price)
             em_safety = "SAFE" if k_put < (sp - em_move) else "MONITOR"
-        except Exception:
+        except Exception as e:
+            log_warn("scan_single_ticker em_safety", e, ticker=str(tkr))
             em_safety = "—"
 
         flow_bias = "—"
@@ -1210,12 +1216,14 @@ def scan_single_ticker(
                 and not _dp_s.empty
                 and bool(_dp_s["dark_pool_alert"].iloc[-1])
             )
-        except Exception:
+        except Exception as e:
+            log_warn("scan_single_ticker dark_pool_proxy", e, ticker=str(tkr))
             whale_ok = False
         try:
             _hl = fetch_news_headlines(tkr)
             news_bias_score = float(Sentiment.analyze_news_bias(_hl)) if _hl else 0.0
-        except Exception:
+        except Exception as e:
+            log_warn("scan_single_ticker news bias", e, ticker=str(tkr))
             _hl = []
             news_bias_score = None
         parts = []
@@ -1236,8 +1244,8 @@ def scan_single_ticker(
             _, _piv, _civ = calc_vol_skew(float(price), c_s, p_s)
             if _piv is not None and _civ is not None and float(_piv) > 0:
                 skew_ratio = float(_civ) / float(_piv)
-        except Exception:
-            pass
+        except Exception as e:
+            log_warn("scan_single_ticker calc_vol_skew", e, ticker=str(tkr))
 
         _yf_info = fetch_info(tkr) or {}
         _flt, _short_pct = _parse_yahoo_float_and_short(_yf_info)

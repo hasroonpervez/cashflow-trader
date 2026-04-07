@@ -33,6 +33,7 @@ from .config import (
     EMA_EXTENSION_WARN_PCT,
 )
 from .streamlit_threading import make_script_ctx_pool, submit_with_script_ctx
+from .utils import safe_last, safe_float
 from .ui_helpers import (
     _factor_checklist_labels, _confluence_why_trade_plain,
     _iv_rank_qualitative_words, _iv_rank_pill_html,
@@ -43,6 +44,82 @@ from .ui_helpers import (
     _persist_overlay_prefs,
 )
 import plotly.graph_objects as go
+
+
+@dataclass
+class PriceData:
+    """Grouped OHLCV / spot fields (mirrors flat DashContext after build)."""
+
+    df: Any = None
+    df_wk: Any = None
+    df_1mo_spark: Any = None
+    price: float = 0.0
+    prev: float = 0.0
+    chg: float = 0.0
+    chg_pct: float = 0.0
+    hi52: float = 0.0
+    lo52: float = 0.0
+    vix_v: float = 0.0
+
+
+@dataclass
+class OptionsData:
+    """Options desk snapshot (mirrors flat DashContext after build)."""
+
+    rfr: float = 0.045
+    bluf_cc: Any = None
+    bluf_csp: Any = None
+    bluf_exp: Any = None
+    bluf_dte: int = 0
+    bluf_calls: Any = None
+    bluf_puts: Any = None
+    gamma_flip: Any = None
+    opt_exps: list = field(default_factory=list)
+    cc_scan_rows: list = field(default_factory=list)
+    csp_scan_rows: list = field(default_factory=list)
+    ref_iv_bluf: Any = None
+    nc: int = 1
+    action_strat: str = ""
+    action_plain: str = ""
+    master_html: str = ""
+    bluf_html: str = ""
+
+
+@dataclass
+class StructureScores:
+    """Quant edge, confluence, structure (mirrors flat DashContext after build)."""
+
+    qs: float = 0.0
+    qb: dict = field(default_factory=dict)
+    struct: str = ""
+    wk_label: str = ""
+    wk_color: str = ""
+    fg: float = 0.0
+    fg_label: str = ""
+    fg_emoji: str = ""
+    fg_advice: str = ""
+    rsi_v: float = 0.0
+    macd_bull: bool = False
+    h_v: Any = None
+    obv_up: bool = True
+    al: list = field(default_factory=list)
+    gold_zone_price: float = 0.0
+    gold_zone_components: dict = field(default_factory=dict)
+    cp_score: int = 0
+    cp_max: int = 9
+    cp_breakdown: dict = field(default_factory=dict)
+    cp_bearish: int = 0
+    cp_color: str = ""
+    cp_label: str = ""
+    diamonds: list = field(default_factory=list)
+    latest_d: Any = None
+    d_wr: float = 0.0
+    d_avg: float = 0.0
+    d_n: int = 0
+    qs_color: str = ""
+    qs_status: str = ""
+    daily_struct: str = ""
+    weekly_struct: str = ""
 
 
 @dataclass
@@ -128,6 +205,10 @@ class DashContext:
     watch_items: list = field(default_factory=list)
     scanner_watchlist: str = ""
     scanner_sort_mode: str = ""
+    # Nested views (populated at end of build_context; flat fields remain canonical for getattr).
+    prices: PriceData = field(default_factory=PriceData)
+    options: OptionsData = field(default_factory=OptionsData)
+    scores: StructureScores = field(default_factory=StructureScores)
 
 
 def build_context(
@@ -206,7 +287,7 @@ def build_context(
         return None
 
     df = ctx.df
-    ctx.price = float(df["Close"].iloc[-1])
+    ctx.price = safe_float(safe_last(df["Close"]), 0.0)
     ctx.prev = float(df["Close"].iloc[-2]) if len(df) >= 2 else ctx.price
     ctx.chg = ctx.price - ctx.prev
     ctx.chg_pct = ctx.chg / ctx.prev * 100
@@ -225,11 +306,15 @@ def build_context(
     ctx.fg_label, ctx.fg_emoji, ctx.fg_advice = Sentiment.interpret(ctx.fg)
 
     ml_v, sl_v, h_v = TA.macd(df["Close"])
-    ctx.macd_bull = ml_v.iloc[-1] > sl_v.iloc[-1]
+    ctx.macd_bull = safe_float(safe_last(ml_v), 0.0) > safe_float(safe_last(sl_v), 0.0)
     ctx.h_v = h_v
     obv_s = TA.obv(df)
-    ctx.obv_up = obv_s.iloc[-1] > obv_s.iloc[-20] if len(obv_s) >= 20 else True
-    ctx.rsi_v = float(TA.rsi(df["Close"]).iloc[-1])
+    ctx.obv_up = (
+        safe_float(safe_last(obv_s), 0.0) > safe_float(obv_s.iloc[-20], 0.0)
+        if len(obv_s) >= 20
+        else True
+    )
+    ctx.rsi_v = safe_float(safe_last(TA.rsi(df["Close"])), 0.0)
     ctx.al = Alerts.scan(df, ticker, ctx.vix_v)
 
     # Gold (initial) → options (uses POC/HVN) → gamma flip → Gold fuse → confluence → diamonds
@@ -340,6 +425,71 @@ def build_context(
     except Exception:
         st.session_state["_cf_shadow_move"] = None
         st.session_state["_cf_regime_shadow_breakout"] = None
+
+    ctx.prices = PriceData(
+        df=ctx.df,
+        df_wk=ctx.df_wk,
+        df_1mo_spark=ctx.df_1mo_spark,
+        price=ctx.price,
+        prev=ctx.prev,
+        chg=ctx.chg,
+        chg_pct=ctx.chg_pct,
+        hi52=ctx.hi52,
+        lo52=ctx.lo52,
+        vix_v=ctx.vix_v,
+    )
+    ctx.options = OptionsData(
+        rfr=ctx.rfr,
+        bluf_cc=ctx.bluf_cc,
+        bluf_csp=ctx.bluf_csp,
+        bluf_exp=ctx.bluf_exp,
+        bluf_dte=ctx.bluf_dte,
+        bluf_calls=ctx.bluf_calls,
+        bluf_puts=ctx.bluf_puts,
+        gamma_flip=ctx.gamma_flip,
+        opt_exps=list(ctx.opt_exps or []),
+        cc_scan_rows=list(ctx.cc_scan_rows or []),
+        csp_scan_rows=list(ctx.csp_scan_rows or []),
+        ref_iv_bluf=ctx.ref_iv_bluf,
+        nc=ctx.nc,
+        action_strat=ctx.action_strat,
+        action_plain=ctx.action_plain,
+        master_html=ctx.master_html,
+        bluf_html=ctx.bluf_html,
+    )
+    ctx.scores = StructureScores(
+        qs=ctx.qs,
+        qb=dict(ctx.qb or {}),
+        struct=ctx.struct,
+        wk_label=ctx.wk_label,
+        wk_color=ctx.wk_color,
+        fg=ctx.fg,
+        fg_label=ctx.fg_label,
+        fg_emoji=ctx.fg_emoji,
+        fg_advice=ctx.fg_advice,
+        rsi_v=ctx.rsi_v,
+        macd_bull=ctx.macd_bull,
+        h_v=ctx.h_v,
+        obv_up=ctx.obv_up,
+        al=list(ctx.al or []),
+        gold_zone_price=ctx.gold_zone_price,
+        gold_zone_components=dict(ctx.gold_zone_components or {}),
+        cp_score=ctx.cp_score,
+        cp_max=ctx.cp_max,
+        cp_breakdown=dict(ctx.cp_breakdown or {}),
+        cp_bearish=ctx.cp_bearish,
+        cp_color=ctx.cp_color,
+        cp_label=ctx.cp_label,
+        diamonds=list(ctx.diamonds or []),
+        latest_d=ctx.latest_d,
+        d_wr=ctx.d_wr,
+        d_avg=ctx.d_avg,
+        d_n=ctx.d_n,
+        qs_color=ctx.qs_color,
+        qs_status=ctx.qs_status,
+        daily_struct=ctx.daily_struct,
+        weekly_struct=ctx.weekly_struct,
+    )
 
     return ctx
 
