@@ -126,6 +126,14 @@ for _import_try in range(_IMPORT_KEYERROR_RETRIES):
             )
 
             from modules.css import _CSS, _MINI_MODE_DENSITY_CSS, inject_css_and_navbar
+            from modules.signal_desk import (
+                compute_desk_consensus,
+                consensus_banner_html,
+                consensus_compact_html,
+                traders_note_markdown,
+                bento_box_html,
+                suggested_shares_atr_risk,
+            )
         break
     except KeyError:
         if _import_try >= _IMPORT_KEYERROR_RETRIES - 1:
@@ -761,6 +769,8 @@ def main():
     d_wr = ctx.d_wr; d_avg = ctx.d_avg; d_n = ctx.d_n
     daily_struct = ctx.daily_struct; weekly_struct = ctx.weekly_struct
 
+    _consensus = compute_desk_consensus(ctx, df)
+
     render_mode_badge(use_quant_models)
     st.markdown(
         "<div style='margin:2px 0 10px 0'>"
@@ -841,6 +851,51 @@ def main():
 </style>""",
         unsafe_allow_html=True,
     )
+
+    # ── CONSENSUS SIGNAL + TRADER'S NOTE + BENTO (information hierarchy) ──
+    if mini_mode:
+        st.markdown(consensus_compact_html(ticker, _consensus), unsafe_allow_html=True)
+    else:
+        st.markdown(consensus_banner_html(ticker, _consensus), unsafe_allow_html=True)
+        st.markdown(traders_note_markdown(ticker, ctx, df, _consensus))
+        _b1 = bento_box_html(
+            "THE SETUP",
+            "Is the spring coiled?",
+            _consensus["setup_hint"].replace("**", ""),
+        )
+        _b2 = bento_box_html(
+            "THE MOMENTUM",
+            "Is flow confirming?",
+            _consensus["momentum_hint"].replace("**", ""),
+        )
+        _b3 = bento_box_html("THE EXIT", "Where is the plan?", _consensus["exit_hint"].replace("**", ""))
+        bc1, bc2, bc3 = st.columns(3)
+        with bc1:
+            st.markdown(_b1, unsafe_allow_html=True)
+        with bc2:
+            st.markdown(_b2, unsafe_allow_html=True)
+        with bc3:
+            st.markdown(_b3, unsafe_allow_html=True)
+        with st.expander("Calculate position size (illustrative 1% risk vs ATR stop)", expanded=False):
+            st.caption(
+                "Not connected to your broker. Enter **account size** and **risk %**; stop distance uses "
+                "~**1.5× 14d ATR** below spot (same anchor as the trader's note)."
+            )
+            _pc1, _pc2 = st.columns(2)
+            with _pc1:
+                _acct = st.number_input("Account ($)", min_value=0.0, value=100000.0, step=1000.0, key="cf_pos_acct")
+            with _pc2:
+                _rpct = st.number_input("Risk per trade (%)", min_value=0.1, max_value=5.0, value=1.0, step=0.1, key="cf_pos_risk")
+            _atr_u = float(_consensus.get("atr_last") or 0)
+            _sh = suggested_shares_atr_risk(_acct, _rpct, float(price), _atr_u, 1.5)
+            if _sh is not None and _sh > 0 and _atr_u > 0:
+                _stop = float(price) - 1.5 * _atr_u
+                st.success(
+                    f"~**{_sh:,}** shares risks ~**{_rpct:.1f}%** of `${_acct:,.0f}` if stop ≈ **${_stop:,.2f}** "
+                    f"(**1.5× ATR** ≈ `${1.5 * _atr_u:,.2f}` below **${price:,.2f}**)."
+                )
+            else:
+                st.info("ATR or price unavailable — cannot size from this snapshot.")
 
     # ── EARNINGS AMBUSH CHECK ──
     if earnings_near and earnings_dt:

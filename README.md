@@ -271,17 +271,17 @@ cashflow-trader/
 - **Fragmented metadata** — If needed later: move **news** and **earnings** fetches into **`@st.fragment`** (or equivalent lazy regions) so the main script can paint price/context first while metadata loads without blocking the primary **`build_context`** spinner path (requires careful wiring so any block that assumes `ctx.news` / earnings is ready either tolerates empty first paint or reads from `st.session_state`).
 - **Alternative earnings provider** — Optional future path: a dedicated calendar/earnings API with stable auth instead of Yahoo-only scraping, to reduce dependence on **crumb** / quote flows for dates alone (adds vendor choice, keys, and fallback logic).
 
-### UI roadmap: information hierarchy (planned)
+### UI roadmap: information hierarchy
 
-Direction for evolving the desk from **raw metrics** to **actionable signals**—not implemented yet; ordered for incremental delivery.
+Desk upgrades from **raw metrics** toward **actionable signals** (ongoing).
 
-1. **Consensus / “traffic light” signal** — A single **0–100%** desk-level read (ring, bar, or badge) derived from existing context (vol regime, squeeze, volume Z, sieve flags, gap behavior). Buckets map to **high risk** (expanded vol, weak institutional footprint), **neutral** (consolidation / wait), **high conviction** (aligned squeeze + flow + sieve-style gates). *Suggested first build:* **Consensus gauge** atop the Equity / command strip so each active ticker gets one glanceable score before drilling into tables.
-2. **Context-first “bento” grouping** — Three answer-first panels: **The setup** (coil / float scarcity / vol state), **The momentum** (RS, volume Z, trend confirmation), **The exit** (ATR-style stop, distance to support / Gold Zone). Hides column sprawl behind conclusions the trader already verbalizes.
-3. **Chart storytelling** — Keep Plotly depth but emphasize **labels**: Golden Zone band, breakout candle callouts, and optional markers when **volume Z** exceeds a whale threshold (e.g. vertical emphasis on that session) so institutional footprint is visible on the price axis, not only in scanner tables.
-4. **Plain-English desk note** — One short **“Trader’s note”** block (template + filled slots from `ctx`: squeeze, short interest proxy, volume vs baseline, stop level). Can later swap in real LLM summarization; v1 is deterministic copy from structured fields.
-5. **One-touch workflow** — Actions such as **Calculate position size** from a user-supplied **account balance** and **risk %** against the desk **ATR / stop** (no broker OAuth in v1; optional saved default in **Secrets** / config).
+1. **Consensus / “traffic light” signal** — **Shipped:** **`modules/signal_desk.py`** + **`compute_desk_consensus`** blends Quant Edge, confluence, fear/greed, daily/weekly structure, MACD/OBV tilt, and **volume Z** into a **0–100** score with **high risk / neutral / conviction** bands. **`app.py`** renders a **ring + bar** banner (compact strip in **Turbo mode**).
+2. **Context-first “bento” grouping** — **Shipped:** three columns under the note — **The setup** (Bollinger / squeeze language), **The momentum** (RSI, MACD, OBV, volume Z), **The exit** (Gold Zone distance + copy).
+3. **Chart storytelling** — **Partially shipped:** price chart adds a **gold vertical** on the **last bar** when **volume Z ≥ 4** vs the prior 20 sessions (**`build_chart(..., mark_whale_volume=True)`**), with overlay key text. Golden Zone / existing overlays unchanged.
+4. **Plain-English desk note** — **Shipped:** deterministic **`traders_note_markdown`** (markdown) below the consensus card — ATR-style stop line, squeeze / volume language. LLM swap remains a future option.
+5. **One-touch workflow** — **Shipped (illustrative):** expander **Calculate position size** — account $, risk %, **~1.5× ATR** stop below spot → suggested share count (**`suggested_shares_atr_risk`**); not broker-connected.
 
-**Implementation sketch (when prioritized):** tighten **CSS** (SaaS-style cards, spacing), ship **consensus gauge**, then **trader’s note**, then bento regrouping and chart overlays.
+**Still optional later:** broader **CSS** pass, LLM-generated note, **Secrets**-default account size, breakout-candle callouts on chart.
 
 ---
 

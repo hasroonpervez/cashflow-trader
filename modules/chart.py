@@ -75,7 +75,8 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
                 mobile_layout=False, em_lower=None, em_upper=None, em_expiry=None,
                 em_iv_pct=None, em_days_to_expiry=None, gamma_flip_price=None,
                 earnings_days_to=None, iv_overlay_symbol=None,
-                shadow_lower=None, shadow_upper=None, opex_pin_price=None):
+                shadow_lower=None, shadow_upper=None, opex_pin_price=None,
+                mark_whale_volume=True):
     """Build four separate figures: price (+ overlays), volume, RSI, MACD — easier to read than one stacked chart.
 
     When ``mobile_layout`` is True (narrow UA / phone), the price panel drops the legend, tightens margins,
@@ -877,6 +878,31 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
         title_text="MACD",
         **_PLOTLY_AXIS_TITLE,
     )
+
+    if mark_whale_volume:
+        try:
+            from .signal_desk import whale_session_x_for_chart
+
+            _wx = whale_session_x_for_chart(df, 4.0)
+            if _wx is not None:
+                fig_p.add_vline(
+                    x=_wx,
+                    line_width=2,
+                    line_color="rgba(234, 179, 8, 0.95)",
+                    line_dash="solid",
+                    annotation_text="Whale vol",
+                    annotation_position="top",
+                    annotation_font=dict(size=9, color="#fde047", family="JetBrains Mono"),
+                )
+                _overlay_rows.append(
+                    (
+                        "#eab308",
+                        "Whale session",
+                        "Gold vertical: last bar volume Z ≥ 4 vs the prior 20 sessions (institutional footprint marker).",
+                    )
+                )
+        except Exception:
+            pass
 
     _key_html = _price_overlay_key_html(_overlay_rows, mobile_layout)
     return fig_p, fig_v, fig_r, fig_m, _key_html

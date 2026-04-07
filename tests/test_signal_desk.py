@@ -1,0 +1,67 @@
+"""Consensus signal helpers (no Yahoo)."""
+from types import SimpleNamespace
+import numpy as np
+import pandas as pd
+
+from modules.signal_desk import (
+    compute_desk_consensus,
+    last_bar_volume_zscore,
+    suggested_shares_atr_risk,
+    whale_session_x_for_chart,
+)
+
+
+def _dummy_df(n=120):
+    rng = np.random.default_rng(42)
+    idx = pd.date_range("2024-01-01", periods=n, freq="B")
+    close = 100 + np.cumsum(rng.normal(0, 0.5, n))
+    return pd.DataFrame(
+        {
+            "Open": close - 0.2,
+            "High": close + 0.6,
+            "Low": close - 0.6,
+            "Close": close,
+            "Volume": rng.integers(1_000_000, 3_000_000, n),
+        },
+        index=idx,
+    )
+
+
+def test_last_bar_volume_zscore_reasonable():
+    df = _dummy_df()
+    z = last_bar_volume_zscore(df)
+    assert z is not None
+    assert -5 < z < 5
+
+
+def test_whale_marker_only_when_spike():
+    df = _dummy_df()
+    df.loc[df.index[-1], "Volume"] = df["Volume"].iloc[:-1].max() * 50
+    x = whale_session_x_for_chart(df, z_threshold=4.0)
+    assert x == df.index[-1]
+
+
+def test_consensus_score_in_range():
+    df = _dummy_df()
+    ctx = SimpleNamespace(
+        qs=55.0,
+        cp_score=5,
+        cp_max=9,
+        fg=50.0,
+        struct="BULLISH",
+        wk_label="BULLISH",
+        macd_bull=True,
+        obv_up=True,
+        price=float(df["Close"].iloc[-1]),
+        gold_zone_price=float(df["Close"].iloc[-1]) * 0.98,
+        rsi_v=55.0,
+        chg_pct=1.0,
+    )
+    c = compute_desk_consensus(ctx, df)
+    assert 0 <= c["score"] <= 100
+    assert c["band"] in ("high_risk", "neutral", "conviction")
+
+
+def test_suggested_shares():
+    sh = suggested_shares_atr_risk(100_000.0, 1.0, 100.0, 2.0, 1.5)
+    assert sh is not None and sh > 0
