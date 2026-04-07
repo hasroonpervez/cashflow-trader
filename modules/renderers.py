@@ -427,9 +427,9 @@ def render_setup_tab(chart_mood: str, d: DeskLocals) -> None:
                 "You collect the premium and the stock comes back to you. Time decay works in your favor.", "bull")
 
         _qe_blurb = (
-            "Institutional mode: headline score blends <strong>FFD</strong> and <strong>HMM regime</strong> "
-            "(open A/B diagnostics for the retail five pillars)."
-            if use_quant_models and isinstance(qb, dict) and qb.get("model") == "institutional"
+            "Institutional mode: headline score <strong>blends</strong> the five retail pillars with "
+            "<strong>FFD</strong> + <strong>HMM regime</strong> (open A/B diagnostics)."
+            if use_quant_models and isinstance(qb, dict) and qb.get("model") == "blended"
             else "Composite from five checks: trend, momentum, volume, volatility, structure."
         )
         st.markdown(
@@ -456,18 +456,21 @@ def render_setup_tab(chart_mood: str, d: DeskLocals) -> None:
                 col1, col2 = st.columns(2)
                 col1.metric("Retail Engine", f"{retail_score:.0f}")
                 col2.metric("Quant Engine", f"{inst_score:.0f}", delta=f"{delta_q:+.0f} vs retail")
-                _is_inst = isinstance(inst_breakdown, dict) and inst_breakdown.get("model") == "institutional"
-                if _is_inst:
+                _is_blended = isinstance(inst_breakdown, dict) and inst_breakdown.get("model") == "blended"
+                if _is_blended:
                     st.success(
-                        "Institutional path active: headline **Quant** score blends **FFD momentum** and **HMM regime** "
-                        "(not the simple average of the five retail pillars)."
+                        "Institutional path active: headline **Quant** score **blends** the five retail pillars with "
+                        "**FFD** and **HMM regime** (then MC PoP fusion when chain data exists)."
                     )
-                    i1, i2, i3 = st.columns(3)
+                    i1, i2, i3, i4 = st.columns(4)
                     _rp = float(inst_breakdown.get("regime_prob_high_vol") or 0.0)
                     _ffd = float(inst_breakdown.get("ffd_last") or 0.0)
+                    _rc = float(inst_breakdown.get("retail_core") or retail_score)
+                    _ins = float(inst_breakdown.get("inst_signal") or inst_score)
                     i1.metric("High-vol regime (HMM)", f"{_rp * 100:.1f}%", help="Probability mass in the high-volatility state.")
                     i2.metric("FFD residual", f"{_ffd:.4f}", help="Fractional differentiation signal (stationary momentum memory).")
-                    i3.metric("Composite", f"{inst_score:.1f}", help="Capped blend used for the main Quant Edge gauge.")
+                    i3.metric("Retail core (5 pillars)", f"{_rc:.1f}", help="Mean of trend, momentum, volume, volatility, structure.")
+                    i4.metric("Inst. track", f"{_ins:.1f}", help="FFD+HMM signal before blend with retail core.")
                     st.markdown("##### Retail: five pillars (20% each)")
                     _pillars = {k: retail_breakdown.get(k) for k in ("trend", "momentum", "volume", "volatility", "structure") if k in retail_breakdown}
                     streamlit_show_dataframe(

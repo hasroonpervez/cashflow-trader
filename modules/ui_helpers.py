@@ -1217,8 +1217,8 @@ def _fragment_technical_zone(
                 st.markdown(f"* **{comp_name}**: ${comp_val:.2f} ({dist:+.1f}% from spot)")
             _explain(
                 "Why the Gold Zone matters",
-                "The Gold Zone fuses four institutional magnets into one line: Volume Profile POC where the crowd traded most, "
-                "the 61.8% Fibonacci anchor, the 200 day simple moving average, and the nearest Gann Square of 9 pivot. "
+                "The Gold Zone is a **weighted** blend of anchors: volume POC / nearby HVN and the 200-day SMA carry the most weight, "
+                "then Fib 61.8%, optional gamma flip when close to spot, and Gann Square of 9. "
                 "Above it, buyers still own the narrative. Below it, respect the air pocket. "
                 "Treat it as the headline level on your chart.",
                 "neutral",

@@ -29,7 +29,7 @@ pip install -r requirements-dev.txt
 python3 -m pytest tests/ -q
 ```
 
-Coverage includes utils (`safe_last`, `safe_float`, `safe_html`, `log_warn`), `ConfigTransaction`, correlation / RS vs SPY, signal desk, BS Greeks (vanna/charm), quant edge, allocation, watchlist helpers, and smoke imports (no live Yahoo in most tests).
+Coverage includes utils (`safe_last`, `safe_float`, `safe_html`, `log_warn`), `ConfigTransaction`, correlation / RS vs SPY, signal desk, BS Greeks (vanna/charm), quant edge (retail + blended institutional path), allocation, watchlist helpers, and smoke imports (no live Yahoo in most tests).
 
 ---
 
@@ -93,7 +93,7 @@ On Cloud, if the filesystem is **read-only**, use Secrets `watchlist` and expect
 - **Gold Zone & confluence** — Blended anchors; **Diamond** blue/pink signals; **pre-diamond** coil hint on scanner (Equity path).
 - **Scanner** — Watchlist ranking, GEX regime, flow/bias, optional allocator; results cached in `_cf_scanner_bundle` until the next scan.
 - **Rolling Edge log** — Parallel quant vs retail edge across symbols; fragment refresh.
-- **Math** — Black–Scholes (+ vanna/charm), Corrado–Su, Kelly-style helpers, FFD-based correlation, HMM path when deps exist.
+- **Math** — Black–Scholes (+ vanna/charm), Corrado–Su, Kelly-style helpers, FFD-based correlation, HMM path when deps exist; quant edge **blends** pillars + regime track (see below).
 
 ---
 
@@ -182,6 +182,14 @@ Live code builds BBW from Bollinger on closes; skew from `calc_vol_skew`; float/
 
 **Models** — Corrado–Su; Monte Carlo PoP (seed 42); Kelly-style sizing; FFD for correlation; optional HMM; fundamental sieve (FCF/EV + efficiency YoY via Yahoo + Alpha Vantage when configured).
 
+**Methodology (recent hardening)**
+
+- **Quant Edge (`use_quant_models`)** — Five pillars (trend, momentum, volume, volatility, structure) form a **retail core**. The institutional track (FFD residual + HMM regime probability) is **blended** into that core (default 62% / 38%) instead of replacing it, then MC PoP fusion applies. This reduces wild score jumps when the HMM path errors and falls back to retail.
+- **Gold Zone** — Component prices are a **weighted** mean (POC and HVN highest, then SMA200, Fib, gamma flip, Gann) rather than equal weighting.
+- **Scanner Kelly** — Continuous Kelly still uses expected return / variance when variance is positive. The discrete fallback now uses **MC PoP** as win probability and **BS short-put credit vs assignment-gap** style win/loss amounts instead of a flat 55% and daily `chg_pct`.
+- **Diamond win rate** — Prefers a **holdout window** (signals only from the first ~75% of bars, forward outcomes on the full series) when history is long enough and the holdout set has enough diamonds; falls back to all signals otherwise. Still not a full walk-forward backtest.
+- **CC backtest (`Backtest.cc_sim`)** — Covered-call premium per entry bar uses **`bs_price`** (same BS engine as the desk), not the old hand-tuned premium formula.
+
 ---
 
 ## Known limitations
@@ -191,6 +199,7 @@ Live code builds BBW from Bollinger on closes; skew from `calc_vol_skew`; float/
 - **Options** — Thin names may lack OI or chains; GEX/flip may be blank.
 - **Scanner bundle** — Stale until you **Scan Watchlist** again after editing symbols.
 - **10x / fundamental sieve** — Data gaps yield “—”; not predictive of returns.
+- **Diamond win rate / backtests** — Heuristic labels on one price path; holdout scoring is stricter than raw in-sample but still not out-of-sample validation.
 
 Optional `hmmlearn` / `scipy` paths degrade gracefully if missing.
 

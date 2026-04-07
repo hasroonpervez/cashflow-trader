@@ -7,7 +7,6 @@ import logging
 import streamlit as st
 import pandas as pd
 import numpy as np
-import math
 from datetime import datetime
 
 from .ta import TA
@@ -217,22 +216,44 @@ class Sentiment:
 class Backtest:
     @staticmethod
     def cc_sim(df, otm_pct=.05, hold=30, iv_m=1.0):
-        """Quick premium heuristic sweep — not Black-Scholes; live desk uses ``bs_price`` paths."""
-        results = []; rvol = df["Close"].pct_change().rolling(20).std()*np.sqrt(252)
+        """Covered-call sweep: short OTM call premium from ``bs_price`` (same engine as the desk)."""
+        from .options import bs_price
+
+        r = 0.045
+        results = []
+        rvol = df["Close"].pct_change().rolling(20).std() * np.sqrt(252)
         i = 20
         while i < len(df) - hold:
-            entry = df["Close"].iloc[i]; strike = entry*(1+otm_pct)
-            iv = rvol.iloc[i]
-            if pd.isna(iv) or iv <= 0: iv = 0.5
-            iv *= iv_m; tf = math.sqrt(hold/365)
-            d1a = otm_pct/(iv*tf) if iv*tf > 0 else 1
-            prem = entry*iv*tf*max(.05,.4-.3*min(d1a,2)); prem = max(prem, entry*.003)
-            exit_p = df["Close"].iloc[i+hold]
-            if exit_p >= strike: profit = (strike-entry)+prem; out = "Called Away"
-            else: profit = prem+(exit_p-entry); out = "Expired OTM"
-            results.append({"entry_date":df.index[i],"exit_date":df.index[i+hold],
-                "entry":entry,"strike":strike,"exit":exit_p,"iv_est":iv*100,
-                "premium":prem,"profit":profit,"ret_pct":profit/entry*100,"outcome":out})
+            entry = float(df["Close"].iloc[i])
+            strike = entry * (1 + otm_pct)
+            iv = float(rvol.iloc[i])
+            if pd.isna(iv) or iv <= 0:
+                iv = 0.5
+            iv *= iv_m
+            T = hold / 365.0
+            prem = float(bs_price(entry, strike, T, r, max(iv, 0.001), "call"))
+            prem = max(prem, entry * 0.003)
+            exit_p = float(df["Close"].iloc[i + hold])
+            if exit_p >= strike:
+                profit = (strike - entry) + prem
+                out = "Called Away"
+            else:
+                profit = prem + (exit_p - entry)
+                out = "Expired OTM"
+            results.append(
+                {
+                    "entry_date": df.index[i],
+                    "exit_date": df.index[i + hold],
+                    "entry": entry,
+                    "strike": strike,
+                    "exit": exit_p,
+                    "iv_est": iv * 100,
+                    "premium": prem,
+                    "profit": profit,
+                    "ret_pct": profit / entry * 100,
+                    "outcome": out,
+                }
+            )
             i += hold
         return pd.DataFrame(results)
 

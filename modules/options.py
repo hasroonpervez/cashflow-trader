@@ -24,6 +24,20 @@ from .sentiment import Sentiment
 from .streamlit_threading import make_script_ctx_pool, submit_with_script_ctx
 from .utils import log_warn, safe_float, safe_last
 
+# Quant Edge: FFD/HMM track blended with five-pillar retail mean (not a wholesale replacement).
+_QUANT_BLEND_W_RETAIL = 0.62
+_QUANT_BLEND_W_INST = 0.38
+
+# Gold Zone: emphasize volume-derived / structural anchors over heuristic overlays.
+_GOLD_ZONE_WEIGHTS = {
+    "POC": 1.35,
+    "HVN": 1.35,
+    "SMA 200": 1.15,
+    "Fib 61.8%": 1.0,
+    "Gamma Flip": 0.95,
+    "Gann Sq9": 0.55,
+}
+
 try:
     from scipy.stats import norm
 
@@ -292,55 +306,25 @@ def _quant_edge_mc_pop_boost(options_data, top_n=8):
         return 0.0, None
 
 
-def quant_edge_score(df, vix_val=None, options_data=None, use_quant=False):
-    """Composite 0-100 using five de-correlated dimensions (no Supertrend here — that
-    belongs in confluence/diamond context, not double-counted with EMA trend):
-    1. Trend — EMA stack only (structure of moving averages)
-    2. Momentum — RSI only (single oscillator)
-    3. Volume — OBV vs its own history
-    4. Volatility — ATR regime + optional VIX
-    5. Structure — market-structure label (not redundant with EMA slope)
-    Equal 20% weights.
-    """
-    if use_quant:
-        try:
-            from .sentiment import QuantSentiment
-            regime_probs = QuantSentiment.regime_detection(df)
-            high_vol_regime = float(regime_probs.get(1, 0.0))
-            ffd_series = TA.apply_ffd(df["Close"], d=0.4)
-            ffd_last = safe_float(safe_last(ffd_series), 0.0)
-            edge = 50.0 + (ffd_last * 10.0) - (high_vol_regime * 20.0)
-            mc_boost, mc_avg_top = _quant_edge_mc_pop_boost(options_data)
-            edge = float(max(0.0, min(100.0, edge + mc_boost)))
-            breakdown = {
-                "regime_prob_high_vol": round(high_vol_regime, 4),
-                "ffd_last": round(ffd_last, 4),
-                "model": "institutional",
-            }
-            if mc_avg_top is not None:
-                breakdown["mc_pop_top_avg"] = round(mc_avg_top, 1)
-            return round(edge, 1), breakdown
-        except Exception as e:
-            log_warn("quant_edge_score use_quant path", e)
-
+def _quant_edge_pillars(df, vix_val):
+    """Five de-correlated pillars (trend, momentum, volume, volatility, structure)."""
     sc = {}
     close = safe_float(safe_last(df["Close"]), 0.0)
-    # 1. TREND (equal 20% weight in composite; important for premium sellers)
     if len(df) >= 200:
         e20, e50, e200 = [
             safe_float(safe_last(TA.ema(df["Close"], p)), 0.0) for p in (20, 50, 200)
         ]
         sc["trend"] = 95 if close > e20 > e50 > e200 else (75 if close > e50 > e200 else (55 if close > e200 else 25))
-    else: sc["trend"] = 60
-    # 2. MOMENTUM (single indicator: RSI — avoids collinearity with MACD/CCI)
+    else:
+        sc["trend"] = 60
     rv = safe_float(safe_last(TA.rsi(df["Close"])), 0.0)
     sc["momentum"] = 85 if 40 <= rv <= 60 else (65 if 30 <= rv <= 70 else 25)
-    # 3. VOLUME (OBV — measures accumulation/distribution, orthogonal to price momentum)
     obv_s = TA.obv(df)
-    sc["volume"] = (
-        85 if safe_float(safe_last(obv_s), 0.0) > obv_s.iloc[-20] else 35
-    ) if len(obv_s) >= 20 else 50
-    # 4. VOLATILITY (ATR regime + VIX — for premium sellers, higher = better)
+    if len(obv_s) >= 20:
+        obv_ref = safe_float(obv_s.iloc[-20], 0.0)
+        sc["volume"] = 85 if safe_float(safe_last(obv_s), 0.0) > obv_ref else 35
+    else:
+        sc["volume"] = 50
     if len(df) >= 20:
         atr_s = TA.atr(df)
         cur_atr = safe_float(safe_last(atr_s), 0.0)
@@ -353,14 +337,55 @@ def quant_edge_score(df, vix_val=None, options_data=None, use_quant=False):
         sc["volatility"] = round(float(vol_score), 1)
     else:
         sc["volatility"] = 50.0
-    # 5. STRUCTURE (BOS/CHOCH — pattern-based, not derived from moving averages)
     struct, _, _ = TA.market_structure(df)
     sc["structure"] = 90.0 if struct == "BULLISH" else (50.0 if struct == "RANGING" else 20.0)
-
     for _k in ("trend", "momentum", "volume"):
         if _k in sc and isinstance(sc[_k], (int, float)):
             sc[_k] = round(float(sc[_k]), 1)
-    composite = round(float(np.mean(list(sc.values()))), 1)
+    return sc
+
+
+def quant_edge_score(df, vix_val=None, options_data=None, use_quant=False):
+    """Composite 0–100 from five pillars (20% each in the retail core).
+
+    When ``use_quant`` is True, an FFD + HMM regime track is **blended** with that retail
+    core (default 62% retail / 38% institutional) so toggling models does not swap the
+    entire score. MC PoP fusion applies to the blended result.
+    """
+    sc = _quant_edge_pillars(df, vix_val)
+    pillar_vals = [float(sc[k]) for k in ("trend", "momentum", "volume", "volatility", "structure")]
+    retail_mean = round(float(np.mean(pillar_vals)), 1)
+
+    if use_quant:
+        try:
+            from .sentiment import QuantSentiment
+
+            regime_probs = QuantSentiment.regime_detection(df)
+            high_vol_regime = float(regime_probs.get(1, 0.0))
+            ffd_series = TA.apply_ffd(df["Close"], d=0.4)
+            ffd_last = safe_float(safe_last(ffd_series), 0.0)
+            ffd_contrib = float(np.tanh(ffd_last * 650.0) * 18.0)
+            inst_signal = float(np.clip(50.0 + ffd_contrib - high_vol_regime * 18.0, 0.0, 100.0))
+            blended = _QUANT_BLEND_W_RETAIL * retail_mean + _QUANT_BLEND_W_INST * inst_signal
+            mc_boost, mc_avg_top = _quant_edge_mc_pop_boost(options_data)
+            edge = float(max(0.0, min(100.0, blended + mc_boost)))
+            breakdown = {
+                **sc,
+                "regime_prob_high_vol": round(high_vol_regime, 4),
+                "ffd_last": round(ffd_last, 4),
+                "inst_signal": round(inst_signal, 1),
+                "retail_core": retail_mean,
+                "model": "blended",
+            }
+            if mc_avg_top is not None:
+                breakdown["mc_pop_top_avg"] = round(mc_avg_top, 1)
+            if mc_boost > 0:
+                breakdown["mc_pop_edge"] = round(mc_boost, 4)
+            return round(edge, 1), breakdown
+        except Exception as e:
+            log_warn("quant_edge_score use_quant path", e)
+
+    composite = retail_mean
     mc_boost, mc_avg_top = _quant_edge_mc_pop_boost(options_data)
     if mc_boost > 0:
         composite = round(float(max(0.0, min(100.0, composite + mc_boost))), 1)
@@ -474,7 +499,8 @@ def weekly_trend_label(df_wk):
 
 @st.cache_data(ttl=120, show_spinner=False)
 def calc_gold_zone(df, df_wk=None, gamma_flip_price=None):
-    """Gold Zone: mean of POC, Fib 61.8%, Gann Sq9, and 200-day SMA (institutional anchor).
+    """Gold Zone: **weighted** blend of POC, Fib 61.8%, Gann Sq9, and 200-day SMA.
+    Weights favor volume nodes (POC, HVN) and SMA200 over Fib / gamma / Gann.
     Nearest HVN within 2% of spot is fused as a primary anchor alongside POC/Fib.
     ``df_wk`` is accepted for API compatibility; SMA 200 replaces weekly S/R in the blend.
     When ``gamma_flip_price`` is within 5% of spot, it is fused as **Gamma Flip** support."""
@@ -515,7 +541,13 @@ def calc_gold_zone(df, df_wk=None, gamma_flip_price=None):
         pass
 
     if components:
-        gold_zone = round(np.mean(list(components.values())), 2)
+        w_acc = 0.0
+        v_acc = 0.0
+        for _name, _px in components.items():
+            w = float(_GOLD_ZONE_WEIGHTS.get(_name, 1.0))
+            v_acc += w * float(_px)
+            w_acc += w
+        gold_zone = round(v_acc / w_acc, 2) if w_acc > 0 else round(float(price), 2)
         return gold_zone, components
     return round(price, 2), {}
 
@@ -898,13 +930,8 @@ def detect_diamonds(
     return diamonds
 
 
-def diamond_win_rate(df, diamonds, forward_bars=10):
-    """Label diamonds on ``df`` then measure forward ``forward_bars`` closes on the **same** series.
-
-    This is an **in-sample** sanity check (signals and outcomes share one path — not walk-forward).
-    Do not treat win rate as out-of-sample predictive accuracy.
-    Blue: win if price rose; Pink: win if price fell. Returns (win_rate_pct, avg_return_pct, n).
-    """
+def _diamond_win_rate_core(df, diamonds, forward_bars):
+    """Forward ``forward_bars`` outcome stats for a pre-filtered diamond list."""
     if not diamonds:
         return 0.0, 0.0, 0
 
@@ -938,6 +965,41 @@ def diamond_win_rate(df, diamonds, forward_bars=10):
     if total == 0:
         return 0.0, 0.0, 0
     return round(wins / total * 100, 1), round(float(np.mean(returns)), 2), total
+
+
+def diamond_win_rate(
+    df,
+    diamonds,
+    forward_bars=10,
+    *,
+    holdout_frac=0.25,
+    holdout_min_bars=80,
+    holdout_min_n=3,
+):
+    """Forward outcomes after each diamond signal (same ``df`` path).
+
+    Still not a full walk-forward backtest (diamond rules were fit on this path). When
+    ``holdout_frac`` is set (default 0.25), we **prefer** stats using only diamonds in the
+    first (1 − holdout_frac) share of bars so later bars contribute only as forward
+    outcomes. Falls back to all diamonds if the holdout subset is too small.
+    Pass ``holdout_frac=None`` to always use every diamond (legacy in-sample read).
+    """
+    if holdout_frac is not None and float(holdout_frac) > 0 and len(df) >= holdout_min_bars:
+        cut = max(0, int(len(df) * (1.0 - float(holdout_frac))))
+        if cut > forward_bars + 5:
+            filt = []
+            for d in diamonds:
+                try:
+                    loc = df.index.get_loc(d["date"])
+                    idx = _index_pos(loc)
+                    if idx < cut:
+                        filt.append(d)
+                except KeyError:
+                    continue
+            h_wr, h_avg, h_n = _diamond_win_rate_core(df, filt, forward_bars)
+            if h_n >= holdout_min_n:
+                return h_wr, h_avg, h_n
+    return _diamond_win_rate_core(df, diamonds, forward_bars)
 
 
 def latest_diamond_status(diamonds):
@@ -1188,10 +1250,16 @@ def scan_single_ticker(
         ret = df["Close"].pct_change().dropna()
         exp_ret = float(ret.mean() * 252) if len(ret) > 0 else 0.0
         ret_var = float(ret.var() * 252) if len(ret) > 1 else 0.0
+        mc_for_kelly = float(scanner_avg_mc) if np.isfinite(scanner_avg_mc) else 55.0
+        win_p_disc = float(np.clip(mc_for_kelly, 8.0, 94.0))
+        credit_pct = max(0.2, (prem_scan / max(price, 1e-9)) * 100.0)
+        assign_gap_pct = max(0.5, (price - float(K_scan)) / max(price, 1e-9) * 100.0)
+        win_amt_disc = credit_pct
+        loss_amt_disc = max(credit_pct * 1.15, assign_gap_pct * 0.75)
         k_full, k_half = kelly_criterion(
-            55.0,
-            max(1.0, abs(chg_pct)),
-            max(1.0, abs(chg_pct) * 1.5),
+            win_p_disc,
+            win_amt_disc,
+            loss_amt_disc,
             use_quant=True,
             expected_return=exp_ret,
             variance=ret_var,

@@ -54,6 +54,15 @@ def test_breakdown_has_five_pillars():
         assert key in qb, f"Missing pillar: {key}"
 
 
+def test_use_quant_blended_keeps_pillars_and_model_tag():
+    _, qb = quant_edge_score(_make_df(), vix_val=20, use_quant=True)
+    for key in ("trend", "momentum", "volume", "volatility", "structure"):
+        assert key in qb
+    assert qb.get("model") == "blended"
+    assert "retail_core" in qb
+    assert "inst_signal" in qb
+
+
 def test_nested_scores_mirror_after_build():
     from modules.pages import build_context, DashContext
     from unittest.mock import MagicMock, patch
