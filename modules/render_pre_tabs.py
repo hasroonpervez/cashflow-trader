@@ -36,6 +36,7 @@ from modules.signal_desk import (
     traders_note_markdown,
     unified_probability_dial_html,
 )
+from modules.streamlit_threading import make_script_ctx_pool, submit_with_script_ctx
 from modules.ta import TA
 from modules.ui_helpers import (
     _confluence_why_trade_plain,
@@ -386,10 +387,10 @@ def render_tape_open_editor_flush(
     _prev_key = st.session_state.get("_cf_global_market_key")
     _global_snap = None
     try:
-        from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FTE
+        from concurrent.futures import TimeoutError as _FTE
 
-        with ThreadPoolExecutor(max_workers=1) as _tp:
-            _fut = _tp.submit(fetch_global_market_bundle, tuple(watch_items), ticker)
+        with make_script_ctx_pool(max_workers=1) as _tp:
+            _fut = submit_with_script_ctx(_tp, fetch_global_market_bundle, tuple(watch_items), ticker)
             _global_snap = _fut.result(timeout=_BUNDLE_WALL_TIMEOUT)
     except _FTE:
         log_warn(

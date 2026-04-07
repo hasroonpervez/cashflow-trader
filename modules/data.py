@@ -31,6 +31,8 @@ _RS_SPY_LOOKBACK_SESSIONS = 90
 # force ``_YAHOO_YF_TIMEOUT`` and (2) monkey-patch ``YfData`` to clamp timeouts and bind the
 # singleton to ``_YAHOO_SESSION`` before any ticker touches a default chrome session.
 _YAHOO_YF_TIMEOUT = 5.0
+_FETCH_INFO_RL_COOLDOWN_SEC = 120.0
+_FETCH_INFO_RL_UNTIL: dict[str, float] = {}
 
 
 class _ForcedTimeoutSession(curl_requests.Session):
@@ -131,6 +133,17 @@ def _is_yahoo_timeout_error(exc: BaseException) -> bool:
         return True
     msg = str(exc)
     return "curl: (28)" in msg or "Operation timed out" in msg
+
+
+def _is_yahoo_rate_limit_error(exc: BaseException) -> bool:
+    """True for Yahoo/yfinance throttling errors."""
+    name = type(exc).__name__
+    msg = str(exc)
+    return (
+        "YFRateLimitError" in name
+        or "Too Many Requests" in msg
+        or "rate limited" in msg.lower()
+    )
 
 
 def retry_fetch(fn, retries=3, delay=2):
@@ -896,12 +909,25 @@ def fetch_info(ticker):
         sym = str(ticker).upper().strip()
         if not sym:
             return {}
+        now_ts = float(time.time())
+        cool_until = float(_FETCH_INFO_RL_UNTIL.get(sym, 0.0) or 0.0)
+        if now_ts < cool_until:
+            return {}
         raw_info = _yfinance_ticker(sym).info
         info = dict(raw_info) if isinstance(raw_info, dict) else {}
         _merge_alphavantage_fundamentals_into_info(sym, info)
+        _FETCH_INFO_RL_UNTIL.pop(sym, None)
         return info
     except Exception as _e:
-        log_warn("fetch_info", _e, ticker=str(ticker))
+        if _is_yahoo_rate_limit_error(_e):
+            _FETCH_INFO_RL_UNTIL[sym] = float(time.time()) + float(_FETCH_INFO_RL_COOLDOWN_SEC)
+            log_warn(
+                f"fetch_info rate-limited; cooling down {int(_FETCH_INFO_RL_COOLDOWN_SEC)}s",
+                _e,
+                ticker=str(ticker),
+            )
+        else:
+            log_warn("fetch_info", _e, ticker=str(ticker))
         return {}
 
 
