@@ -79,6 +79,7 @@ Writes are **atomic** (temp file + replace). **Mission Control** fields are batc
 | `mini_mode` | Turbo / compact layout |
 | `use_quant_models` | Institutional quant path (default on) |
 | `defer_headlines_earnings` | Skip upfront news + earnings in `build_context` |
+| `defer_options_first_pass` | Skip options-chain hydration on the first session render (faster Cloud cold boot) |
 | `overlay_*` | Chart layers (EMA, Fib, Gann, etc.) |
 
 On Cloud, if the filesystem is **read-only**, use Secrets `watchlist` and expect toasts when disk writes fail — session state still updates.

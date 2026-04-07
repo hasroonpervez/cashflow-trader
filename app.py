@@ -175,9 +175,16 @@ def main():
 
     from modules.pages import build_context
     _defer_meta = bool(cfg.get("defer_headlines_earnings", False))
+    _defer_options_first_pass = bool(cfg.get("defer_options_first_pass", DEFAULT_CONFIG["defer_options_first_pass"]))
+    _defer_options_fetch = _defer_options_first_pass and not bool(st.session_state.get("_cf_first_pass_done", False))
     ctx = build_context(
-        hud.ticker, cfg, global_snapshot=_global_snap, defer_headlines_earnings=_defer_meta
+        hud.ticker,
+        cfg,
+        global_snapshot=_global_snap,
+        defer_headlines_earnings=_defer_meta,
+        defer_options_fetch=_defer_options_fetch,
     )
+    st.session_state["_cf_first_pass_done"] = True
     if ctx is None:
         _sym_e = safe_html(hud.ticker)
         st.error(

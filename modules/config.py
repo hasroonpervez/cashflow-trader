@@ -31,6 +31,8 @@ DEFAULT_CONFIG = {
     "use_quant_models": True,
     # When true, `build_context` skips Yahoo headline + next-earnings fetch; news tab uses `@st.fragment`.
     "defer_headlines_earnings": False,
+    # When true, skip options-chain hydration on the first session render to improve Cloud cold boot.
+    "defer_options_first_pass": True,
 }
 
 _LEGACY_CONFIG_KEYS = frozenset({

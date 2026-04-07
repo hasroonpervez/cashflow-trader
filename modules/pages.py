@@ -217,6 +217,7 @@ def build_context(
     desk_snapshot: Optional[DeskMarketSnapshot] = None,
     global_snapshot: Optional[GlobalMarketSnapshot] = None,
     defer_headlines_earnings: bool = False,
+    defer_options_fetch: bool = False,
 ) -> Optional[DashContext]:
     """Fetch all data and compute all scores. Returns None if data unavailable."""
     ctx = DashContext(ticker=ticker, cfg=cfg)
@@ -324,7 +325,8 @@ def build_context(
         ctx.weekly_struct, _, _ = TA.market_structure(ctx.df_wk)
 
     # Options fetch (enables MC-PoP fusion into Quant Edge when chain rows exist)
-    _fetch_options_context(ctx)
+    if not defer_options_fetch:
+        _fetch_options_context(ctx)
     ctx.gamma_flip = None
     try:
         if ctx.bluf_calls is not None and ctx.bluf_puts is not None:
