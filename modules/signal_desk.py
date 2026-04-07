@@ -24,6 +24,17 @@ _COIL_BBW_PCTILE_MAX = 0.05
 
 _HURST_WINDOW = 100
 
+# ``compute_desk_consensus`` linear blend: heuristic relative emphasis of each pillar.
+# Not calibrated to a dataset — change only with backtests / sensitivity notes.
+_CONSENSUS_W_QS = 0.28
+_CONSENSUS_W_CONFLUENCE = 0.20
+_CONSENSUS_W_FG = 0.16
+_CONSENSUS_W_STRUCTURE = 0.14
+_CONSENSUS_W_WEEKLY = 0.10
+_CONSENSUS_W_TAPE = 0.07
+_CONSENSUS_W_VOL = 0.05
+_CONSENSUS_ABSORPTION_BONUS = 2.5  # applied before final clip to [0, 100]
+
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def _cached_hurst_rs(symbol: str, closes_tuple: tuple) -> Optional[float]:
@@ -610,18 +621,17 @@ def compute_desk_consensus(
     else:
         vol_s = float(vol_w_flow * vol_s + vol_w_rsi * rsi_bb_blend)
 
-    # Weights sum to 1.0
     score = (
-        0.28 * qs
-        + 0.20 * conf_pct
-        + 0.16 * fg
-        + 0.14 * struct_s
-        + 0.10 * wk_s
-        + 0.07 * tape
-        + 0.05 * vol_s
+        _CONSENSUS_W_QS * qs
+        + _CONSENSUS_W_CONFLUENCE * conf_pct
+        + _CONSENSUS_W_FG * fg
+        + _CONSENSUS_W_STRUCTURE * struct_s
+        + _CONSENSUS_W_WEEKLY * wk_s
+        + _CONSENSUS_W_TAPE * tape
+        + _CONSENSUS_W_VOL * vol_s
     )
     if absorb.get("active"):
-        score = float(min(100.0, score + 2.5))
+        score = float(min(100.0, score + _CONSENSUS_ABSORPTION_BONUS))
     score = float(max(0.0, min(100.0, score)))
     if score < 40.0:
         band = "high_risk"

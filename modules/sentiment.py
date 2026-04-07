@@ -12,7 +12,7 @@ from datetime import datetime
 
 from .ta import TA
 from .data import fetch_stock
-from .utils import log_warn
+from .utils import log_warn, safe_float, safe_last
 
 try:
     from hmmlearn import hmm
@@ -182,16 +182,29 @@ class Sentiment:
 
     @staticmethod
     def fear_greed(df, vix_val=None):
-        sc = [min(100, max(0, TA.rsi(df["Close"]).iloc[-1]))]
-        sma200 = df["Close"].rolling(200).mean().iloc[-1] if len(df) >= 200 else df["Close"].mean()
-        sc.append(min(100, max(0, 50 + (df["Close"].iloc[-1]/sma200-1)*500)))
+        closes = df["Close"]
+        rsi_s = TA.rsi(closes)
+        sc = [min(100, max(0, safe_float(safe_last(rsi_s), 50.0)))]
+        close_last = safe_float(safe_last(closes), 0.0)
+        if len(df) >= 200:
+            sma200 = safe_float(safe_last(closes.rolling(200).mean()), close_last)
+        else:
+            sma200 = safe_float(float(closes.mean()), close_last) if len(df) else close_last
+        if sma200 and abs(sma200) > 1e-12:
+            sc.append(min(100, max(0, 50 + (close_last / sma200 - 1) * 500)))
+        else:
+            sc.append(50.0)
         if len(df) >= 20:
-            sc.append(min(100, max(0, 50 + (df["Close"].iloc[-1]/df["Close"].iloc[-20]-1)*300)))
-            cv = df["Close"].pct_change().iloc[-20:].std()*np.sqrt(252)*100
-            hv = df["Close"].pct_change().std()*np.sqrt(252)*100
-            sc.append(max(0, min(100, 100-cv/max(hv,1)*50)))
-        if vix_val and vix_val > 0: sc.append(max(0, min(100, 100-(vix_val-12)*3)))
-        return np.mean(sc)
+            c20 = safe_float(closes.iloc[-20], close_last)
+            if c20 and abs(c20) > 1e-12:
+                sc.append(min(100, max(0, 50 + (close_last / c20 - 1) * 300)))
+            tail_pct = closes.pct_change().iloc[-20:]
+            cv = safe_float(tail_pct.std(), 0.0) * np.sqrt(252) * 100
+            hv = safe_float(closes.pct_change().std(), 0.0) * np.sqrt(252) * 100
+            sc.append(max(0, min(100, 100 - cv / max(hv, 1) * 50)))
+        if vix_val and vix_val > 0:
+            sc.append(max(0, min(100, 100 - (vix_val - 12) * 3)))
+        return float(np.mean(sc))
 
     @staticmethod
     def interpret(s):
@@ -204,6 +217,7 @@ class Sentiment:
 class Backtest:
     @staticmethod
     def cc_sim(df, otm_pct=.05, hold=30, iv_m=1.0):
+        """Quick premium heuristic sweep — not Black-Scholes; live desk uses ``bs_price`` paths."""
         results = []; rvol = df["Close"].pct_change().rolling(20).std()*np.sqrt(252)
         i = 20
         while i < len(df) - hold:

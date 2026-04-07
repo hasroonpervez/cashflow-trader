@@ -899,8 +899,12 @@ def detect_diamonds(
 
 
 def diamond_win_rate(df, diamonds, forward_bars=10):
-    """Backtest diamond signals: for Blue, check if price rose; for Pink, check
-    if price fell.  Returns (win_rate_pct, avg_return_pct, sample_count)."""
+    """Label diamonds on ``df`` then measure forward ``forward_bars`` closes on the **same** series.
+
+    This is an **in-sample** sanity check (signals and outcomes share one path — not walk-forward).
+    Do not treat win rate as out-of-sample predictive accuracy.
+    Blue: win if price rose; Pink: win if price fell. Returns (win_rate_pct, avg_return_pct, n).
+    """
     if not diamonds:
         return 0.0, 0.0, 0
 
@@ -1370,10 +1374,10 @@ class Opt:
                 ) - 1
                 rs_strong = ticker_3d > spy_3d
 
-            # Volume ramping (accumulation)
+            # Volume ramping (accumulation): last 3 vs prior 7 so windows don't mostly overlap
             vol_ramping = False
-            if 'Volume' in df.columns and len(df) >= 5:
-                vol_ramping = df['Volume'].tail(3).mean() > df['Volume'].tail(5).mean()
+            if "Volume" in df.columns and len(df) >= 10:
+                vol_ramping = df["Volume"].tail(3).mean() > df["Volume"].tail(10).mean()
 
             # Institutional support proximity
             near_support = False

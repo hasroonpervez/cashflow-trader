@@ -33,7 +33,7 @@ from .config import (
     EMA_EXTENSION_WARN_PCT,
 )
 from .streamlit_threading import make_script_ctx_pool, submit_with_script_ctx
-from .utils import safe_last, safe_float
+from .utils import safe_last, safe_float, log_warn
 from .ui_helpers import (
     _factor_checklist_labels, _confluence_why_trade_plain,
     _iv_rank_qualitative_words, _iv_rank_pill_html,
@@ -309,11 +309,10 @@ def build_context(
     ctx.macd_bull = safe_float(safe_last(ml_v), 0.0) > safe_float(safe_last(sl_v), 0.0)
     ctx.h_v = h_v
     obv_s = TA.obv(df)
-    ctx.obv_up = (
-        safe_float(safe_last(obv_s), 0.0) > safe_float(obv_s.iloc[-20], 0.0)
-        if len(obv_s) >= 20
-        else True
-    )
+    if len(obv_s) >= 20:
+        ctx.obv_up = safe_float(safe_last(obv_s), 0.0) > safe_float(obv_s.iloc[-20], 0.0)
+    else:
+        ctx.obv_up = True
     ctx.rsi_v = safe_float(safe_last(TA.rsi(df["Close"])), 0.0)
     ctx.al = Alerts.scan(df, ticker, ctx.vix_v)
 
@@ -365,7 +364,8 @@ def build_context(
                 _pmap = dict(st.session_state.get("_cf_opex_pin_map") or {})
                 _pmap[str(ctx.ticker).strip().upper()] = _pin
                 st.session_state["_cf_opex_pin_map"] = _pmap
-    except Exception:
+    except Exception as e:
+        log_warn("gamma flip / opex pin", e, ticker=str(getattr(ctx, "ticker", "") or ""))
         ctx.gamma_flip = None
         st.session_state["_cf_opex_pin"] = None
 
