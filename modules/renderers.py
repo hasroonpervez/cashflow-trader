@@ -30,6 +30,7 @@ from modules.data import (
     _PLOTLY_PLOT_BG,
     _PLOTLY_UI_CONFIG,
     _ticker_daily_ohlcv_from_raw,
+    fetch_watchlist_earnings_heatmap,
     fetch_stock,
     list_option_expiration_dates,
 )
@@ -1636,6 +1637,59 @@ def render_intel_tab(d: DeskLocals) -> None:
             "Not enough daily history for this symbol and settings to run the covered-call sweep. "
             "Try a longer period, a shorter hold window, or confirm the ticker has a full options tape."
         )
+
+    # ── WATCHLIST EARNINGS HEAT MAP ──
+    _wl_items = [t.strip().upper() for t in (d.scanner_watchlist or "").split(",") if t.strip()]
+    if _wl_items:
+        with st.expander("📅 Watchlist Earnings Calendar", expanded=False):
+            st.caption(
+                "**Red = this week** (pause premium selling). "
+                "**Yellow = next week** (widen buffers). "
+                "**Green = clear** (safe to sell premium)."
+            )
+            _hm = fetch_watchlist_earnings_heatmap(tuple(_wl_items))
+            if not _hm.empty:
+                _tw = _hm[_hm["Urgency"] == "this_week"]
+                _nw = _hm[_hm["Urgency"] == "next_week"]
+                if not _tw.empty:
+                    st.warning(
+                        f"**{len(_tw)} ticker(s) reporting THIS WEEK:** {', '.join(_tw['Ticker'])}. "
+                        "Pause new premium sales — IV crush risk."
+                    )
+                if not _nw.empty:
+                    st.info(
+                        f"**{len(_nw)} ticker(s) reporting NEXT WEEK:** {', '.join(_nw['Ticker'])}. "
+                        "Widen strike buffers."
+                    )
+                _colors = {
+                    "this_week": "#ef4444",
+                    "next_week": "#f59e0b",
+                    "this_month": "#94a3b8",
+                    "reported": "#64748b",
+                    "clear": "#10b981",
+                    "unknown": "#475569",
+                }
+                _cells = []
+                for _, _r in _hm.iterrows():
+                    _c = _colors.get(_r["Urgency"], "#475569")
+                    _days_label = (
+                        f"{int(_r['Days'])}d" if _r["Days"] is not None and pd.notna(_r["Days"]) else "—"
+                    )
+                    _cells.append(
+                        f"<div style='display:inline-flex;flex-direction:column;align-items:center;"
+                        f"padding:8px 12px;margin:3px;border-radius:10px;"
+                        f"border:1px solid {_c}40;background:{_c}18;min-width:72px'>"
+                        f"<span style='font-size:.72rem;font-weight:800;color:{_c}'>{safe_html(_r['Ticker'])}</span>"
+                        f"<span style='font-size:.62rem;color:#94a3b8;margin-top:2px'>{safe_html(str(_r['Date'] or '—'))}</span>"
+                        f"<span style='font-size:.58rem;font-weight:700;color:{_c}'>{_days_label}</span>"
+                        f"</div>"
+                    )
+                st.markdown(
+                    "<div style='display:flex;flex-wrap:wrap;gap:2px;margin:8px 0'>" + "".join(_cells) + "</div>",
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.info("No earnings dates available for the current watchlist.")
 
     # ══════════════════════════════════════════════════════════════════
     # SECTION 7: MARKET SCANNER (multi-ticker diamond and confluence scan)

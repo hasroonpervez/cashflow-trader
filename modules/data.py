@@ -1545,6 +1545,53 @@ def fetch_earnings_calendar_display(ticker: str):
         return pd.DataFrame(), None
 
 
+@st.cache_data(ttl=900, show_spinner=False)
+def fetch_watchlist_earnings_heatmap(tickers: tuple) -> pd.DataFrame:
+    """Next earnings date for every watchlist ticker with urgency bucketing."""
+    rows = []
+    today = datetime.now().date()
+    for sym in tickers:
+        sym = str(sym).strip().upper()
+        if not sym:
+            continue
+        raw = None
+        try:
+            raw = fetch_earnings_date(sym)
+        except Exception as _e:
+            log_warn("watchlist earnings heatmap fetch", _e, ticker=sym)
+        if raw is None:
+            rows.append({"Ticker": sym, "Date": None, "Days": None, "Urgency": "unknown"})
+            continue
+        try:
+            if isinstance(raw, str):
+                dt = datetime.strptime(raw[:10], "%Y-%m-%d").date()
+            else:
+                dt = pd.Timestamp(raw).date()
+        except Exception as _e:
+            log_warn("watchlist earnings heatmap parse", _e, ticker=sym)
+            rows.append({"Ticker": sym, "Date": None, "Days": None, "Urgency": "unknown"})
+            continue
+        days_out = int((dt - today).days)
+        if days_out < 0:
+            urgency = "reported"
+        elif days_out <= 7:
+            urgency = "this_week"
+        elif days_out <= 14:
+            urgency = "next_week"
+        elif days_out <= 30:
+            urgency = "this_month"
+        else:
+            urgency = "clear"
+        rows.append({"Ticker": sym, "Date": dt.strftime("%Y-%m-%d"), "Days": days_out, "Urgency": urgency})
+    df = pd.DataFrame(rows, columns=["Ticker", "Date", "Days", "Urgency"])
+    if df.empty:
+        return df
+    urgency_order = {"this_week": 0, "next_week": 1, "this_month": 2, "reported": 3, "clear": 4, "unknown": 5}
+    df["_sort"] = df["Urgency"].map(urgency_order).fillna(5)
+    df = df.sort_values(["_sort", "Days"], na_position="last").drop(columns=["_sort"]).reset_index(drop=True)
+    return df
+
+
 def fetch_macro():
     """Macro strip + VIX glance history via the macro-only desk snapshot (watchlist empty)."""
     s = fetch_desk_market_snapshot(tuple())
