@@ -50,7 +50,6 @@ footer,
     unsafe_allow_html=True,
 )
 
-import html as _html_mod
 import pandas as pd
 from datetime import datetime
 import warnings, time
@@ -78,7 +77,7 @@ for _import_try in range(_IMPORT_KEYERROR_RETRIES):
                 REF_NOTIONAL, RISK_PCT_EXAMPLE, KELLY_DISPLAY_CAP_PCT,
                 EMA_EXTENSION_WARN_PCT,
             )
-            from modules.utils import log_warn
+            from modules.utils import safe_html, log_warn
             from modules.desk_locals import build_desk_locals
             from modules.render_pre_tabs import (
                 apply_auto_watchlist_to_cfg_tx,
@@ -180,7 +179,7 @@ def main():
         hud.ticker, cfg, global_snapshot=_global_snap, defer_headlines_earnings=_defer_meta
     )
     if ctx is None:
-        _sym_e = _html_mod.escape(str(hud.ticker))
+        _sym_e = safe_html(hud.ticker)
         st.error(
             f"**Price data unavailable** for `{_sym_e}`. "
             "Yahoo Finance often **rate-limits** shared servers (Streamlit Community Cloud shares IPs), "
@@ -238,13 +237,15 @@ def main():
         if ctx.bluf_exp:
             try:
                 _exp_ch = datetime.strptime(str(ctx.bluf_exp)[:10], "%Y-%m-%d")
-            except Exception:
+            except Exception as _e:
+                log_warn("parsing bluf expiry for chart expected move", _e, ticker=str(ctx.ticker))
                 _exp_ch = None
         if _dte_ch > 0 and _iv_ch > 0:
             st.session_state["_cf_chart_em"] = {"iv_pct": _iv_ch, "dte": _dte_ch, "expiry": _exp_ch}
         else:
             st.session_state["_cf_chart_em"] = {}
-    except Exception:
+    except Exception as _e:
+        log_warn("computing chart expected move state", _e, ticker=str(ctx.ticker))
         st.session_state["_cf_chart_em"] = {}
     _fragment_technical_zone(
         ctx.df,
