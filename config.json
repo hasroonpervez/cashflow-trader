@@ -17,6 +17,8 @@
   "overlay_diamonds": true,
   "overlay_gold": true,
   "use_quant_models": true,
+  "discord_webhook_url": "",
+  "alert_on_conviction": true,
   "defer_headlines_earnings": true,
   "defer_options_first_pass": true
 }

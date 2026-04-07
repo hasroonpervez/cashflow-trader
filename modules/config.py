@@ -32,6 +32,8 @@ DEFAULT_CONFIG = {
     "overlay_diamonds": True,
     "overlay_gold": True,
     "use_quant_models": True,
+    "discord_webhook_url": "",
+    "alert_on_conviction": True,
     # When true, `build_context` skips Yahoo headline + next-earnings fetch; news tab uses `@st.fragment`.
     "defer_headlines_earnings": True,
     # When true, skip options-chain hydration on the first session render to improve Cloud cold boot.

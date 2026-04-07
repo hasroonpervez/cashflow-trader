@@ -78,7 +78,7 @@ from modules.chart import _chart_hoverlabel, build_correlation_heatmap, build_sk
 from modules.data import compute_iv_rank_proxy, fetch_earnings_calendar_display, fetch_news_headlines
 
 from .desk_locals import DeskLocals
-from .utils import log_warn, safe_float, safe_href, safe_html, safe_last
+from .utils import log_warn, safe_float, safe_href, safe_html, safe_last, send_discord_webhook
 
 
 def _news_item_markdown_html(item: dict) -> str:
@@ -1780,6 +1780,33 @@ def render_intel_tab(d: DeskLocals) -> None:
     watchlist_tickers = [t.strip().upper() for t in scanner_watchlist.split(",") if t.strip()]
     if watchlist_tickers:
         auto_scan_interval = max(0, int(auto_scan_interval or DEFAULT_CONFIG.get("auto_scan_interval", 300)))
+        from modules.config import load_config, save_config
+
+        _cfg_alerts = load_config()
+        with st.expander("Alert Settings", expanded=False):
+            _wh = st.text_input(
+                "Discord Webhook URL",
+                value=str(_cfg_alerts.get("discord_webhook_url", "") or ""),
+                type="password",
+                help="Paste a Discord webhook URL to get 💎 CONVICTION alerts.",
+                key="cf_discord_webhook",
+            )
+            _alert_on = st.toggle(
+                "Alert on 💎 CONVICTION",
+                value=bool(_cfg_alerts.get("alert_on_conviction", True)),
+                key="cf_alert_on_conviction",
+            )
+            if st.button("Save Alert Settings", key="cf_save_alert_settings"):
+                _merged_alerts = {
+                    **_cfg_alerts,
+                    "discord_webhook_url": str(_wh or "").strip(),
+                    "alert_on_conviction": bool(_alert_on),
+                }
+                if save_config(_merged_alerts):
+                    st.success("Alert settings saved.")
+                else:
+                    st.error("Could not write alert settings to disk.")
+
         _scan_bundle = st.session_state.get("_cf_scanner_bundle")
         _now_ts = float(time.time())
         _last_scan_ts = float((_scan_bundle or {}).get("scanned_at_ts") or 0.0)
@@ -2025,6 +2052,24 @@ def render_intel_tab(d: DeskLocals) -> None:
                     )
                     _more = f" +{len(_conviction) - 8} more" if len(_conviction) > 8 else ""
                     st.success(f"💎 CONVICTION: Blue Diamond + 10x score ≥ 5 — {_tickers}{_more}")
+                    _cfg_alerts_live = load_config()
+                    _webhook = str(_cfg_alerts_live.get("discord_webhook_url", "") or "")
+                    _do_alert = bool(_cfg_alerts_live.get("alert_on_conviction", True))
+                    if _webhook and _do_alert:
+                        import threading
+
+                        for r in _conviction:
+                            _msg = (
+                                f"💎 **CONVICTION ALERT** — **{r['ticker']}** @ ${float(r['price']):.2f}\n"
+                                f"Blue Diamond + 10x Score {int(r.get('10x Potential', 0) or 0)}/10\n"
+                                f"QE {float(r['qs']):.0f} · Confluence {int(r['cp_score'])} · {str(r.get('struct', ''))}\n"
+                                f"Flow: {str(r.get('Flow / Bias', '—'))}"
+                            )
+                            threading.Thread(
+                                target=send_discord_webhook,
+                                args=(_webhook, _msg),
+                                daemon=True,
+                            ).start()
 
                 with st.expander("10x Screener (score ≥ 5)", expanded=False):
                     _ten_rows = [r for r in scanner_results if int(r.get("10x Potential", 0) or 0) >= 5]
