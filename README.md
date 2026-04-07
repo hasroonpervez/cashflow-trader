@@ -261,6 +261,10 @@ cashflow-trader/
 - The technical chart lives in `@st.fragment`; quant vs retail mode is passed via `st.session_state` (not extra fragment kwargs) so deploys and fragment reruns stay compatible. **Expected Move chart inputs** use the same pattern (`_cf_chart_em`, `_cf_em_safety`). **Gamma flip** uses **`_cf_gamma_flip`**; desk picks use **`_cf_bluf_cc_pick` / `_cf_bluf_csp_pick`** for Θ/Γ on the Diamond card. Stale kwargs from older sessions are ignored safely on the fragment signature.
 - The **Rolling Edge Capture Log** uses a separate `@st.fragment(run_every=…)` that recomputes retail vs quant scores for every watchlist ticker; VIX and institutional mode are read from `st.session_state` (`_cf_vix_snapshot`, `_cf_use_quant_models`) so it stays aligned with the active ticker context. When **`_cf_global_market_bundle`** is present, **`scan_watchlist_edge_rows`** slices **`panel_raw`** instead of calling **`fetch_stock`** per symbol (fallback to **`fetch_stock`** if a column is missing).
 
+### Performance & caching
+
+> **Note:** While the **Global Market Bundle** caches price data to minimize API footprint, secondary metadata (**news**, **earnings**) may still trigger brief background fetches during workspace transitions so the desk stays current; **`build_context`** runs those fetches (with their own **`@st.cache_data`** TTLs) inside **`st.spinner`** on each full script rerun—so you may still see a short “working” state even when the **2y** price panel is a cache hit. **Clear price cache & retry** is scoped to the **price feed** (**`fetch_stock`** + **`fetch_global_market_bundle`**), not every cached helper in the app.
+
 ---
 
 ## Run Locally
