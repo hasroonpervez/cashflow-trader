@@ -5,6 +5,7 @@ import pandas as pd
 
 from modules.signal_desk import (
     compute_desk_consensus,
+    institutional_absorption,
     last_bar_volume_zscore,
     suggested_shares_atr_risk,
     whale_session_x_for_chart,
@@ -60,6 +61,31 @@ def test_consensus_score_in_range():
     c = compute_desk_consensus(ctx, df)
     assert 0 <= c["score"] <= 100
     assert c["band"] in ("high_risk", "neutral", "conviction")
+    assert "absorption" in c and isinstance(c["absorption"], bool)
+    assert "absorption_detail" in c
+
+
+def test_institutional_absorption_triggers_on_flat_close():
+    df = _dummy_df(80)
+    tail = df.index[-21:-1]
+    df.loc[tail, "Volume"] = np.linspace(900_000, 1_100_000, len(tail)).astype(np.int64)
+    df.loc[df.index[-1], "Volume"] = 50_000_000
+    c_prev = float(df["Close"].iloc[-2])
+    df.loc[df.index[-1], "Close"] = c_prev * 1.0005
+    a = institutional_absorption(df)
+    assert a["active"] is True
+    assert a["volume_z"] is not None and a["volume_z"] >= 4.0
+
+
+def test_institutional_absorption_off_when_price_runs():
+    df = _dummy_df(80)
+    tail = df.index[-21:-1]
+    df.loc[tail, "Volume"] = np.linspace(900_000, 1_100_000, len(tail)).astype(np.int64)
+    df.loc[df.index[-1], "Volume"] = 50_000_000
+    c_prev = float(df["Close"].iloc[-2])
+    df.loc[df.index[-1], "Close"] = c_prev * 1.05
+    a = institutional_absorption(df)
+    assert a["active"] is False
 
 
 def test_suggested_shares():

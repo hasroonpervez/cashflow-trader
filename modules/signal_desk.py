@@ -44,6 +44,56 @@ def whale_session_x_for_chart(df: pd.DataFrame, z_threshold: float = 4.0):
         return None
 
 
+def institutional_absorption(
+    df: pd.DataFrame,
+    volume_z: Optional[float] = None,
+    *,
+    z_min: float = 4.0,
+    atr_mult_flat: float = 0.45,
+    min_flat_pct: float = 0.35,
+    max_flat_pct: float = 1.0,
+    no_atr_fallback_pct: float = 0.55,
+) -> dict:
+    """
+    Whale-trap / absorption: extreme volume Z vs prior sessions, but the last daily close
+    barely moved vs an ATR-scaled typical daily range (OHLCV proxy for liquidity taken without marking).
+
+    Returns dict with active flag, diagnostics, and volume_z used.
+    """
+    out: dict = {
+        "active": False,
+        "volume_z": None,
+        "last_return_pct": None,
+        "flat_threshold_pct": None,
+    }
+    if df is None or getattr(df, "empty", True) or "Close" not in df.columns or len(df) < 25:
+        return out
+    close = pd.to_numeric(df["Close"], errors="coerce")
+    if close.isna().all() or close.iloc[-2] <= 0 or not np.isfinite(float(close.iloc[-1])):
+        return out
+    vz = volume_z if volume_z is not None else last_bar_volume_zscore(df)
+    out["volume_z"] = vz
+    if vz is None or vz < z_min:
+        return out
+    c0, c1 = float(close.iloc[-2]), float(close.iloc[-1])
+    r_pct = (c1 / c0 - 1.0) * 100.0
+    if not np.isfinite(r_pct):
+        return out
+    out["last_return_pct"] = r_pct
+    thr = no_atr_fallback_pct
+    try:
+        atr_last = float(TA.atr(df).iloc[-1]) if len(df) >= 15 else 0.0
+    except Exception:
+        atr_last = 0.0
+    if atr_last > 0 and c1 > 0:
+        atr_pct = 100.0 * atr_last / c1
+        if np.isfinite(atr_pct) and atr_pct > 0:
+            thr = float(np.clip(max(min_flat_pct, atr_mult_flat * atr_pct), min_flat_pct, max_flat_pct))
+    out["flat_threshold_pct"] = thr
+    out["active"] = bool(abs(r_pct) <= thr)
+    return out
+
+
 def _bbw_last_pctile(df: pd.DataFrame, lookback: int = 60) -> Optional[float]:
     """Approximate BBW tightness: percentile rank of last (BB upper-lower)/mid in trailing window."""
     if df is None or len(df) < lookback + 25 or "Close" not in df.columns:
@@ -103,6 +153,7 @@ def compute_desk_consensus(ctx: Any, df: pd.DataFrame) -> dict:
     tape = tape + 6.0 if obv_up else -4.0
     tape = max(0.0, min(100.0, tape))
     vz = last_bar_volume_zscore(df)
+    absorb = institutional_absorption(df, volume_z=vz)
     if vz is None:
         vol_s = 50.0
     else:
@@ -117,6 +168,8 @@ def compute_desk_consensus(ctx: Any, df: pd.DataFrame) -> dict:
         + 0.07 * tape
         + 0.05 * vol_s
     )
+    if absorb.get("active"):
+        score = float(min(100.0, score + 2.5))
     score = float(max(0.0, min(100.0, score)))
     if score < 40.0:
         band = "high_risk"
@@ -151,6 +204,15 @@ def compute_desk_consensus(ctx: Any, df: pd.DataFrame) -> dict:
     ]
     if vz is not None:
         mom_parts.append(f"Volume Z today **{vz:+.1f}**")
+    if absorb.get("active"):
+        rp = absorb.get("last_return_pct")
+        thr = absorb.get("flat_threshold_pct")
+        if rp is not None and thr is not None:
+            mom_parts.append(
+                f"**Institutional absorption** (whale trap): huge print, flat close (**{rp:+.2f}%** vs ≤**{thr:.2f}%** “quiet” band)"
+            )
+        else:
+            mom_parts.append("**Institutional absorption** (whale trap): extreme volume vs muted close")
     momentum_hint = " · ".join(mom_parts)
     gz = float(getattr(ctx, "gold_zone_price", 0) or 0)
     px = float(getattr(ctx, "price", 0) or 0)
@@ -176,7 +238,27 @@ def compute_desk_consensus(ctx: Any, df: pd.DataFrame) -> dict:
         "setup_hint": setup_hint,
         "momentum_hint": momentum_hint,
         "exit_hint": exit_hint,
+        "absorption": bool(absorb.get("active")),
+        "absorption_detail": absorb,
     }
+
+
+def _absorption_banner_html(c: dict) -> str:
+    if not c.get("absorption"):
+        return ""
+    d = c.get("absorption_detail") or {}
+    vz = d.get("volume_z")
+    rp = d.get("last_return_pct")
+    thr = d.get("flat_threshold_pct")
+    vz_s = f"{vz:.1f}σ" if vz is not None and np.isfinite(float(vz)) else "high"
+    if rp is not None and thr is not None and np.isfinite(rp) and np.isfinite(thr):
+        sub = html_mod.escape(f"Last session {rp:+.2f}% vs ≤{thr:.2f}% quiet band (volume {vz_s} vs 20d norm).")
+    else:
+        sub = html_mod.escape("Extreme volume vs muted daily close — often absorption / liquidity reload.")
+    return f"""<div style="margin-top:10px;padding:10px 12px;border-radius:10px;border:1px solid rgba(34,211,238,0.35);
+background:rgba(6,182,212,0.12);font-size:0.78rem;color:#a5f3fc;line-height:1.5">
+<strong style="color:#22d3ee;letter-spacing:0.06em">INSTITUTIONAL ABSORPTION</strong> · {sub}
+<span style="display:block;margin-top:4px;color:#64748b;font-size:0.72rem">Microstructure proxy on daily bars — not order-book imbalance.</span></div>"""
 
 
 def consensus_banner_html(ticker: str, c: dict) -> str:
@@ -206,6 +288,7 @@ background:linear-gradient(135deg,rgba(15,23,42,0.95),rgba(30,41,59,0.88));box-s
 <div style="height:100%;width:{pct}%;background:{col};border-radius:4px;opacity:0.92"></div></div>
 <div style="margin-top:8px;font-size:0.75rem;color:#64748b;line-height:1.45">
 Blend: Quant Edge, confluence, tape sentiment, structure, weekly bias, volume anomaly.</div>
+{_absorption_banner_html(c)}
 </div></div>"""
 
 
@@ -215,9 +298,12 @@ def consensus_compact_html(ticker: str, c: dict) -> str:
     pct = int(round(float(c["score"])))
     col = c["color"]
     lab = html_mod.escape(str(c["label"]))
+    _abs = ""
+    if c.get("absorption"):
+        _abs = " · <span style=\"color:#22d3ee;font-weight:700\">ABSORPTION</span>"
     return f"""<div style="margin:0 0 10px 0;padding:8px 12px;border-radius:10px;border:1px solid rgba(148,163,184,0.2);
 background:rgba(15,23,42,0.9);font-size:0.82rem;color:#cbd5e1">
-<strong style="color:{col};font-family:JetBrains Mono,monospace">{pct}</strong>/100 consensus · {tk} — <span style="color:#e2e8f0">{lab}</span></div>"""
+<strong style="color:{col};font-family:JetBrains Mono,monospace">{pct}</strong>/100 consensus · {tk} — <span style="color:#e2e8f0">{lab}</span>{_abs}</div>"""
 
 
 def traders_note_markdown(ticker: str, ctx: Any, df: pd.DataFrame, c: dict) -> str:
@@ -241,7 +327,22 @@ def traders_note_markdown(ticker: str, ctx: Any, df: pd.DataFrame, c: dict) -> s
         parts.append("Price is in a **tight Bollinger squeeze** (potential energy building).")
     elif bbwp is not None and bbwp >= 0.85:
         parts.append("Bollinger bandwidth is **wide** (realized range expanded).")
-    if vz is not None:
+    if c.get("absorption"):
+        ad = c.get("absorption_detail") or {}
+        rp = ad.get("last_return_pct")
+        thr = ad.get("flat_threshold_pct")
+        vz_a = ad.get("volume_z")
+        if rp is not None and thr is not None and vz_a is not None:
+            parts.append(
+                f"**Whale trap / absorption:** volume ~**{vz_a:.1f}σ** vs the prior 20 sessions, but the session closed only "
+                f"**{rp:+.2f}%** vs a **≤{thr:.2f}%** “quiet-close” band (ATR-scaled). "
+                "Large size may be changing hands without yet marking price — watch the next sessions for resolution."
+            )
+        else:
+            parts.append(
+                "**Whale trap / absorption:** extreme volume with a muted daily close — watch for a volatility release."
+            )
+    elif vz is not None:
         if vz >= 4.0:
             parts.append(
                 f"Today's volume is roughly **{vz:.1f}σ** above its recent norm — watch for **institutional footprint**."
