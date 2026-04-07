@@ -64,6 +64,26 @@ if "bt_hold" not in st.session_state:
 if "_cf_ledger" not in st.session_state:
     st.session_state["_cf_ledger"] = []
 
+def _is_script_health_probe() -> bool:
+    """Best-effort detection of platform health-check requests."""
+    try:
+        hdrs = st.context.headers
+        h = hdrs.to_dict() if hdrs is not None else {}
+        low = {str(k).lower(): str(v).lower() for k, v in h.items()}
+        blob = " ".join([f"{k}:{v}" for k, v in low.items()])
+        if "/script-health-check" in blob:
+            return True
+        ua = low.get("user-agent", "")
+        if "kube-probe" in ua or "health" in ua:
+            return True
+    except Exception:
+        return False
+    return False
+
+# Hard short-circuit for health probes before expensive imports/context building.
+if _is_script_health_probe():
+    st.stop()
+
 # ── Module imports: serialize + retry on KeyError (Streamlit watcher vs import race; see streamlit#6404)
 _modules_import_lock = threading.Lock()
 _IMPORT_KEYERROR_RETRIES = 5
