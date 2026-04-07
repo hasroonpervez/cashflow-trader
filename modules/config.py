@@ -7,6 +7,7 @@ from __future__ import annotations
 import streamlit as st
 import json, os
 from pathlib import Path
+from datetime import datetime
 
 CONFIG_PATH = Path(__file__).parent.parent / "config.json"
 
@@ -104,6 +105,64 @@ def save_config(cfg) -> bool:
         return True
     except Exception:
         return False
+
+
+JOURNAL_PATH = CONFIG_PATH.parent / "trade_journal.json"
+
+
+def load_journal() -> list:
+    """Load persistent trade journal from disk."""
+    try:
+        if JOURNAL_PATH.exists():
+            with open(JOURNAL_PATH) as f:
+                data = json.load(f)
+            return data if isinstance(data, list) else []
+    except Exception:
+        pass
+    return []
+
+
+def save_journal(entries: list) -> bool:
+    """Atomic write of trade journal. Returns False on read-only filesystem."""
+    try:
+        temp = JOURNAL_PATH.with_suffix(".tmp")
+        with open(temp, "w") as f:
+            json.dump(entries, f, indent=2, default=str)
+        os.replace(temp, JOURNAL_PATH)
+        return True
+    except Exception:
+        return False
+
+
+def journal_add_entry(entry: dict) -> bool:
+    """Append one trade and persist."""
+    entries = load_journal()
+    entries.append(entry)
+    return save_journal(entries)
+
+
+def journal_close_trade(index: int, actual_close_price: float, close_date: str = None) -> bool:
+    """Close a trade with actual fill and compute realized P&L."""
+    entries = load_journal()
+    if not (0 <= index < len(entries)):
+        return False
+    e = entries[index]
+    e["status"] = "closed"
+    e["actual_close_price"] = actual_close_price
+    e["close_date"] = close_date or datetime.now().strftime("%Y-%m-%d")
+    prem = float(e.get("premium_100", 0) or 0)
+    strike = float(e.get("strike", 0) or 0)
+    contracts = int(e.get("contracts", 1) or 1)
+    opt_type = str(e.get("option_type", "put")).lower()
+    intrinsic = (
+        max(0.0, actual_close_price - strike) if opt_type == "call" else max(0.0, strike - actual_close_price)
+    ) * 100.0 * contracts
+    e["realized_pnl"] = round(prem * contracts - intrinsic, 2)
+    return save_journal(entries)
+
+
+def journal_clear() -> bool:
+    return save_journal([])
 
 
 class ConfigTransaction:

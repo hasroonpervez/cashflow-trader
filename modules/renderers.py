@@ -18,6 +18,10 @@ from modules.config import (
     KELLY_DISPLAY_CAP_PCT,
     REF_NOTIONAL,
     RISK_PCT_EXAMPLE,
+    journal_add_entry,
+    journal_clear,
+    journal_close_trade,
+    load_journal,
 )
 from modules.data import (
     _PLOTLY_AXIS_TITLE,
@@ -1078,6 +1082,21 @@ def render_cashflow_tab(cfg: dict, d: DeskLocals) -> None:
                                     "theta_desk_day_entry": _th_day_e,
                                 }
                             )
+                            journal_add_entry(
+                                {
+                                    "ticker": str(ticker).upper(),
+                                    "option_type": "call",
+                                    "strike": float(b["strike"]),
+                                    "premium_100": float(b["prem_100"]),
+                                    "contracts": int(nc_s),
+                                    "iv": float(b.get("iv") or 0),
+                                    "expiry": str(sel_exp)[:10],
+                                    "entry_date": datetime.now().strftime("%Y-%m-%d"),
+                                    "entry_spot": float(price),
+                                    "qs_at_entry": float(qs),
+                                    "status": "open",
+                                }
+                            )
                             st.rerun()
                         if st.checkbox("All CC strikes", key="exp_5"):
                             _cc_df = _options_scan_dataframe(cc, put_table=False)
@@ -1157,6 +1176,21 @@ def render_cashflow_tab(cfg: dict, d: DeskLocals) -> None:
                                     "qs_at_entry": float(qs),
                                     "dist_pin_pct_at_entry": _dist_pin_e2,
                                     "theta_desk_day_entry": _th_day_e2,
+                                }
+                            )
+                            journal_add_entry(
+                                {
+                                    "ticker": str(ticker).upper(),
+                                    "option_type": "put",
+                                    "strike": float(b["strike"]),
+                                    "premium_100": float(b["prem_100"]),
+                                    "contracts": 1,
+                                    "iv": float(b.get("iv") or 0),
+                                    "expiry": str(sel_exp)[:10],
+                                    "entry_date": datetime.now().strftime("%Y-%m-%d"),
+                                    "entry_spot": float(price),
+                                    "qs_at_entry": float(qs),
+                                    "status": "open",
                                 }
                             )
                             st.rerun()
@@ -2522,5 +2556,62 @@ def render_ledger_tab(d: DeskLocals) -> None:
     if st.button("Clear Sentinel Ledger", key="cf_ledger_clear"):
         st.session_state["_cf_ledger"] = []
         st.rerun()
+
+    # ── PERSISTENT TRADE JOURNAL ──
+    st.divider()
+    st.markdown("### 📓 Persistent Trade Journal")
+    st.caption("Survives browser closes. Stored in `trade_journal.json`.")
+
+    _journal = load_journal()
+    if not _journal:
+        st.info("No persistent trades yet. Use **Track Trade** to add entries.")
+    else:
+        _jrows = []
+        for _ji, _je in enumerate(_journal):
+            _jstatus = _je.get("status", "open")
+            _jrows.append(
+                {
+                    "#": _ji + 1,
+                    "Ticker": _je.get("ticker", "—"),
+                    "Type": str(_je.get("option_type", "—")).upper(),
+                    "Strike": f"${float(_je.get('strike', 0)):.0f}",
+                    "Premium": f"${float(_je.get('premium_100', 0)):.0f}",
+                    "Entry": _je.get("entry_date", "—"),
+                    "Status": "✅ Closed" if _jstatus == "closed" else "🟢 Open",
+                    "P&L": f"${float(_je.get('realized_pnl', 0)):.2f}" if _jstatus == "closed" else "—",
+                }
+            )
+        st.dataframe(pd.DataFrame(_jrows), use_container_width=True, hide_index=True)
+        _closed = [e for e in _journal if e.get("status") == "closed"]
+        if _closed:
+            _total_pnl = sum(float(e.get("realized_pnl", 0)) for e in _closed)
+            _wins = sum(1 for e in _closed if float(e.get("realized_pnl", 0)) > 0)
+            _wr = _wins / len(_closed) * 100.0
+            _jm1, _jm2, _jm3 = st.columns(3)
+            with _jm1:
+                st.metric("Total Realized P&L", f"${_total_pnl:,.2f}")
+            with _jm2:
+                st.metric("Win Rate", f"{_wr:.0f}%")
+            with _jm3:
+                st.metric("Closed Trades", str(len(_closed)))
+        _open_trades = [(_i, _e) for _i, _e in enumerate(_journal) if _e.get("status") != "closed"]
+        if _open_trades:
+            with st.expander("Close a trade", expanded=False):
+                _labels = [
+                    f"#{i+1} {e.get('ticker','?')} {str(e.get('option_type','')).upper()} ${float(e.get('strike',0)):.0f}"
+                    for i, e in _open_trades
+                ]
+                _sel = st.selectbox("Trade", _labels, key="cf_jrnl_close_sel")
+                _cpx = st.number_input("Close price ($)", min_value=0.01, value=100.0, step=0.50, key="cf_jrnl_close_px")
+                if st.button("Close Trade", key="cf_jrnl_close_btn"):
+                    _idx = _open_trades[_labels.index(_sel)][0]
+                    if journal_close_trade(_idx, float(_cpx)):
+                        st.success("Saved.")
+                        st.rerun()
+                    else:
+                        st.error("Could not write to disk (read-only host?).")
+        if st.button("Clear Journal", key="cf_jrnl_clear"):
+            journal_clear()
+            st.rerun()
 
 
