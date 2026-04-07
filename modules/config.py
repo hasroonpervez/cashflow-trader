@@ -12,11 +12,12 @@ CONFIG_PATH = Path(__file__).parent.parent / "config.json"
 
 DEFAULT_CONFIG = {
     "watchlist": (
-        "PLTR,BMNR,HIMS,RIVN,TSLA,QS,LCID,NIO,OPEN,ZETA,CIFR,BITF,RXRX,ABCL,IBRX,"
+        "PLTR,BMNR,HIMS,RIVN,TSLA,QS,LCID,NIO,OPEN,ZETA,CIFR,KEEL,RXRX,ABCL,IBRX,"
         "DNA,ABSI,SRFM,BYND,SOFI,SPY,QQQ,BTC,ETH"
     ),
     "scanner_sort_mode": "Custom watchlist order",
     "scanner_mode": "📈 Options Yield",
+    "auto_scan_interval": 300,
     "strat_focus": "Hybrid",
     "strat_horizon": "30 DTE",
     "mini_mode": False,

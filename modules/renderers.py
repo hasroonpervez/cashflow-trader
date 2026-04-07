@@ -4,6 +4,8 @@ from __future__ import annotations
 import html as _html_mod
 import math
 import re
+import sys
+import time
 from datetime import datetime, timedelta
 
 import numpy as np
@@ -371,6 +373,7 @@ def render_setup_tab(chart_mood: str, d: DeskLocals) -> None:
     qs_status = d.qs_status
     scanner_watchlist = d.scanner_watchlist
     scanner_sort_mode = d.scanner_sort_mode
+    auto_scan_interval = d.auto_scan_interval
     equity_capital = d.equity_capital
     global_snap = d.global_snap
     defer_meta = d.defer_meta
@@ -1643,7 +1646,30 @@ def render_intel_tab(d: DeskLocals) -> None:
 
     watchlist_tickers = [t.strip().upper() for t in scanner_watchlist.split(",") if t.strip()]
     if watchlist_tickers:
-        if st.button("Scan Watchlist", key="run_scanner"):
+        auto_scan_interval = max(0, int(auto_scan_interval or DEFAULT_CONFIG.get("auto_scan_interval", 300)))
+        _scan_bundle = st.session_state.get("_cf_scanner_bundle")
+        _now_ts = float(time.time())
+        _last_scan_ts = float((_scan_bundle or {}).get("scanned_at_ts") or 0.0)
+        _has_prior_scan = _last_scan_ts > 0
+        _auto_due = bool(
+            auto_scan_interval > 0
+            and _has_prior_scan
+            and (_now_ts - _last_scan_ts) >= auto_scan_interval
+        )
+        _auto_status = st.empty()
+        if auto_scan_interval <= 0:
+            _auto_status.caption("Auto refresh disabled (`auto_scan_interval` <= 0).")
+        elif _has_prior_scan:
+            _remaining = max(0, int(round(auto_scan_interval - (_now_ts - _last_scan_ts))))
+            _mode = str((_scan_bundle or {}).get("scan_trigger") or "manual")
+            if _auto_due:
+                _auto_status.caption("Auto refresh due now; running scanner...")
+            else:
+                _auto_status.caption(f"Auto refresh every {auto_scan_interval}s · next in {_remaining}s · last trigger: {_mode}.")
+        else:
+            _auto_status.caption(f"Auto refresh set to {auto_scan_interval}s after first manual scan.")
+        _manual_scan = st.button("Scan Watchlist", key="run_scanner")
+        if _manual_scan or _auto_due:
             with st.spinner("📡 Radar active. Scanning institutional order flow…"):
                 _panel_scan = (
                     global_snap.raw_panel
@@ -1742,8 +1768,9 @@ def render_intel_tab(d: DeskLocals) -> None:
                     "failed": list(scan_failed),
                     "watchlist_tickers": list(watchlist_tickers),
                     "log_returns_df": log_returns_df,
+                    "scanned_at_ts": float(time.time()),
+                    "scan_trigger": "manual" if _manual_scan else "auto",
                 }
-
         _scan_bundle = st.session_state.get("_cf_scanner_bundle")
         if _scan_bundle:
             _scan_failed = _scan_bundle.get("failed") or []
@@ -1764,6 +1791,17 @@ def render_intel_tab(d: DeskLocals) -> None:
                 else:
                     order = {t: i for i, t in enumerate(watchlist_tickers_scn)}
                     scanner_results.sort(key=lambda x: order.get(x["ticker"], 10_000))
+
+                def _ten_x_badge(score):
+                    try:
+                        s = int(score or 0)
+                    except (TypeError, ValueError):
+                        s = 0
+                    if s >= 7:
+                        return f"🥇 {s}/10"
+                    if s >= 5:
+                        return f"🥈 {s}/10"
+                    return f"⚪ {s}/10"
 
                 def _render_scanner_options_data_table():
                     scanner_df = pd.DataFrame(
@@ -1786,6 +1824,7 @@ def render_intel_tab(d: DeskLocals) -> None:
                                 "Flow / Bias": r.get("Flow / Bias", "—"),
                                 "Gold Zone Dist %": float(r["dist_gz"]),
                                 "Daily": r["struct"],
+                                "10x Potential": _ten_x_badge(r.get("10x Potential", 0)),
                                 "10x Convexity": r.get("10x Convexity", "—"),
                                 "Summary": r["summary"],
                             }
@@ -1830,6 +1869,10 @@ def render_intel_tab(d: DeskLocals) -> None:
                                 ),
                                 "Gold Zone Dist %": st.column_config.NumberColumn("Gold Zone Dist", format="%+.1f%%"),
                                 "Daily": st.column_config.TextColumn("Daily"),
+                                "10x Potential": st.column_config.TextColumn(
+                                    "10x Potential",
+                                    help="10-factor heuristic score: 7+ gold, 5-6 silver, below 5 neutral.",
+                                ),
                                 "10x Convexity": st.column_config.TextColumn(
                                     "10x Convexity",
                                     help="Venture-style sieve: float ≤30M, short ≥20%, BBW ≤5th pct (1y), vol Z≥4 (90d), call/put IV ≥1.1. All must pass; Yahoo data often gaps.",
@@ -1837,6 +1880,45 @@ def render_intel_tab(d: DeskLocals) -> None:
                                 "Summary": st.column_config.TextColumn("Summary", width="large"),
                             },
                         )
+
+                _conviction = [
+                    r for r in scanner_results
+                    if "BLUE" in str(r.get("d_status", "")) and int(r.get("10x Potential", 0) or 0) >= 5
+                ]
+                if _conviction:
+                    _tickers = ", ".join(
+                        f"{_html_mod.escape(str(r.get('ticker')))} ({int(r.get('10x Potential', 0) or 0)}/10)"
+                        for r in _conviction[:8]
+                    )
+                    _more = f" +{len(_conviction) - 8} more" if len(_conviction) > 8 else ""
+                    st.success(f"💎 CONVICTION: Blue Diamond + 10x score ≥ 5 — {_tickers}{_more}")
+
+                with st.expander("10x Screener (score ≥ 5)", expanded=False):
+                    _ten_rows = [r for r in scanner_results if int(r.get("10x Potential", 0) or 0) >= 5]
+                    if _ten_rows:
+                        _ten_df = pd.DataFrame(
+                            [
+                                {
+                                    "Ticker": r.get("ticker"),
+                                    "10x Score": int(r.get("10x Potential", 0) or 0),
+                                    "Diamond": r.get("d_status", "—"),
+                                    "Flags": ", ".join(sorted((r.get("10x Flags") or {}).keys())) or "—",
+                                    "Flow / Bias": r.get("Flow / Bias", "—"),
+                                    "Summary": r.get("summary", "—"),
+                                }
+                                for r in _ten_rows
+                            ]
+                        ).sort_values(by=["10x Score", "Ticker"], ascending=[False, True])
+                        streamlit_show_dataframe(
+                            _ten_df,
+                            use_container_width=True,
+                            hide_index=True,
+                            key="cf_10x_screener_df",
+                            on_select="ignore",
+                            selection_mode=[],
+                        )
+                    else:
+                        st.caption("No tickers currently score 5+ on the 10x heuristic.")
 
                 if scanner_mode == "📈 Options Yield":
                     _blues_alloc = [r for r in scanner_results if "BLUE" in str(r.get("d_status", ""))]
@@ -1921,6 +2003,10 @@ def render_intel_tab(d: DeskLocals) -> None:
                             <div style='text-align:center;min-width:100px'>
                                 <div style='font-size:.65rem;color:#64748b;text-transform:uppercase'>Diamond</div>
                                 <span class='diamond-badge {r["d_class"]}'>{_ds}</span>
+                            </div>
+                            <div style='text-align:center;min-width:88px'>
+                                <div style='font-size:.65rem;color:#64748b;text-transform:uppercase'>10x Potential</div>
+                                <div class='mono' style='font-size:.78rem;color:#facc15;font-weight:700;line-height:1.25'>{_html_mod.escape(_ten_x_badge(r.get("10x Potential", 0)))}</div>
                             </div>
                             <div style='text-align:center;min-width:88px'>
                                 <div style='font-size:.65rem;color:#64748b;text-transform:uppercase'>10x Sieve</div>
@@ -2351,15 +2437,28 @@ def render_ledger_tab(d: DeskLocals) -> None:
         on_select="ignore",
         selection_mode=[],
     )
-    _m = sentinel_ledger_metrics(_led, rfr=float(rfr))
-    m1, m2, m3, m4 = st.columns(4)
+    _m = sentinel_ledger_metrics(_led, rfr=float(rfr), corr_matrix=cm_cached)
+    m1, m2, m3, m4, m5, m6 = st.columns(6)
     with m1:
         st.metric("Total portfolio Δ (equiv. shares)", f"{_m['total_delta']:,.2f}")
     with m2:
         st.metric("Total Θ / day (desk income)", f"${_m['total_theta_day']:,.2f}")
     with m3:
-        st.metric("Unrealized P&L (model)", f"${_m['unrealized_pnl']:,.2f}")
+        st.metric(
+            "Total vega (per +1 IV pt)",
+            f"${_m.get('total_vega', 0.0):,.2f}",
+            help="Aggregate short-option vega. Negative means portfolio loses value if implied vol rises.",
+        )
     with m4:
+        _var95 = _m.get("var_95_1d")
+        st.metric(
+            "VaR 95% (1d, delta-corr)",
+            f"${_var95:,.2f}" if _var95 is not None else "—",
+            help="Approximate 1-day 95% VaR using delta-dollar exposures, 20d realized vol, and cached watchlist correlation matrix.",
+        )
+    with m5:
+        st.metric("Unrealized P&L (model)", f"${_m['unrealized_pnl']:,.2f}")
+    with m6:
         _er = _v22.get("avg_edge_realization")
         st.metric(
             "Edge realization (avg, active tickers)",

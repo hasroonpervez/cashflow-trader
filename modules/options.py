@@ -1106,6 +1106,90 @@ def evaluate_asymmetric_convexity_sieve(
     return {"hit": hit, "gates": gates, "bbw_pctile": bbw_pctile, "vol_z": vol_z}
 
 
+def score_10x_potential(df: pd.DataFrame, info: dict, *, spy_df: pd.DataFrame = None, pre_diamond: dict = None, latest_d: dict = None):
+    """Heuristic 10x potential score (0-10) plus matched factor flags."""
+    score = 0
+    flags: dict = {}
+    if df is None or getattr(df, "empty", True) or "Close" not in df.columns:
+        return score, flags
+
+    mcap = safe_float((info or {}).get("marketCap"), 0.0)
+    if 0 < mcap < 10_000_000_000:
+        score += 1
+        flags["small_cap"] = True
+
+    rg = safe_float((info or {}).get("revenueGrowth"), 0.0)
+    if rg > 0.25:
+        score += 1
+        flags["rev_growth_pct"] = round(rg * 100.0, 1)
+        if rg > 0.50:
+            score += 1
+            flags["hyper_growth"] = True
+
+    si = safe_float((info or {}).get("shortPercentOfFloat"), 0.0)
+    if si > 0.15:
+        score += 1
+        flags["short_pct_float"] = round(si * 100.0, 1)
+
+    try:
+        bw = _bbw_series(pd.to_numeric(df["Close"], errors="coerce"))
+        bw_pctile = safe_float(safe_last(bw.rank(pct=True)), np.nan)
+        if np.isfinite(bw_pctile):
+            flags["bbw_pctile"] = round(float(bw_pctile), 3)
+            if float(bw_pctile) <= 0.10:
+                score += 1
+                flags["vol_squeeze"] = True
+    except Exception as e:
+        log_warn("score_10x_potential bbw", e)
+
+    if "Volume" in df.columns and len(df) >= 20:
+        v3 = safe_float(df["Volume"].tail(3).mean(), 0.0)
+        v20 = safe_float(df["Volume"].tail(20).mean(), 1.0)
+        if v20 > 0 and v3 > 1.5 * v20:
+            score += 1
+            flags["vol_ramp_x"] = round(v3 / v20, 2)
+
+    try:
+        h = TA.calculate_hurst_exponent(pd.to_numeric(df["Close"], errors="coerce").dropna())
+        if h is not None and np.isfinite(float(h)):
+            flags["hurst"] = round(float(h), 3)
+            if float(h) > 0.55:
+                score += 1
+                flags["hurst_trend"] = True
+    except Exception as e:
+        log_warn("score_10x_potential hurst", e)
+
+    if spy_df is not None and not getattr(spy_df, "empty", True) and "Close" in spy_df.columns and len(df) >= 90 and len(spy_df) >= 90:
+        try:
+            tk_90 = pd.to_numeric(df["Close"], errors="coerce").dropna().tail(90)
+            sp_90 = pd.to_numeric(spy_df["Close"], errors="coerce").dropna().tail(90)
+            if len(tk_90) >= 2 and len(sp_90) >= 2:
+                tk_ret = safe_float(safe_last(tk_90), 0.0) / max(1e-9, safe_float(tk_90.iloc[0], 0.0))
+                sp_ret = safe_float(safe_last(sp_90), 0.0) / max(1e-9, safe_float(sp_90.iloc[0], 0.0))
+                rs_ratio = (tk_ret / sp_ret) if sp_ret > 0 else np.nan
+                if np.isfinite(rs_ratio):
+                    flags["rs_spy_ratio_90d"] = round(float(rs_ratio), 2)
+                    if float(rs_ratio) > 1.2:
+                        score += 1
+                        flags["rs_outperform"] = True
+        except Exception as e:
+            log_warn("score_10x_potential rs_spy", e)
+
+    fcf = safe_float((info or {}).get("freeCashflow"), 0.0)
+    if fcf > 0:
+        score += 1
+        flags["fcf_positive"] = True
+
+    if isinstance(latest_d, dict) and str(latest_d.get("type", "")).lower() == "blue":
+        score += 1
+        flags["blue_diamond"] = True
+    elif isinstance(pre_diamond, dict) and bool(pre_diamond.get("is_pre_diamond")):
+        score += 1
+        flags["pre_diamond"] = str(pre_diamond.get("signal_strength") or "active")
+
+    return int(score), flags
+
+
 def scan_single_ticker(
     tkr,
     correlation_haircut=1.0,
@@ -1346,6 +1430,13 @@ def scan_single_ticker(
             _short_pct,
             skew_ratio,
         )
+        _ten_x_score, _ten_x_flags = score_10x_potential(
+            df,
+            _yf_info,
+            spy_df=spy_df,
+            pre_diamond=pre_diamond,
+            latest_d=latest_d,
+        )
         _fund_sieve = evaluate_fundamental_sieve(tkr)
         _fcf_ten = bool(_fund_sieve and _fund_sieve.get("ten_x_candidate"))
         if _sieve.get("hit") and _fcf_ten:
@@ -1391,6 +1482,8 @@ def scan_single_ticker(
                 else round(price * 0.95, 2)
             ),
             "10x Convexity": convexity_label,
+            "10x Potential": int(_ten_x_score),
+            "10x Flags": _ten_x_flags,
             "convexity_sieve": _sieve,
             "fundamental_sieve": _fund_sieve,
             "fcf_yield_pct": (_fund_sieve or {}).get("fcf_yield_pct"),

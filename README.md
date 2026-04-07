@@ -9,6 +9,8 @@
 - **Options Yield** — Full income workflow: BLUF trade line, GEX / gamma flip, Monte Carlo PoP, spreads, Greeks, multi-ticker scanner.
 - **Equity Radar** — Stock-focused scan: pre-diamond signals, actionable targets, Delta-One setup (same scan payload; options chrome hidden until you switch back).
 - **Sentinel Ledger** — Track legs; pin distance, edge realization, and “golden zone” style maturity hints.
+- **10x scanner + conviction** — `10x Potential` score, score>=5 screener, and `💎 CONVICTION` when Blue Diamond aligns with 10x.
+- **Auto scanner refresh** — Scanner can auto-rerun on a timer (`auto_scan_interval`, default 300s) after first manual scan.
 - **In-app glossary** — **Intel → Quick Reference Guide**.
 
 ---
@@ -75,6 +77,7 @@ Writes are **atomic** (temp file + replace). **Mission Control** fields are batc
 |-----|--------|
 | `watchlist` | Comma-separated symbols |
 | `scanner_mode` | `📈 Options Yield` or `🎯 Equity Radar` |
+| `auto_scan_interval` | Scanner auto-refresh cadence in seconds (`300` default; `0` disables) |
 | `scanner_sort_mode`, `strat_focus`, `strat_horizon` | Desk controls |
 | `mini_mode` | Turbo / compact layout |
 | `use_quant_models` | Institutional quant path (default on) |
@@ -144,6 +147,9 @@ cashflow-trader/
 | Risk | Portfolio ρ warning; allocator sector + top-3 correlation guards with Sentinel |
 | Equity mode | Radar summary, actionable targets, Delta-One tabs; shared scanner cache |
 | Options | Vanna & charm on BS row; IV rank proxy; skew chart |
+| Scanner upgrades | `score_10x_potential` integrated into scanner rows (`10x Potential`, flags), Intel **10x Screener**, and Blue+10x **CONVICTION** banner |
+| Auto-monitoring | Intel scanner supports timer-driven reruns via `auto_scan_interval`; cache bundle stores last trigger/time |
+| Sentinel risk | Portfolio aggregates now include **total vega** and a simple **1-day 95% VaR** (delta-correlation approximation) |
 
 **Pinning (intuition)** — Dealers hedge gamma; near expiry, GEX can concentrate at strikes (“walls”). Θ/Γ informs how strongly the model weights the wall in `predict_opex_pin`. Heuristic only, not a settlement forecast.
 
@@ -199,8 +205,11 @@ Live code builds BBW from Bollinger on closes; skew from `calc_vol_skew`; float/
 - **Cloud filesystem** may be read-only — use Secrets for `watchlist`.
 - **Options** — Thin names may lack OI or chains; GEX/flip may be blank.
 - **Scanner bundle** — Stale until you **Scan Watchlist** again after editing symbols.
+- **Auto-rescan behavior** — Timer starts after the first manual scan; very short intervals can increase Yahoo throttling risk.
 - **10x / fundamental sieve** — Data gaps yield “—”; not predictive of returns.
 - **Diamond win rate / backtests** — Heuristic labels on one price path; holdout scoring is stricter than raw in-sample but still not out-of-sample validation.
+
+Watchlist defaults include **KEEL** (former BITF / Bitfarms) for the rebranded AI-infrastructure thesis.
 
 Optional `hmmlearn` / `scipy` paths degrade gracefully if missing.
 

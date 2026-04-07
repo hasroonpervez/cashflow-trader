@@ -14,6 +14,7 @@ import pandas as pd
 import streamlit as st
 
 from .ta import TA
+from .utils import safe_last
 
 # Rolling VWAP + Z prior window (sessions); keep in sync with ``vwap_distance_stats`` defaults.
 _VWAP_ROLL_BARS = 20
@@ -207,9 +208,9 @@ def vwap_distance_stats(
     mu, sig = float(prior.mean()), float(prior.std(ddof=0))
     if not np.isfinite(mu) or not np.isfinite(sig) or sig < 1e-12:
         return out
-    last_rel = float(rel.iloc[-1])
-    last_vwap = float(vwap.iloc[-1])
-    last_c = float(c.iloc[-1])
+    last_rel = float(safe_last(rel, np.nan))
+    last_vwap = float(safe_last(vwap, np.nan))
+    last_c = float(safe_last(c, np.nan))
     if not np.isfinite(last_rel) or not np.isfinite(last_vwap) or last_vwap <= 0 or not np.isfinite(last_c):
         return out
     out["rolling_vwap"] = last_vwap
@@ -231,7 +232,7 @@ def last_bar_volume_zscore(df: pd.DataFrame) -> Optional[float]:
     mu, sig = float(prior.mean()), float(prior.std())
     if not np.isfinite(mu) or not np.isfinite(sig) or sig < 1e-9:
         return None
-    last = float(v.iloc[-1])
+    last = float(safe_last(v, np.nan))
     if not np.isfinite(last):
         return None
     return (last - mu) / sig
@@ -243,8 +244,8 @@ def whale_session_x_for_chart(df: pd.DataFrame, z_threshold: float = 4.0):
     if z is None or z < z_threshold:
         return None
     try:
-        return df.index[-1]
-    except Exception:
+        return df.index[-1] if len(df.index) else None
+    except (IndexError, TypeError):
         return None
 
 
@@ -312,8 +313,9 @@ def detect_whale_sweep(
         return out
     rv = vwap_detail.get("rolling_vwap") if isinstance(vwap_detail, dict) else None
     try:
-        last_c = float(pd.to_numeric(df["Close"], errors="coerce").iloc[-1])
-    except Exception:
+        last_close = safe_last(pd.to_numeric(df["Close"], errors="coerce"), np.nan)
+        last_c = float(last_close)
+    except (TypeError, ValueError):
         return out
     rvf = float(rv) if rv is not None and np.isfinite(float(rv)) else None
     price_ok = rvf is not None and rvf > 0 and last_c > rvf
@@ -343,7 +345,7 @@ def ffd_stationarity_proxy(df: pd.DataFrame, *, d: float = 0.4, tail: int = 60) 
         if not np.isfinite(sf) or not np.isfinite(sr) or sr < 1e-12:
             return False
         return bool(sf < sr * 0.92)
-    except Exception:
+    except (TypeError, ValueError):
         return False
 
 
@@ -460,21 +462,23 @@ def institutional_absorption(
     if df is None or getattr(df, "empty", True) or "Close" not in df.columns or len(df) < 25:
         return out
     close = pd.to_numeric(df["Close"], errors="coerce")
-    if close.isna().all() or close.iloc[-2] <= 0 or not np.isfinite(float(close.iloc[-1])):
+    c_prev = safe_last(close.iloc[:-1], np.nan)
+    c_last = safe_last(close, np.nan)
+    if close.isna().all() or not np.isfinite(float(c_prev)) or float(c_prev) <= 0 or not np.isfinite(float(c_last)):
         return out
     vz = volume_z if volume_z is not None else last_bar_volume_zscore(df)
     out["volume_z"] = vz
     if vz is None or vz < z_min:
         return out
-    c0, c1 = float(close.iloc[-2]), float(close.iloc[-1])
+    c0, c1 = float(c_prev), float(c_last)
     r_pct = (c1 / c0 - 1.0) * 100.0
     if not np.isfinite(r_pct):
         return out
     out["last_return_pct"] = r_pct
     thr = no_atr_fallback_pct
     try:
-        atr_last = float(TA.atr(df).iloc[-1]) if len(df) >= 15 else 0.0
-    except Exception:
+        atr_last = float(safe_last(TA.atr(df), 0.0)) if len(df) >= 15 else 0.0
+    except (TypeError, ValueError):
         atr_last = 0.0
     if atr_last > 0 and c1 > 0:
         atr_pct = 100.0 * atr_last / c1
@@ -497,11 +501,11 @@ def _bbw_last_pctile(df: pd.DataFrame, lookback: int = 60) -> Optional[float]:
         if len(bw) < lookback:
             return None
         tail = bw.iloc[-lookback:]
-        last = float(bw.iloc[-1])
+        last = float(safe_last(bw, np.nan))
         if not np.isfinite(last):
             return None
         return float((tail <= last).mean())
-    except Exception:
+    except (TypeError, ValueError):
         return None
 
 
@@ -743,8 +747,8 @@ def compute_desk_consensus(
     else:
         exit_hint = "Gold Zone not fused — use structure and your own stop rule."
     try:
-        atr_last = float(TA.atr(df).iloc[-1]) if df is not None and len(df) >= 15 else 0.0
-    except Exception:
+        atr_last = float(safe_last(TA.atr(df), 0.0)) if df is not None and len(df) >= 15 else 0.0
+    except (TypeError, ValueError):
         atr_last = 0.0
     vwap_urgency = bool(
         vz is not None

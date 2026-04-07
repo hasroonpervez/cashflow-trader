@@ -78,6 +78,7 @@ class DeskLocals:
     qs_status: Any = None
     scanner_watchlist: Any = None
     scanner_sort_mode: Any = None
+    auto_scan_interval: Any = None
     equity_capital: Any = None
     global_snap: Any = None
     defer_meta: Any = None
@@ -168,6 +169,7 @@ def build_desk_locals(
         qs_status=ctx.qs_status,
         scanner_watchlist=hud.scanner_watchlist,
         scanner_sort_mode=hud.scanner_sort_mode,
+        auto_scan_interval=cfg.get("auto_scan_interval", DEFAULT_CONFIG.get("auto_scan_interval", 300)),
         equity_capital=hud.equity_capital,
         global_snap=global_snap,
         defer_meta=defer_meta,

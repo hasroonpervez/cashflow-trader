@@ -110,16 +110,25 @@ def ledger_theta_desk_day(spot, strike, dte_days, rfr, iv_pct, opt_type, contrac
     return float(-float(g.get("theta", 0)) * mult)
 
 
-def sentinel_ledger_metrics(ledger: list, rfr: float = 0.045) -> dict:
-    """Aggregate Δ, daily Θ income, and mark-to-model unrealized P&L for tracked short-premium legs."""
-    empty = {"total_delta": 0.0, "total_theta_day": 0.0, "unrealized_pnl": 0.0}
+def sentinel_ledger_metrics(ledger: list, rfr: float = 0.045, corr_matrix: Optional[pd.DataFrame] = None) -> dict:
+    """Aggregate Δ, Θ/day, vega, unrealized P&L, and simple 1-day 95% VaR."""
+    empty = {
+        "total_delta": 0.0,
+        "total_theta_day": 0.0,
+        "total_vega": 0.0,
+        "unrealized_pnl": 0.0,
+        "var_95_1d": None,
+    }
     if not ledger:
         return empty
     total_delta = 0.0
     total_theta = 0.0
+    total_vega = 0.0
     unrealized = 0.0
     today = datetime.now().date()
     cache_spot = {}
+    cache_vol = {}
+    delta_by_sym: dict[str, float] = {}
 
     def _spot(sym: str) -> Optional[float]:
         if sym in cache_spot:
@@ -134,6 +143,25 @@ def sentinel_ledger_metrics(ledger: list, rfr: float = 0.045) -> dict:
         except Exception:
             cache_spot[sym] = None
         return cache_spot[sym]
+
+    def _realized_vol_20(sym: str) -> Optional[float]:
+        if sym in cache_vol:
+            return cache_vol[sym]
+        try:
+            df_s = fetch_stock(sym, "6mo", "1d")
+            if df_s is None or df_s.empty or "Close" not in df_s.columns:
+                cache_vol[sym] = None
+                return None
+            ret = pd.to_numeric(df_s["Close"], errors="coerce").pct_change().dropna().tail(20)
+            if len(ret) < 10:
+                cache_vol[sym] = None
+                return None
+            sigma = float(ret.std(ddof=1))
+            cache_vol[sym] = sigma if np.isfinite(sigma) and sigma > 0 else None
+            return cache_vol[sym]
+        except Exception:
+            cache_vol[sym] = None
+            return None
 
     for row in ledger:
         if not isinstance(row, dict):
@@ -170,16 +198,58 @@ def sentinel_ledger_metrics(ledger: list, rfr: float = 0.045) -> dict:
             continue
         mult = 100 * max(1, contracts)
         # Short option: position delta = −Δ_option × multiplier
-        total_delta -= float(g.get("delta", 0)) * mult
+        pos_delta = -float(g.get("delta", 0)) * mult
+        total_delta += pos_delta
+        delta_by_sym[sym] = float(delta_by_sym.get(sym, 0.0) + pos_delta)
         # Long-option theta from BS is negative; short collects +|theta| × multiplier
         total_theta -= float(g.get("theta", 0)) * mult
+        # Vega from bs_greeks is per 1% IV point; short options carry negative vega.
+        total_vega -= float(g.get("vega", 0)) * mult
         prem_share = prem_100 / 100.0
         unrealized += (prem_share - mark) * mult
+
+    var_95_1d = None
+    try:
+        keys = sorted(k for k, v in delta_by_sym.items() if abs(float(v)) > 1e-9)
+        if keys:
+            ex = []
+            for k in keys:
+                sp = _spot(k)
+                sig = _realized_vol_20(k)
+                if sp is None or not np.isfinite(float(sp)) or float(sp) <= 0:
+                    ex.append(0.0)
+                    continue
+                # Dollar delta exposure scaled by 1-day realized vol.
+                ex.append(float(delta_by_sym[k]) * float(sp) * float(sig or 0.02))
+            e = np.asarray(ex, dtype=float)
+            if np.any(np.isfinite(e)) and np.sum(np.abs(e)) > 0:
+                C = np.eye(len(keys), dtype=float)
+                if isinstance(corr_matrix, pd.DataFrame) and not corr_matrix.empty:
+                    cols = [str(c).strip().upper() for c in corr_matrix.columns]
+                    idxs = [str(i).strip().upper() for i in corr_matrix.index]
+                    cm = corr_matrix.copy()
+                    cm.columns = cols
+                    cm.index = idxs
+                    for i, ki in enumerate(keys):
+                        for j, kj in enumerate(keys):
+                            if ki in cm.index and kj in cm.columns:
+                                rho = float(cm.loc[ki, kj])
+                                C[i, j] = rho if np.isfinite(rho) else (1.0 if i == j else 0.0)
+                # Symmetrize + clip to a valid-ish correlation range for robustness.
+                C = 0.5 * (C + C.T)
+                C = np.clip(C, -1.0, 1.0)
+                port_var = float(e @ C @ e.T)
+                if np.isfinite(port_var) and port_var >= 0:
+                    var_95_1d = 1.65 * np.sqrt(port_var)
+    except Exception:
+        var_95_1d = None
 
     return {
         "total_delta": round(total_delta, 2),
         "total_theta_day": round(total_theta, 2),
+        "total_vega": round(total_vega, 2),
         "unrealized_pnl": round(unrealized, 2),
+        "var_95_1d": round(float(var_95_1d), 2) if var_95_1d is not None and np.isfinite(float(var_95_1d)) else None,
     }
 
 
