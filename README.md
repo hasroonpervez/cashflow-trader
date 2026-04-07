@@ -243,6 +243,7 @@ cashflow-trader/
     ├── sentiment.py          # **Bayesian-style `analyze_news_bias`**, HMM (FFD), CC sim, Alerts, QuantBacktest
     ├── chart.py              # Price / volume / RSI / MACD + **Shadow move (purple)** + **OpEx pin** + HVN / EM / gamma flip / correlation heatmap
     ├── ui_helpers.py         # Sparklines, fragments, **`sentinel_ledger_metrics`**, **`sentinel_ledger_table_rows`**, **`ledger_theta_desk_day`**, regime **Shadow breakout** banner, **expected_move_safety_html**, **Θ/Γ desk line**
+    ├── signal_desk.py        # **`compute_desk_consensus`**, trader’s note helpers, volume-Z / bento copy; **Elite tier** roadmap: FFD momentum, absorption alert, correlation-aware sizer messaging
     ├── pages.py              # **`build_context`** (optional **`global_snapshot`**): options → GEX → **OpEx pin map** → **shadow move** → **shadow breakout** flag → fused Gold → confluence → diamonds
     ├── streamlit_threading.py # Thread pools with ScriptRunContext re-attach per task
     └── css.py                # Full CSS theme + Mini Mode + sidebar toggle JS
@@ -392,13 +393,53 @@ If the earnings calendar endpoint returns no rows, the app falls back to the pri
 | Expected Move (1-σ) | `Spot × (IV%/100) × √(DTE/365.25)` for implied range context (chart + desk + scanner) |
 | **GEX & Gamma Flip** | **Vectorized gamma × OI** with dealer sign (calls **+**, puts **−**); optional **HVN liquidity weight (1.2×)**; cumulative strike GEX crosses define **zero-gamma**; **`predict_opex_pin`** blends **gamma wall** with **Θ/Γ** magnet |
 | **Shadow Expected Move** | **`TA.get_shadow_move`**: central **70%** of whale-volume closes vs IV **1σ** band — chart insight when liquidity range diverges from options-implied width |
-| Fractional Differentiation (FFD) | Improve stationarity while preserving memory in time-series dynamics |
+| Fractional Differentiation (FFD) | Improve stationarity while preserving memory in time-series dynamics (see **Elite tier roadmap** below) |
 | HMM Regime Detection | Classify latent volatility regimes on **FFD diff + rolling vol** features (subsampled, diagonal covariance, bounded EM iterations); guarded against numerical failures |
 | Continuous Kelly (Merton) | Compute variance-aware continuous-time allocation with optional half-Kelly |
 | OTM IV Skew Regime Ratio | Classify market-maker fear/greed posture from put-vs-call OTM implied volatility |
 | Vectorized Historical Edge Proxy | Backtest threshold/hold edge signals over daily history without UI lockups |
 
 `hmmlearn` and `scipy` are handled with safe fallbacks so the app remains usable if those packages are unavailable.
+
+---
+
+## Elite tier roadmap: market microstructure & data science
+
+This section frames where the desk is headed beyond classic “green arrow” TA: **stationarity with memory**, **volume–price joint tests**, **convex sizing**, **structural liquidity (VPVR/HVN)**, and **portfolio-level correlation hygiene**. It complements what is **already shipped** (FFD + HMM correlation path, adaptive volume Z, HVN-weighted GEX, Kelly governors with correlation haircut, cluster penalty on scanner Blues) with a clear **next commit** target for **`modules/signal_desk.py`**.
+
+### 1. Mathematical stationarity: fractional differentiation (FFD)
+
+Integer differencing (\(d = 1\), e.g. log returns) pushes prices toward stationarity but discards **long-memory** structure that institutions lean on for regime and slow mean reversion. **Fractional differentiation** uses a real order \(d\) (often **0.3–0.7**) so the series is **more stationary** while **retaining persistence**:
+
+\[
+\Delta^d X_t = \sum_{k=0}^{\infty} \binom{d}{k} (-1)^k X_{t-k}
+\]
+
+**In this repo:** `TA.apply_ffd` (default **`d=0.4`**, bounded weights) and **FFD-based correlation** (`ffd_returns_from_closes` / `get_correlation_matrix`) are **live** in v21+. **Roadmap:** optional **FFD-weighted momentum** inside desk consensus (below) to align the **Consensus Score** with memory-aware dynamics instead of relying only on classical MACD.
+
+### 2. Volume-weighted alpha: VWAP deviation and relative volume
+
+A raw volume spike is noisy; a professional read combines **where** size traded with **how unusual** participation is. A standard construct is the **z-score of distance from session or rolling VWAP** (conceptually \(Z_{\text{VWAP}} = (P_t - \text{VWAP}_t) / \sigma_{\text{VWAP}}\) when a rolling dispersion of VWAP distance is defined), together with **relative volume (RVOL)**. **Narrative:** when price trends, **RVOL / volume Z** is extreme (e.g. **Z > 4**), and **VWAP distance** expands, the desk reads **urgency** (aggressive flow sweeping the book). **In this repo:** VWAP and adaptive volume Z (`get_dark_pool_proxy`) exist on the TA side; **full VWAP-distance Z** wired into **`signal_desk` consensus copy** is **roadmap**.
+
+### 3. Convexity engine: Kelly-style allocation
+
+**Kelly** formalizes optimal growth under an edge: \(f^* = (bp - q) / b\) with **odds** \(b\), win probability \(p\), and \(q = 1 - p\). **In this repo:** Kelly governors and **`Opt._simple_corr_haircut`** already scale scanner allocation; **roadmap:** surface **explicit Kelly framing** next to the desk **position size** expander (risk/reward + consensus) so copy matches the math users already get from allocation helpers.
+
+### 4. Structural “gold zone”: volume profile (POC, value area, HVN)
+
+Retail draws arbitrary support; professionals anchor to **high volume nodes (HVN)**, **point of control (POC)**, and **value area (VA)**—where liquidity actually accumulated. **In this repo:** `TA.get_volume_nodes`, Gold Zone fusion, and **HVN-weighted GEX** are **live**. The desk narrative can further stress **“structural floor”** when spot aligns with an HVN and consensus turns constructive (**roadmap copy / scoring tie-in**).
+
+### 5. Visual information architecture (“zero-noise” desk)
+
+**Primary:** a high-resolution **equity curve / projection** for the active setup (backtest path exists; deeper integration is optional). **Secondary:** **correlation matrix** warnings—e.g. *already long TSLA; adding RIVN raises systemic risk* when \(\rho\) is high—**partially shipped** via watchlist correlation and **cluster penalty**; **roadmap:** tie the **Calculate position size** flow to **held-ticker correlation** when portfolio symbols are available.
+
+### Planned upgrades in `modules/signal_desk.py` (“Elite tier” commit)
+
+1. **FFD-weighted momentum** — Replace or augment MACD-only tape tilt with a **stationarity-aware** momentum signal derived from FFD-aligned series (consensus inputs stay bounded for Streamlit latency).
+2. **“Whale trap” / institutional absorption** — Alert when **volume Z is extreme (e.g. > 4)** while **price change is muted** over the same bar or short window (**absorption** narrative: liquidity taken without yet marking price).
+3. **Portfolio optimizer hook** — **Correlation check** in the position-sizer path: warn or haircut when the candidate is highly correlated with symbols already treated as **held** or **scanned peers** (extends existing **`_simple_corr_haircut`** / cluster ideas to the desk UX).
+
+**Disclaimer:** All labels above are **research and education**; they do not guarantee performance. Yahoo-derived OHLCV cannot observe true order flow or lit book imbalance.
 
 ---
 
