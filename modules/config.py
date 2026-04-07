@@ -104,33 +104,34 @@ def save_config(cfg) -> bool:
 
 
 class ConfigTransaction:
-    """Accumulate config mutations, write once at flush."""
+    """Batch config mutations; write once at flush instead of many saves per load."""
 
     def __init__(self):
         self._base = load_config()
-        self._mutations = {}
-        self._dirty = False
+        self._mutations: dict = {}
 
     def update(self, **kwargs):
         for k, v in kwargs.items():
             if self._base.get(k) != v:
                 self._mutations[k] = v
-                self._dirty = True
 
     def flush(self) -> bool:
-        if not self._dirty:
+        if not self._mutations:
             return True
         merged = {**self._base, **self._mutations}
-        result = save_config(merged)
-        if result:
+        ok = save_config(merged)
+        if ok:
             self._base = merged
             self._mutations = {}
-            self._dirty = False
-        return result
+        return ok
 
     @property
-    def current(self):
+    def current(self) -> dict:
         return {**self._base, **self._mutations}
+
+    @property
+    def dirty(self) -> bool:
+        return bool(self._mutations)
 
     @property
     def pending_keys(self):
