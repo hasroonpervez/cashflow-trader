@@ -10,6 +10,7 @@ import math
 from datetime import timedelta
 from typing import Optional
 from numpy.lib.stride_tricks import sliding_window_view
+from .utils import log_warn, safe_float, safe_last
 
 class TA:
     @staticmethod
@@ -102,7 +103,7 @@ class TA:
         cr = close.dropna()
         er = 0.5
         if len(cr) >= 21:
-            change = abs(float(cr.iloc[-1] - cr.iloc[-21]))
+            change = abs(safe_float(safe_last(cr), 0.0) - safe_float(safe_last(cr.iloc[:-20]), 0.0))
             path = float(cr.diff().abs().iloc[-20:].sum())
             if path > 1e-12:
                 er = change / path
@@ -293,7 +294,7 @@ class TA:
         recent = df.iloc[-lookback:]
         si = recent["Low"].idxmin(); sp = recent.loc[si, "Low"]
         sb = list(recent.index).index(si)
-        av = TA.atr(df).iloc[-1]
+        av = safe_float(safe_last(TA.atr(df)), np.nan)
         if pd.isna(av) or av <= 0: av = sp * 0.02
         bs = len(recent) - 1 - sb
         return {n: round(sp + av * r * bs, 2) for n, r in {"1x1":1,"2x1":2,"1x2":.5,"3x1":3,"1x3":1/3}.items()}, sp
@@ -464,7 +465,8 @@ class TA:
             if not math.isfinite(h):
                 return None
             return float(np.clip(h, 0.0, 1.0))
-        except Exception:
+        except Exception as _e:
+            log_warn("TA.calculate_hurst_exponent", _e)
             return None
 
     @staticmethod

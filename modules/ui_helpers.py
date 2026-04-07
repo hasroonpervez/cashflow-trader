@@ -28,6 +28,7 @@ from .options import (
 )
 from .chart import build_chart
 from .config import save_config, load_config, _overlay_prefs_from_session, _persist_overlay_prefs
+from .utils import log_warn, safe_float, safe_last
 
 # Watchlist scanner: "Flow / Bias" column (whale Z-score + NLP headline flags).
 SCANNER_WHALE_FLOW_BIAS_HELP = (
@@ -49,7 +50,8 @@ def streamlit_df_widget_key(prefix: str, data) -> str:
     try:
         if hasattr(data, "data") and not isinstance(data, pd.DataFrame):
             df = data.data
-    except Exception:
+    except Exception as _e:
+        log_warn("streamlit_df_widget_key data fallback", _e)
         df = data
     if df is None:
         return f"{prefix}_none"
@@ -60,7 +62,8 @@ def streamlit_df_widget_key(prefix: str, data) -> str:
     try:
         blob = df.reset_index(drop=True).astype(str).to_csv(index=False).encode("utf-8", errors="replace")
         digest = hashlib.sha256(blob).hexdigest()[:16]
-    except Exception:
+    except Exception as _e:
+        log_warn("streamlit_df_widget_key checksum", _e)
         digest = "err"
     return f"{prefix}_{df.shape[0]}x{df.shape[1]}_{digest}"
 
@@ -136,11 +139,12 @@ def sentinel_ledger_metrics(ledger: list, rfr: float = 0.045, corr_matrix: Optio
         try:
             df_s = fetch_stock(sym, "3mo", "1d")
             if df_s is not None and not df_s.empty and "Close" in df_s.columns:
-                v = float(pd.to_numeric(df_s["Close"], errors="coerce").iloc[-1])
+                v = safe_float(safe_last(pd.to_numeric(df_s["Close"], errors="coerce")), float("nan"))
                 cache_spot[sym] = v if np.isfinite(v) else None
             else:
                 cache_spot[sym] = None
-        except Exception:
+        except Exception as _e:
+            log_warn("sentinel_ledger_metrics spot fetch", _e, ticker=str(sym))
             cache_spot[sym] = None
         return cache_spot[sym]
 
@@ -159,7 +163,8 @@ def sentinel_ledger_metrics(ledger: list, rfr: float = 0.045, corr_matrix: Optio
             sigma = float(ret.std(ddof=1))
             cache_vol[sym] = sigma if np.isfinite(sigma) and sigma > 0 else None
             return cache_vol[sym]
-        except Exception:
+        except Exception as _e:
+            log_warn("sentinel_ledger_metrics realized vol fetch", _e, ticker=str(sym))
             cache_vol[sym] = None
             return None
 
@@ -188,13 +193,15 @@ def sentinel_ledger_metrics(ledger: list, rfr: float = 0.045, corr_matrix: Optio
             if exp_s:
                 exp_d = datetime.strptime(str(exp_s)[:10], "%Y-%m-%d").date()
                 dte = max(0, (exp_d - today).days)
-        except Exception:
+        except Exception as _e:
+            log_warn("sentinel_ledger_metrics dte parse", _e, ticker=str(sym))
             dte = int(row.get("dte_at_entry", 30) or 30)
         T = max(dte, 1) / 365.0
         try:
             g = bs_greeks(spot, strike, T, float(rfr), iv, opt_type)
             mark = float(bs_price(spot, strike, T, float(rfr), iv, opt_type))
-        except Exception:
+        except Exception as _e:
+            log_warn("sentinel_ledger_metrics bs_price/greeks", _e, ticker=str(sym))
             continue
         mult = 100 * max(1, contracts)
         # Short option: position delta = −Δ_option × multiplier
@@ -241,7 +248,8 @@ def sentinel_ledger_metrics(ledger: list, rfr: float = 0.045, corr_matrix: Optio
                 port_var = float(e @ C @ e.T)
                 if np.isfinite(port_var) and port_var >= 0:
                     var_95_1d = 1.65 * np.sqrt(port_var)
-    except Exception:
+    except Exception as _e:
+        log_warn("sentinel_ledger_metrics var calc", _e)
         var_95_1d = None
 
     return {
@@ -276,11 +284,12 @@ def sentinel_ledger_table_rows(
         try:
             df_s = fetch_stock(sym, "3mo", "1d")
             if df_s is not None and not df_s.empty and "Close" in df_s.columns:
-                v = float(pd.to_numeric(df_s["Close"], errors="coerce").iloc[-1])
+                v = safe_float(safe_last(pd.to_numeric(df_s["Close"], errors="coerce")), float("nan"))
                 cache[sym] = v if np.isfinite(v) else None
             else:
                 cache[sym] = None
-        except Exception:
+        except Exception as _e:
+            log_warn("sentinel_ledger_table_rows spot fetch", _e, ticker=str(sym))
             cache[sym] = None
         return cache[sym]
 
@@ -484,7 +493,8 @@ def expected_move_safety_html(price, strike, iv_pct, dte):
             f"<strong>Safety Status:</strong> {safety}<br>"
             f"<span style='color:#94a3b8'>Expected Move Range: ${lo:.2f} - ${hi:.2f}</span></div>"
         )
-    except Exception:
+    except Exception as _e:
+        log_warn("expected_move_safety_html", _e)
         return ""
 
 
@@ -930,7 +940,8 @@ def _fragment_rolling_edge_capture():
                 ),
             )
             st.plotly_chart(fig_tm, use_container_width=True)
-    except Exception:
+    except Exception as _e:
+        log_warn("rolling edge matrix render", _e)
         pass
 
     st.divider()
@@ -945,7 +956,8 @@ def _fragment_rolling_edge_capture():
                 mime="text/csv",
                 use_container_width=True,
             )
-    except Exception:
+    except Exception as _e:
+        log_warn("rolling edge export csv", _e)
         pass
     st.session_state.edge_log = df_log
     _edge_gap_help = (
@@ -1010,8 +1022,11 @@ def _fragment_technical_zone(
         chg_pct = 0.0
         if len(df) >= 2:
             try:
-                chg_pct = (float(df["Close"].iloc[-1]) / float(df["Close"].iloc[-2]) - 1.0) * 100.0
-            except Exception:
+                _c_last = safe_float(safe_last(df["Close"]), 0.0)
+                _c_prev = safe_float(safe_last(df["Close"].iloc[:-1]), _c_last)
+                chg_pct = (_c_last / _c_prev - 1.0) * 100.0 if _c_prev else 0.0
+            except Exception as _e:
+                log_warn("technical zone mini chg_pct", _e, ticker=str(ticker))
                 chg_pct = 0.0
         gz_line = "n/a"
         gz_pct = 0.0
@@ -1019,7 +1034,8 @@ def _fragment_technical_zone(
             if gold_zone_price:
                 gz_pct = (float(price) / float(gold_zone_price) - 1.0) * 100.0
                 gz_line = f"${float(gold_zone_price):.2f} ({gz_pct:+.1f}% from spot)"
-        except Exception:
+        except Exception as _e:
+            log_warn("technical zone mini gold-zone distance", _e, ticker=str(ticker))
             gz_line = "n/a"
         spark7 = _glance_sparkline_svg(df["Close"].tail(7), "#00E5FF", w=220, h=56)
         chg_c = "#10b981" if chg_pct >= 0 else "#ef4444"
@@ -1240,15 +1256,17 @@ def _fragment_technical_zone(
                 try:
                     _dpd = TA.get_dark_pool_proxy(df)
                     if _dpd is not None and len(_dpd) and "dark_pool_alert" in _dpd.columns:
-                        _d_inst = "High Accumulation" if bool(_dpd["dark_pool_alert"].iloc[-1]) else "Normal"
-                except Exception:
+                        _d_inst = "High Accumulation" if bool(safe_last(_dpd["dark_pool_alert"], False)) else "Normal"
+                except Exception as _e:
+                    log_warn("technical zone diamond flow", _e, ticker=str(ticker))
                     pass
                 try:
                     _dhd = fetch_news_headlines(ticker)
                     _bsd = float(Sentiment.analyze_news_bias(_dhd)) if _dhd else 0.0
                     if _dhd:
                         _d_news = "Positive" if _bsd > 0.15 else ("Negative" if _bsd < -0.15 else "Neutral")
-                except Exception:
+                except Exception as _e:
+                    log_warn("technical zone diamond news", _e, ticker=str(ticker))
                     pass
                 _flow_diamond_html = (
                     f"<div style='margin:10px 0;padding:8px 12px;border-radius:8px;border:1px solid rgba(148,163,184,.22);"

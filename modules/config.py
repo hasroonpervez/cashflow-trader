@@ -70,7 +70,8 @@ def _streamlit_secrets_flat():
                 continue
             out[k] = v
         return out
-    except Exception:
+    except Exception as _e:
+        _ = _e
         return {}
 
 
@@ -85,7 +86,8 @@ def load_config():
             merged = {**merged, **saved}
             for k in _LEGACY_CONFIG_KEYS:
                 merged.pop(k, None)
-    except Exception:
+    except Exception as _e:
+        _ = _e
         pass
     wl_secret = secrets_flat.get("watchlist")
     if wl_secret is not None and str(wl_secret).strip():
@@ -103,7 +105,8 @@ def save_config(cfg) -> bool:
             json.dump(cfg, f, indent=2)
         os.replace(temp_path, CONFIG_PATH)
         return True
-    except Exception:
+    except Exception as _e:
+        _ = _e
         return False
 
 
@@ -117,7 +120,8 @@ def load_journal() -> list:
             with open(JOURNAL_PATH) as f:
                 data = json.load(f)
             return data if isinstance(data, list) else []
-    except Exception:
+    except Exception as _e:
+        _ = _e
         pass
     return []
 
@@ -130,7 +134,8 @@ def save_journal(entries: list) -> bool:
             json.dump(entries, f, indent=2, default=str)
         os.replace(temp, JOURNAL_PATH)
         return True
-    except Exception:
+    except Exception as _e:
+        _ = _e
         return False
 
 

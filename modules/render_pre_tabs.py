@@ -957,7 +957,8 @@ def render_desk_after_context(
             exp_dt = datetime.strptime(str(bluf_exp)[:10], "%Y-%m-%d")
             exp_disp = exp_dt.strftime("%B %d").upper()
             dte_m = max(1, (exp_dt - datetime.now()).days)
-        except Exception:
+        except Exception as _e:
+            log_warn("render_desk_after_context parse bluf expiry", _e, ticker=str(ticker))
             exp_disp = str(bluf_exp).upper()[:18]
             dte_m = max(1, int(bluf_dte or 30))
         _mstrike = float(master_b.get("strike") or 0)
@@ -1116,7 +1117,8 @@ def render_desk_after_context(
             _f_strike = float(fallback_row["strike"])
             try:
                 _f_dte_safe = max(1, (datetime.strptime(str(bluf_exp)[:10], "%Y-%m-%d") - datetime.now()).days)
-            except Exception:
+            except Exception as _e:
+                log_warn("render_desk_after_context fallback expiry dte", _e, ticker=str(ticker))
                 _f_dte_safe = max(1, int(bluf_dte or 30))
             _f_px = float(pd.to_numeric(fallback_row.get("est_px"), errors="coerce") or 0.0)
             _f_prem = _f_px * 100.0

@@ -590,7 +590,8 @@ def render_setup_tab(chart_mood: str, d: DeskLocals) -> None:
                         st.plotly_chart(fig_eq, use_container_width=True)
                     else:
                         st.warning("Not enough historical data or no trades triggered at this threshold.")
-                except Exception:
+                except Exception as _e:
+                    log_warn("setup tab quant backtest", _e, ticker=str(ticker))
                     st.error("Backtest simulation failed. Adjust parameters.")
             if isinstance(retail_breakdown, dict):
                 for k, v in retail_breakdown.items():
@@ -974,7 +975,8 @@ def render_cashflow_tab(cfg: dict, d: DeskLocals) -> None:
                 if not _puts_t.empty:
                     _puts_t["type"] = "put"
                 opts_df = pd.concat([_calls_t, _puts_t], ignore_index=True)
-            except Exception:
+            except Exception as _e:
+                log_warn("cashflow tab options dataframe concat", _e, ticker=str(ticker))
                 opts_df = pd.DataFrame()
             if not calls.empty or not puts.empty:
                 with st.expander("Full option chain — MC PoP % (every strike)", expanded=False):
@@ -1010,7 +1012,8 @@ def render_cashflow_tab(cfg: dict, d: DeskLocals) -> None:
                             )
                         else:
                             st.caption("No strikes with usable bid/ask for MC PoP in this snapshot.")
-                    except Exception:
+                    except Exception as _e:
+                        log_warn("cashflow tab chain mc dataframe", _e, ticker=str(ticker))
                         st.caption("MC PoP chain table unavailable for this expiration.")
                 _desk_poc = gold_zone_components.get("POC") if isinstance(gold_zone_components, dict) else None
                 _desk_hvn = gold_zone_components.get("HVN") if isinstance(gold_zone_components, dict) else None
@@ -1501,7 +1504,8 @@ def render_intel_tab(d: DeskLocals) -> None:
                 risk_corr = PortfolioRisk.build_correlation_matrix(risk_closes_df)
                 kelly_overlap = PortfolioRisk.get_overlap_score(risk_corr, ticker)
                 kelly_corr_haircut = PortfolioRisk.calc_kelly_haircut(kelly_overlap)
-        except Exception:
+        except Exception as _e:
+            log_warn("intel tab kelly overlap", _e, ticker=str(ticker))
             kelly_overlap = 0.0
             kelly_corr_haircut = 1.0
         kelly_effective_haircut = float(kelly_corr_haircut) * float(simple_corr_mult)
@@ -2264,7 +2268,8 @@ def render_intel_tab(d: DeskLocals) -> None:
                         render_equity_setup_desk(
                             scanner_results, "cf_equity_desk_scanner", prefer_ticker=ticker
                         )
-                    except Exception:
+                    except Exception as _e:
+                        log_warn("equity radar table fallback", _e, ticker=str(ticker))
                         st.caption(
                             "Equity Radar temporarily unavailable — showing Options Yield table instead."
                         )

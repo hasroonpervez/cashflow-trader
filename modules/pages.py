@@ -424,7 +424,8 @@ def build_context(
                                 "active": True,
                                 "ticker": str(ctx.ticker).strip().upper(),
                             }
-    except Exception:
+    except Exception as _e:
+        log_warn("build_context shadow move", _e, ticker=str(ctx.ticker))
         st.session_state["_cf_shadow_move"] = None
         st.session_state["_cf_regime_shadow_breakout"] = None
 
@@ -513,7 +514,8 @@ def _parse_earnings(ctx: DashContext):
             ctx.days_to_earnings = (ctx.earnings_dt - datetime.now()).days
             if 0 <= ctx.days_to_earnings <= 14:
                 ctx.earnings_near = True
-        except Exception:
+        except Exception as _e:
+            log_warn("parse earnings date", _e, ticker=str(ctx.ticker))
             ctx.earnings_parse_failed = True
             ctx.earnings_dt = None
             ctx.days_to_earnings = None
@@ -545,7 +547,8 @@ def _fetch_options_context(ctx: DashContext):
             ctx.bluf_exp = ctx.opt_exps[min(2, len(ctx.opt_exps) - 1)]
             try:
                 ctx.bluf_dte = max(1, (datetime.strptime(str(ctx.bluf_exp)[:10], "%Y-%m-%d") - datetime.now()).days)
-            except Exception:
+            except Exception as _e:
+                log_warn("parse options expiry dte", _e, ticker=str(ctx.ticker))
                 ctx.bluf_exp, ctx.bluf_dte = None, 0
             if ctx.bluf_exp:
                 bluf_opt, _ = fetch_options(ctx.ticker, ctx.bluf_exp)
@@ -613,7 +616,8 @@ def _fetch_options_context(ctx: DashContext):
             and float(_piv) >= float(_civ) * 1.20
         ):
             skew_puts_rich = True
-    except Exception:
+    except Exception as _e:
+        log_warn("calc put skew richness", _e, ticker=str(ctx.ticker))
         skew_puts_rich = False
 
     # Determine strategy

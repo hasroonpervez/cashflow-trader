@@ -8,6 +8,7 @@ import plotly.graph_objects as go
 
 from .ta import TA
 from .options import Opt
+from .utils import log_warn, safe_float, safe_last
 
 def _index_pos(idx_obj):
     """Normalize df.index.get_loc result to a single integer position."""
@@ -84,7 +85,7 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
 
     Returns ``(fig_price, fig_volume, fig_rsi, fig_macd, overlay_key_html)``. ``overlay_key_html`` is a
     compact HTML block with full overlay names (wrap-safe) for under the price chart."""
-    last_px = float(df["Close"].iloc[-1])
+    last_px = safe_float(safe_last(df["Close"]), 0.0)
     try:
         if (
             em_lower is None
@@ -99,8 +100,8 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
             )
             em_lower = last_px - _em
             em_upper = last_px + _em
-    except Exception:
-        pass
+    except Exception as _e:
+        log_warn("build_chart expected-move compute", _e, ticker=str(ticker))
     ann_side = "left" if mobile_layout else "right"
     # Wide charts: park retracement / Sq9 / S-R labels on the left so Gold, gamma, EM, and HVN
     # can use the right margin without ten strings stacking on the same anchor.
@@ -299,8 +300,8 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
                         line_width=0,
                         layer="below",
                     )
-            except Exception:
-                pass
+            except Exception as _e:
+                log_warn("build_chart gamma turbulence band", _e, ticker=str(ticker))
 
     try:
         if (
@@ -365,13 +366,13 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
                             )
                         )
                         _cone_done = True
-                except Exception:
-                    pass
+                except Exception as _e:
+                    log_warn("build_chart expected-move cone", _e, ticker=str(ticker))
             if _cone_done:
                 _em_full += " Filled yellow cone extends to the active expiry."
             _overlay_rows.append(("#eab308", "Expected move (1σ)", _em_full))
-    except Exception:
-        pass
+    except Exception as _e:
+        log_warn("build_chart expected-move overlays", _e, ticker=str(ticker))
 
     try:
         _sl = _su = None
@@ -408,7 +409,8 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
                             _cmp = " Shadow band wider than IV 1σ — whale prints suggest break potential."
                         else:
                             _cmp = " Shadow vs IV band broadly aligned."
-            except Exception:
+            except Exception as _e:
+                log_warn("build_chart shadow-vs-em compare", _e, ticker=str(ticker))
                 _cmp = ""
             _overlay_rows.append(
                 (
@@ -417,8 +419,8 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
                     f"Purple band: ~70% of last 30d whale-volume (Z>2) close range (${_sl:,.0f}–${_su:,.0f}).{_cmp}",
                 )
             )
-    except Exception:
-        pass
+    except Exception as _e:
+        log_warn("build_chart shadow-band overlay", _e, ticker=str(ticker))
 
     try:
         if opex_pin_price is not None and np.isfinite(float(opex_pin_price)):
@@ -442,8 +444,8 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
                     f"GEX gamma-wall blend with Θ/Γ magnet (${_op:,.0f}). Not a guarantee — positioning artifact.",
                 )
             )
-    except Exception:
-        pass
+    except Exception as _e:
+        log_warn("build_chart op-ex pin overlay", _e, ticker=str(ticker))
 
     try:
         hvn_levels = TA.get_volume_nodes(df)
@@ -510,8 +512,8 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
                             "Thicker / deeper purple = more size traded near that level.",
                         )
                     )
-    except Exception:
-        pass
+    except Exception as _e:
+        log_warn("build_chart hvn overlay", _e, ticker=str(ticker))
 
     if diamonds is not None:
         blue_d = [d for d in diamonds if d["type"] == "blue"]
@@ -594,8 +596,8 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
             _iv_lines.append(f"Avg. Post-Earnings IV Crush: {_cr:+.1f}%")
         if _ov.get("vega_risk"):
             _iv_lines.append("⚠️ VEGA RISK: IV Crush likely")
-    except Exception:
-        pass
+    except Exception as _e:
+        log_warn("build_chart iv-earnings overlay", _e, ticker=str(ticker))
     _iv_ann_text = "<br>".join(_iv_lines) if _iv_lines else ""
     _iv_annotations = []
     if _iv_ann_text:
@@ -707,8 +709,8 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
                         customdata=zz,
                     )
                 )
-    except Exception:
-        pass
+    except Exception as _e:
+        log_warn("build_chart institutional volume markers", _e, ticker=str(ticker))
     _vm = dict(l=5, r=5, t=24, b=36) if mobile_layout else dict(l=56, r=28, t=28, b=44)
     fig_v.update_layout(
         template="plotly_dark",
@@ -901,8 +903,8 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
                         "Gold vertical: last bar volume Z ≥ 4 vs the prior 20 sessions (institutional footprint marker).",
                     )
                 )
-        except Exception:
-            pass
+        except Exception as _e:
+            log_warn("build_chart whale session marker", _e, ticker=str(ticker))
 
     _key_html = _price_overlay_key_html(_overlay_rows, mobile_layout)
     return fig_p, fig_v, fig_r, fig_m, _key_html

@@ -270,25 +270,36 @@ def run_cc_sim_cached(ticker: str, period: str, otm_pct: float, hold_days: int, 
 class Alerts:
     @staticmethod
     def scan(df, ticker, vix_val=None):
-        alerts = []; close = df["Close"].iloc[-1]; rv = TA.rsi(df["Close"]).iloc[-1]
+        alerts = []
+        close = safe_float(safe_last(df["Close"]), 0.0)
+        rv = safe_float(safe_last(TA.rsi(df["Close"])), 50.0)
         if rv < 30: alerts.append({"t":"bullish","p":"HIGH","m":f"{ticker} RSI is {rv:.1f}. Stock is oversold. Great time to sell puts and collect cash."})
         elif rv > 70: alerts.append({"t":"bearish","p":"MEDIUM","m":f"{ticker} RSI is {rv:.1f}. Stock is overbought. Sell covered calls now."})
         ml, sl, _ = TA.macd(df["Close"])
         if len(ml) >= 2:
-            if ml.iloc[-1] > sl.iloc[-1] and ml.iloc[-2] <= sl.iloc[-2]:
+            ml_last = safe_float(safe_last(ml), 0.0)
+            sl_last = safe_float(safe_last(sl), 0.0)
+            ml_prev = safe_float(safe_last(ml.iloc[:-1]), ml_last)
+            sl_prev = safe_float(safe_last(sl.iloc[:-1]), sl_last)
+            if ml_last > sl_last and ml_prev <= sl_prev:
                 alerts.append({"t":"bullish","p":"HIGH","m":f"{ticker} MACD just crossed bullish. Buyers are taking over."})
-            elif ml.iloc[-1] < sl.iloc[-1] and ml.iloc[-2] >= sl.iloc[-2]:
+            elif ml_last < sl_last and ml_prev >= sl_prev:
                 alerts.append({"t":"bearish","p":"MEDIUM","m":f"{ticker} MACD just crossed bearish. Sellers are gaining control."})
         u, _, lo = TA.bollinger(df["Close"])
         if len(u)>1:
-            bw = (u.iloc[-1]-lo.iloc[-1])/((u.iloc[-1]+lo.iloc[-1])/2)*100
+            u_last = safe_float(safe_last(u), 0.0)
+            lo_last = safe_float(safe_last(lo), 0.0)
+            denom = (u_last + lo_last) / 2.0
+            bw = ((u_last - lo_last) / denom * 100.0) if denom else 0.0
             if bw < 5: alerts.append({"t":"neutral","p":"HIGH","m":f"{ticker} Bollinger squeeze detected. A big move is coming soon."})
         if vix_val and vix_val > 30: alerts.append({"t":"bullish","p":"HIGH","m":f"VIX is {vix_val:.1f}. Extreme fear. Premiums are huge right now."})
         elif vix_val and vix_val > 25: alerts.append({"t":"bullish","p":"MEDIUM","m":f"VIX is {vix_val:.1f}. Fear is elevated. Good time to sell options."})
         st_l, st_d = TA.supertrend(df)
         if len(st_d) >= 2:
-            if st_d.iloc[-1]==1 and st_d.iloc[-2]==-1: alerts.append({"t":"bullish","p":"HIGH","m":f"{ticker} Supertrend just flipped BULLISH. The price floor is rising."})
-            elif st_d.iloc[-1]==-1 and st_d.iloc[-2]==1: alerts.append({"t":"bearish","p":"HIGH","m":f"{ticker} Supertrend just flipped BEARISH. The price ceiling is falling."})
+            st_last = safe_float(safe_last(st_d), 0.0)
+            st_prev = safe_float(safe_last(st_d.iloc[:-1]), st_last)
+            if st_last == 1 and st_prev == -1: alerts.append({"t":"bullish","p":"HIGH","m":f"{ticker} Supertrend just flipped BULLISH. The price floor is rising."})
+            elif st_last == -1 and st_prev == 1: alerts.append({"t":"bearish","p":"HIGH","m":f"{ticker} Supertrend just flipped BEARISH. The price ceiling is falling."})
         rsi_s = TA.rsi(df["Close"]); divs = TA.detect_divergences(df["Close"], rsi_s)
         for d in divs[-2:]:
             alerts.append({"t":d["type"],"p":"MEDIUM","m":f"{ticker} RSI {d['type']} divergence near ${d['price']:.2f}. Early warning of a reversal."})

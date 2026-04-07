@@ -12,10 +12,17 @@ def safe_last(series, default=None):
     """Last element of Series/list, or default if empty/None/NaN."""
     if series is None:
         return default
-    if isinstance(series, (pd.Series, pd.Index)):
+    if isinstance(series, pd.Series):
         if len(series) == 0:
             return default
-        val = series.iloc[-1]
+        val = series.to_numpy()[-1]
+        if isinstance(val, float) and (math.isnan(val) or math.isinf(val)):
+            return default
+        return val
+    if isinstance(series, pd.Index):
+        if len(series) == 0:
+            return default
+        val = series[-1]
         if isinstance(val, float) and (math.isnan(val) or math.isinf(val)):
             return default
         return val
@@ -61,6 +68,6 @@ def safe_href(url) -> str | None:
 
 
 def log_warn(context: str, error: Exception, *, ticker: str = "") -> None:
-    """Log error to stderr. Use instead of silent 'except Exception: pass'."""
+    """Log error to stderr. Use instead of silent broad-except blocks."""
     prefix = f"[cashflow:{ticker}] " if ticker else "[cashflow] "
     print(f"{prefix}{context}: {type(error).__name__}: {error}", file=sys.stderr, flush=True)

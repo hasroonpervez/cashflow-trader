@@ -15,7 +15,7 @@ from curl_cffi import requests as curl_requests
 from datetime import datetime, timedelta
 from typing import NamedTuple, Optional
 
-from .utils import log_warn
+from .utils import log_warn, safe_float, safe_last
 
 # ~90 trading sessions RS vs SPY (growth-factor ratio) on date-aligned closes from the batch panel.
 _RS_SPY_LOOKBACK_SESSIONS = 90
@@ -186,7 +186,8 @@ def _option_expirations_yahoo_http(symbol: str) -> list[str]:
             except (TypeError, ValueError, OSError):
                 continue
         return sorted(set(out))
-    except Exception:
+    except Exception as _e:
+        log_warn("_option_expirations_yahoo_http", _e, ticker=sym)
         return []
 
 
@@ -234,7 +235,8 @@ def _resolve_option_expiration_strings(symbol: str) -> list[str]:
         return []
     try:
         seen.sort(key=lambda s: datetime.strptime(s[:10], "%Y-%m-%d"))
-    except Exception:
+    except Exception as _e:
+        log_warn("_resolve_option_expiration_strings sort", _e, ticker=str(symbol))
         seen.sort()
     return seen
 
@@ -247,7 +249,8 @@ def _client_suggests_mobile_chart():
         lk = {str(k).lower(): v for k, v in h.items()}
         ua = str(lk.get("user-agent") or lk.get("user_agent") or "").lower()
         return any(tok in ua for tok in ("iphone", "ipad", "ipod", "android", "mobile"))
-    except Exception:
+    except Exception as _e:
+        log_warn("_client_suggests_mobile_chart", _e)
         return False
 
 
@@ -280,7 +283,8 @@ def _alphavantage_api_key() -> Optional[str]:
     try:
         s = st.secrets.get("ALPHAVANTAGE_API_KEY", "")
         return str(s).strip() or None
-    except Exception:
+    except Exception as _e:
+        log_warn("_alphavantage_api_key secrets", _e)
         return None
 
 
@@ -308,7 +312,8 @@ def _alphavantage_query(params: dict) -> Optional[dict]:
         )
         r.raise_for_status()
         payload = r.json()
-    except Exception:
+    except Exception as _e:
+        log_warn("_alphavantage_query", _e)
         return None
     if not isinstance(payload, dict):
         return None
@@ -426,7 +431,8 @@ def _fetch_stock_alphavantage(sym: str, period: str, interval: str) -> Optional[
         )
         r.raise_for_status()
         payload = r.json()
-    except Exception:
+    except Exception as _e:
+        log_warn("_fetch_stock_alphavantage", _e, ticker=str(sym))
         return None
     if not isinstance(payload, dict) or "Time Series (Daily)" not in payload:
         return None
@@ -486,7 +492,8 @@ def fetch_stock(ticker, period="1y", interval="1d"):
                 df = _yfinance_ticker(sym).history(
                     period=period, interval=interval, timeout=_YAHOO_YF_TIMEOUT
                 )
-            except Exception:
+            except Exception as _e:
+                log_warn("fetch_stock yfinance history", _e, ticker=str(sym))
                 return None
             if df is None or df.empty:
                 if df is not None and df.empty:
@@ -501,7 +508,8 @@ def fetch_stock(ticker, period="1y", interval="1d"):
                 df.index = pd.to_datetime(df.index)
                 if df.index.tz is not None:
                     df.index = df.index.tz_localize(None)
-            except Exception:
+            except Exception as _e:
+                log_warn("fetch_stock datetime index normalize", _e, ticker=str(sym))
                 return None
             return df
 
@@ -509,7 +517,8 @@ def fetch_stock(ticker, period="1y", interval="1d"):
         if out is not None:
             return out
         return _fetch_stock_alphavantage(sym, period, interval)
-    except Exception:
+    except Exception as _e:
+        log_warn("fetch_stock", _e, ticker=str(ticker))
         return None
 
 
@@ -579,10 +588,10 @@ def rs_spy_ratio_map_from_close_matrix(
             out[su] = None
             continue
         try:
-            spy_b = float(j["_spy"].iloc[-1 - sessions])
-            spy_e = float(j["_spy"].iloc[-1])
-            stk_b = float(j["_stk"].iloc[-1 - sessions])
-            stk_e = float(j["_stk"].iloc[-1])
+            spy_b = safe_float(j["_spy"].iloc[-1 - sessions], 0.0)
+            spy_e = safe_float(safe_last(j["_spy"]), 0.0)
+            stk_b = safe_float(j["_stk"].iloc[-1 - sessions], 0.0)
+            stk_e = safe_float(safe_last(j["_stk"]), 0.0)
         except (TypeError, ValueError, IndexError):
             out[su] = None
             continue
@@ -604,8 +613,10 @@ def _tape_pcts_from_close_matrix(close: pd.DataFrame, syms: tuple) -> dict:
         if sym not in close.columns:
             continue
         c = pd.to_numeric(close[sym], errors="coerce").dropna()
-        if len(c) >= 2 and float(c.iloc[-2]) != 0:
-            out[sym] = float((float(c.iloc[-1]) / float(c.iloc[-2]) - 1.0) * 100.0)
+        c_last = safe_float(safe_last(c), 0.0)
+        c_prev = safe_float(safe_last(c.iloc[:-1]), 0.0)
+        if len(c) >= 2 and c_prev != 0:
+            out[sym] = float((c_last / c_prev - 1.0) * 100.0)
     return out
 
 
@@ -620,7 +631,7 @@ def _macro_bundle_from_close_matrix(close: pd.DataFrame) -> tuple[dict, Optional
         s = pd.to_numeric(close[sym], errors="coerce").dropna()
         if len(s) < 1:
             continue
-        last = float(s.iloc[-1])
+        last = safe_float(safe_last(s), 0.0)
         prev = float(s.iloc[-2]) if len(s) >= 2 else last
         prev_f = float(prev) if prev else 0.0
         chg = (last / prev_f - 1.0) * 100.0 if prev_f else 0.0
@@ -667,7 +678,8 @@ def _ticker_daily_ohlcv_from_raw(raw, sym: str) -> Optional[pd.DataFrame]:
         out.index = pd.to_datetime(out.index)
         if out.index.tz is not None:
             out.index = out.index.tz_localize(None)
-    except Exception:
+    except Exception as _e:
+        log_warn("_ticker_daily_ohlcv_from_raw datetime index normalize", _e, ticker=str(sym))
         return None
     out = out.apply(pd.to_numeric, errors="coerce")
     out = out.dropna(how="all")
@@ -822,7 +834,8 @@ def fetch_equity_daily_closes_wide(symbols: tuple, period: str = "1y") -> pd.Dat
             session=_YAHOO_SESSION,
             timeout=_YAHOO_YF_TIMEOUT,
         )
-    except Exception:
+    except Exception as _e:
+        log_warn("fetch_equity_daily_closes_wide download", _e)
         return pd.DataFrame()
     close = _yf_close_matrix_from_raw(raw, list(syms))
     if close is None:
@@ -865,13 +878,15 @@ def fetch_intraday_series(symbol, period="5d", interval="1h"):
             hist = _yfinance_ticker(sym).history(
                 period=period, interval=interval, timeout=_YAHOO_YF_TIMEOUT
             )
-        except Exception:
+        except Exception as _e:
+            log_warn("fetch_intraday_series history", _e, ticker=str(sym))
             return pd.Series(dtype=float)
         if hist is None or hist.empty or "Close" not in hist.columns:
             return pd.Series(dtype=float)
         s = pd.to_numeric(hist["Close"], errors="coerce").dropna()
         return s
-    except Exception:
+    except Exception as _e:
+        log_warn("fetch_intraday_series", _e, ticker=str(symbol))
         return pd.Series(dtype=float)
 
 @st.cache_data(ttl=300)
@@ -885,7 +900,8 @@ def fetch_info(ticker):
         info = dict(raw_info) if isinstance(raw_info, dict) else {}
         _merge_alphavantage_fundamentals_into_info(sym, info)
         return info
-    except Exception:
+    except Exception as _e:
+        log_warn("fetch_info", _e, ticker=str(ticker))
         return {}
 
 
@@ -927,7 +943,8 @@ def evaluate_fundamental_sieve(ticker: str) -> Optional[dict]:
             "asset_yoy": asset_yoy,
             "ten_x_candidate": ten_x,
         }
-    except Exception:
+    except Exception as _e:
+        log_warn("evaluate_fundamental_sieve", _e, ticker=str(ticker))
         return None
 
 @st.cache_data(ttl=90)
@@ -938,7 +955,8 @@ def list_option_expiration_dates(ticker: str) -> tuple:
         if not sym:
             return tuple()
         return tuple(_resolve_option_expiration_strings(sym))
-    except Exception:
+    except Exception as _e:
+        log_warn("list_option_expiration_dates", _e, ticker=str(ticker))
         return tuple()
 
 
@@ -987,10 +1005,12 @@ def fetch_options(ticker, exp=None):
                 if not calls_df.empty or not puts_df.empty:
                     return (calls_df, puts_df), exps
                 last_empty = (calls_df, puts_df)
-            except Exception:
+            except Exception as _e:
+                log_warn("fetch_options option_chain pick", _e, ticker=str(sym))
                 continue
         return last_empty, exps
-    except Exception:
+    except Exception as _e:
+        log_warn("fetch_options", _e, ticker=str(ticker))
         return empty, []
 
 
@@ -1022,7 +1042,8 @@ def compute_iv_rank_proxy(sym: str, spot: float, ref_iv_pct: float):
                 iv = float(c.loc[ix, "impliedVolatility"]) * 100.0
                 if iv > 0:
                     samples.append(iv)
-            except Exception:
+            except Exception as _e:
+                log_warn("compute_iv_rank_proxy chain exp", _e, ticker=str(sym))
                 continue
         if len(samples) < 2:
             return None
@@ -1032,7 +1053,8 @@ def compute_iv_rank_proxy(sym: str, spot: float, ref_iv_pct: float):
         rank = (float(ref_iv_pct) - lo) / (hi - lo) * 100.0
         rank = max(0.0, min(100.0, rank))
         return {"rank": rank, "lo": lo, "hi": hi}
-    except Exception:
+    except Exception as _e:
+        log_warn("compute_iv_rank_proxy", _e, ticker=str(sym))
         return None
 
 
@@ -1141,7 +1163,8 @@ def avg_post_earnings_vol_crush_proxy_pct(df: pd.DataFrame, symbol: str, n_cycle
         if not crushes:
             return None
         return float(np.mean(crushes))
-    except Exception:
+    except Exception as _e:
+        log_warn("avg_post_earnings_vol_crush_proxy_pct", _e, ticker=str(symbol))
         return None
 
 
@@ -1243,7 +1266,8 @@ def _coerce_earnings_to_yyyy_mm_dd(raw) -> str | None:
         if pd.isna(ts):
             return None
         return ts.strftime("%Y-%m-%d")
-    except Exception:
+    except Exception as _e:
+        log_warn("_coerce_earnings_to_yyyy_mm_dd", _e)
         return None
 
 
@@ -1301,7 +1325,8 @@ def _earnings_next_from_yahoo_quotesummary(symbol: str) -> str | None:
         future = [d for d in parsed if d >= today]
         pick = min(future) if future else max(parsed)
         return pick.strftime("%Y-%m-%d")
-    except Exception:
+    except Exception as _e:
+        log_warn("_earnings_next_from_yahoo_quotesummary", _e, ticker=sym)
         return None
 
 
@@ -1380,7 +1405,8 @@ def _earnings_from_yfinance_earnings_dates(symbol: str) -> str | None:
         else:
             pick = ed.index.max()
         return _coerce_earnings_to_yyyy_mm_dd(pick)
-    except Exception:
+    except Exception as _e:
+        log_warn("_earnings_from_yfinance_earnings_dates", _e, ticker=sym)
         return None
 
 

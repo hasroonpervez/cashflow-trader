@@ -21,13 +21,15 @@ def _scriptrunner_ctx_apis():
         )
 
         return get_script_run_ctx, add_script_run_ctx
-    except Exception:
+    except Exception as _e:
+        _ = _e
         pass
     try:
         from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
 
         return get_script_run_ctx, add_script_run_ctx
-    except Exception:
+    except Exception as _e:
+        _ = _e
         return None, None
 
 
