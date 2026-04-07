@@ -368,3 +368,57 @@ class QuantBacktest:
             "Equity_Curve": trades[["Equity_Curve"]],
         }
 
+
+class WalkForwardBacktest:
+    """Replay scanner-like confluence signals on historical daily bars."""
+
+    @staticmethod
+    def run(
+        df: pd.DataFrame,
+        df_wk: pd.DataFrame = None,
+        *,
+        lookback_days: int = 180,
+        hold_days: int = 10,
+        min_confluence: int = 7,
+    ) -> pd.DataFrame:
+        """Point-in-time Blue-Diamond style replay with forward returns."""
+        from .options import _calc_confluence_points_core, _hurst_adaptive_signal_periods
+
+        if df is None or len(df) < lookback_days + hold_days + 55:
+            return pd.DataFrame()
+
+        results = []
+        n = len(df)
+        test_start = n - lookback_days
+
+        rsi_p, _mf, _ms, _mg, _h = _hurst_adaptive_signal_periods(df["Close"])
+        prev_score = 0
+        for i in range(max(55, test_start), n - hold_days):
+            sub = df.iloc[: i + 1]
+            sc, _mx, bd, _flag = _calc_confluence_points_core(
+                sub, df_wk, None, None, rsi_period=rsi_p
+            )
+            struct_i = (bd.get("Structure") or {}).get("detail", "RANGING")
+            is_blue = (
+                sc >= min_confluence
+                and prev_score < min_confluence
+                and struct_i == "BULLISH"
+            )
+            if is_blue:
+                entry_px = float(df["Close"].iloc[i])
+                exit_px = float(df["Close"].iloc[i + hold_days])
+                ret_pct = (exit_px / entry_px - 1.0) * 100.0
+                results.append(
+                    {
+                        "Date": df.index[i],
+                        "Entry": round(entry_px, 2),
+                        "Exit": round(exit_px, 2),
+                        "Hold Days": hold_days,
+                        "Confluence": sc,
+                        "Return %": round(ret_pct, 2),
+                        "Win": ret_pct > 0,
+                    }
+                )
+            prev_score = sc
+        return pd.DataFrame(results)
+

@@ -53,7 +53,7 @@ from modules.options import (
     scan_single_ticker,
     watchlist_correlation_matrix_cached,
 )
-from modules.sentiment import QuantBacktest, Sentiment, run_cc_sim_cached
+from modules.sentiment import QuantBacktest, Sentiment, WalkForwardBacktest, run_cc_sim_cached
 from modules.signal_desk import suggested_shares_atr_risk, whale_session_x_for_chart
 from modules.ta import TA
 from modules.ui_helpers import (
@@ -593,6 +593,47 @@ def render_setup_tab(chart_mood: str, d: DeskLocals) -> None:
                 except Exception as _e:
                     log_warn("setup tab quant backtest", _e, ticker=str(ticker))
                     st.error("Backtest simulation failed. Adjust parameters.")
+            with st.expander("📊 Walk-Forward Backtest (Blue Diamonds)", expanded=False):
+                st.caption(
+                    "Point-in-time replay: for each bar in the lookback window, "
+                    "confluence is computed using ONLY data available at that point. "
+                    "When a Blue Diamond fires, we record the forward return."
+                )
+                _bt_cols = st.columns(3)
+                with _bt_cols[0]:
+                    _bt_lookback = st.number_input("Lookback (days)", 60, 365, 180, key="cf_bt_lookback")
+                with _bt_cols[1]:
+                    _bt_hold = st.number_input("Hold (days)", 3, 30, 10, key="cf_bt_hold")
+                with _bt_cols[2]:
+                    _bt_conf = st.number_input("Min confluence", 5, 9, 7, key="cf_bt_conf")
+
+                if st.button("Run Backtest", key="cf_run_wf_bt"):
+                    with st.spinner("Running walk-forward backtest..."):
+                        bt_df = WalkForwardBacktest.run(
+                            df,
+                            df_wk,
+                            lookback_days=int(_bt_lookback),
+                            hold_days=int(_bt_hold),
+                            min_confluence=int(_bt_conf),
+                        )
+                    if bt_df.empty:
+                        st.info("No Blue Diamonds fired in the lookback window.")
+                    else:
+                        wins = int(bt_df["Win"].sum())
+                        total = int(len(bt_df))
+                        avg_ret = float(bt_df["Return %"].mean())
+                        st.success(
+                            f"**{total} signals** · Win rate **{wins/total*100:.0f}%** · "
+                            f"Avg return **{avg_ret:+.2f}%** over {int(_bt_hold)} days"
+                        )
+                        streamlit_show_dataframe(
+                            bt_df,
+                            use_container_width=True,
+                            hide_index=True,
+                            key="cf_wf_bt_results",
+                            on_select="ignore",
+                            selection_mode=[],
+                        )
             if isinstance(retail_breakdown, dict):
                 for k, v in retail_breakdown.items():
                     if not isinstance(v, (int, float, np.integer, np.floating)):
