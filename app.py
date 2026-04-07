@@ -149,6 +149,12 @@ if isinstance(_el, pd.DataFrame) and not _el.empty and "Preview" not in _el.colu
 inject_css_and_navbar()
 
 def main():
+    # Ultra-early cold-start fast path: keep first run minimal so Cloud health checks
+    # do not time out before the app reaches a healthy state.
+    if not st.session_state.get("_cf_boot_fastpath_done", False):
+        st.session_state["_cf_boot_fastpath_done"] = True
+        st.stop()
+
     cfg_tx = ConfigTransaction()
     cfg = cfg_tx.current
 
