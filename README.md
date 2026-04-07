@@ -355,7 +355,7 @@ Community Cloud apps often **share egress IPs**. Heavy watchlists plus frequent 
 - Add **`ALPHAVANTAGE_API_KEY`** (Secrets or env) so **`fetch_stock`** can try **Alpha Vantage** daily bars when Yahoo still returns nothing after retry (**free tier** rate limits apply).
 - If logs still show very long **`timed out after … ms`** lines, deploy the latest **`main`**: the app clamps **`YfData._make_request`** / **`_get_cookie_and_crumb`**, forces **`timeout=`** on **`history`** / **`download`**, and subclasses **`Session.request`**. Tune **`_YAHOO_YF_TIMEOUT`** in **`modules/data.py`** (e.g. **8–10**) if **5s** is too aggressive on a slow home network — no Secrets needed, only that float.
 
-If Cloud logs show **`503 GET /script-health-check`** around **60s**, the script was taking too long to become healthy — the data-layer changes above reduce redundant Yahoo work; a reboot still helps after a bad IP day.
+If Cloud logs show **`503 GET /script-health-check`** (often **5–15s** latency per probe), the script run exceeded the platform’s healthy-start window — usually **Yahoo throttling** plus work on the **first** uncached run. **`fetch_global_market_bundle`** batches prices in one download but only runs **`evaluate_fundamental_sieve`** for the **active** ticker (scanner rows still fetch fundamentals per symbol when you scan). For a faster cold path, set **`defer_headlines_earnings`: `true`** in **`config.json`** or Secrets so **`build_context`** skips upfront news + earnings fetches (**Intel → Market News** loads via fragment). A **reboot** still helps after a bad IP day.
 
 ---
 

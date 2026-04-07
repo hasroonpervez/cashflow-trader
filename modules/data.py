@@ -785,12 +785,13 @@ def fetch_global_market_bundle(watch_syms: tuple, active_ticker: str) -> GlobalM
     rs_map = rs_spy_ratio_map_from_close_matrix(close, rs_syms, sessions=_RS_SPY_LOOKBACK_SESSIONS)
 
     ad, aw, am = active_ticker_frames_from_panel(raw, act)
+    # Desk consensus only needs the active symbol (see render_pre_tabs). Scanner rows call
+    # evaluate_fundamental_sieve per ticker — avoid N× fundamental hits here (Cloud health-check timeout).
     sieve_map: dict = {}
-    for sym in risk:
-        try:
-            sieve_map[str(sym).upper().strip()] = evaluate_fundamental_sieve(sym)
-        except Exception:
-            sieve_map[str(sym).upper().strip()] = None
+    try:
+        sieve_map[str(act).upper().strip()] = evaluate_fundamental_sieve(act)
+    except Exception:
+        sieve_map[str(act).upper().strip()] = None
     return GlobalMarketSnapshot(
         desk, risk_df, ad, aw, am, raw, tuple(universe), tuple(risk), rs_map, sieve_map
     )
