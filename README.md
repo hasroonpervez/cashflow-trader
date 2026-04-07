@@ -1,4 +1,4 @@
-# CashFlow Command Center · v22.1 (Free Edition)
+# CashFlow Command Center · v22.2 (Free Edition)
 
 **Predictive analytics options desk** — one screen for watchlist context, consensus, chains, scanner, and a Sentinel ledger. Built with **Streamlit**; data from **Yahoo Finance** (optional **Alpha Vantage** fallback and fundamentals).
 
@@ -10,9 +10,13 @@
 - **Equity Radar** — Stock-focused scan: pre-diamond signals, actionable targets, Delta-One setup (same scan payload; options chrome hidden until you switch back).
 - **Sentinel Ledger** — Track legs; pin distance, edge realization, portfolio delta/theta/vega + 1d VaR, and “golden zone” style maturity hints.
 - **10x scanner + conviction** — `10x Potential` score, score>=5 screener, and `💎 CONVICTION` when Blue Diamond aligns with 10x.
+- **Intraday confirmation gate** — IMMINENT pre-diamond calls are now checked against 1h RSI + OBV before final upgrade.
 - **Auto scanner refresh** — Scanner can auto-rerun on a timer (`auto_scan_interval`, default 300s) after first manual scan.
 - **Watchlist earnings heat map** — Intel tab shows 30-day earnings urgency buckets (`this_week`, `next_week`, `this_month`, `clear`, `reported`, `unknown`).
 - **Persistent trade journal** — `trade_journal.json` survives browser restarts with close workflow and realized P&L stats.
+- **Walk-forward replay backtest** — Setup tab can replay point-in-time Blue Diamond-style triggers and report forward returns.
+- **Discord conviction alerts** — Optional webhook notifications for `💎 CONVICTION` scanner events.
+- **PWA install metadata** — Manifest + mobile meta tags for add-to-home-screen behavior.
 - **In-app glossary** — **Intel → Quick Reference Guide**.
 
 ---
@@ -79,10 +83,14 @@ Writes are **atomic** (temp file + replace). **Mission Control** fields are batc
 |-----|--------|
 | `watchlist` | Comma-separated symbols |
 | `scanner_mode` | `📈 Options Yield` or `🎯 Equity Radar` |
+| `equity_capital` | Equity Radar capital base used for suggested-share sizing |
+| `intraday_confirmation` | Enables the 1h RSI/OBV confirmation downgrade for IMMINENT pre-diamond states |
 | `auto_scan_interval` | Scanner auto-refresh cadence in seconds (`300` default; `0` disables) |
 | `scanner_sort_mode`, `strat_focus`, `strat_horizon` | Desk controls |
 | `mini_mode` | Turbo / compact layout |
 | `use_quant_models` | Institutional quant path (default on) |
+| `discord_webhook_url` | Optional Discord webhook endpoint for conviction alerts |
+| `alert_on_conviction` | Toggles webhook dispatch for `💎 CONVICTION` hits |
 | `defer_headlines_earnings` | Skip upfront news + earnings in `build_context` |
 | `defer_options_first_pass` | Skip options-chain hydration on the first session render (faster Cloud cold boot) |
 | `overlay_*` | Chart layers (EMA, Fib, Gann, etc.) |
@@ -138,7 +146,7 @@ cashflow-trader/
 
 ---
 
-## v22.1 — headline features
+## v22.2 — headline features
 
 | Area | What shipped |
 |------|----------------|
@@ -150,10 +158,14 @@ cashflow-trader/
 | Equity mode | Radar summary, actionable targets, Delta-One tabs; shared scanner cache |
 | Options | Vanna & charm on BS row; IV rank proxy; skew chart |
 | Scanner upgrades | `score_10x_potential` integrated into scanner rows (`10x Potential`, flags), Intel **10x Screener**, and Blue+10x **CONVICTION** banner |
+| Intraday gate | Pre-diamond `🔥 IMMINENT BREAKOUT` is conditionally downgraded when 1h RSI is overbought or OBV is declining |
 | Auto-monitoring | Intel scanner supports timer-driven reruns via `auto_scan_interval`; cache bundle stores last trigger/time |
 | Sentinel risk | Portfolio aggregates now include **total vega** and a simple **1-day 95% VaR** (delta-correlation approximation) |
 | Intel earnings | Watchlist earnings heat map expander with urgency buckets and risk callouts for this week / next week |
 | Journal persistence | Track Trade now mirrors to disk (`trade_journal.json`), with close-trade workflow + realized P&L and win-rate stats |
+| Walk-forward replay | Setup tab includes a point-in-time Blue Diamond replay with configurable lookback/hold/confluence |
+| Alerting | Discord webhook utility + Intel alert settings for async conviction notifications |
+| Mobile install | Manifest + theme metadata injection for home-screen install behavior |
 | Hardening sweep | Removed remaining bare `except Exception:` and unguarded `.iloc[-1]` tail indexing across core modules |
 
 **Pinning (intuition)** — Dealers hedge gamma; near expiry, GEX can concentrate at strikes (“walls”). Θ/Γ informs how strongly the model weights the wall in `predict_opex_pin`. Heuristic only, not a settlement forecast.
