@@ -2503,7 +2503,7 @@ def render_intel_tab(d: DeskLocals) -> None:
         st.markdown('<div id="guide" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
         _section(
             "Quick Reference Guide",
-            "Plain language glossary for every signal on this desk — including v22 **Shadow move**, **OpEx pin**, **Sentinel Ledger**, and **regime calibration**. Keep it open during live markets.",
+            "Plain language glossary for every signal on this desk — including v22 **Shadow move**, **OpEx pin**, **Sentinel Ledger**, **Market Explosion Radar**, and **regime calibration**. Keep it open during live markets.",
             tip_plain="Mirrors the high-level story in **README.md** (repo root). Reach for this when a label feels fuzzy; clarity beats impulse every session.",
         )
         edu = [
@@ -2532,6 +2532,8 @@ def render_intel_tab(d: DeskLocals) -> None:
             ("Sentinel Ledger & Edge realization", "Use <strong>Track Trade</strong> on the optimal CC or CSP row to log a leg for this session. The ledger shows model <strong>Δ</strong>, <strong>Θ/day</strong>, and unrealized P&amp;L vs entry premium. <strong>Edge realization %</strong> compares today’s <strong>Quant Edge</strong> to the score stored at track time for the <strong>active ticker</strong> (capped at 150%)."),
             ("Pin maturity — Golden zone", "For rows tracked with v22+ snapshots: inside <strong>14 DTE</strong>, if <strong>|Dist. to pin %|</strong> has <strong>shrunk</strong> versus entry and your desk <strong>Θ/day</strong> has <strong>grown</strong> versus entry, the ledger shows <strong>✨ Golden zone</strong> — the window where pin gravity and daily decay often peak together. Older rows without snapshots show a dash."),
             ("Market Scanner", "The Scanner checks your entire watchlist in seconds. It calculates Confluence Points, Diamond Status, Gold Zone distance, and Quant Edge for every ticker. Sort by confluence to find the strongest setups across all your stocks. Tickers with 7+ confluence and a Blue Diamond are your best opportunities."),
+            ("Market Explosion Radar", "Use the <strong>Radar</strong> tab for a two-tier hunt: <strong>Tier 1</strong> quickly filters a broad universe for squeeze/trend/relative-strength setups, then <strong>Tier 2</strong> runs deep per-ticker diagnostics (pre-diamond + 10x + GEX). Highest-scoring hits are saved to <strong>radar_hits.json</strong> so you can review signal quality over time."),
+            ("Header shortcuts (Strategies/Risk/Scanner/News/Guide)", "Top nav links jump to sections inside Streamlit tabs. If you click <strong>Strategies</strong>, <strong>Risk</strong>, <strong>Scanner</strong>, <strong>News</strong>, or <strong>Guide</strong>, the app first activates the correct tab and then scrolls to that anchor. <strong>Guide</strong> also opens the Quick Reference expander automatically."),
         ]
         for i in range(0, len(edu), 2):
             ec1, ec2 = st.columns(2)
