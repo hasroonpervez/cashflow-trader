@@ -707,7 +707,6 @@ def _parse_watchlist_string(s):
     return items
 
 
-@st.fragment(run_every=90.0)
 def _fragment_rolling_edge_capture():
     """Full-watchlist quant vs retail edge log + matrix; reruns on a timer without blocking the rest of the app."""
     _scan_mode = st.session_state.get(

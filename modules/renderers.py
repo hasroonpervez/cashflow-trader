@@ -2414,20 +2414,15 @@ def render_intel_tab(d: DeskLocals) -> None:
         st.markdown(f"#### {_html_mod.escape(str(ticker))} News")
         if defer_meta:
             st.caption(
-                "**Deferred headlines** — loaded in a fragment so the main desk can paint first. "
+                "**Deferred headlines** — loaded after core desk metrics so the page paints first. "
                 "Set `defer_headlines_earnings: false` in config to bundle news in the initial fetch."
             )
-
-            @st.fragment
-            def _news_headlines_fragment(sym: str = str(ticker)):
-                _hl = fetch_news_headlines(sym)
-                if _hl:
-                    for item in _hl:
-                        st.markdown(_news_item_markdown_html(item), unsafe_allow_html=True)
-                else:
-                    st.info("No news found.")
-
-            _news_headlines_fragment()
+            _hl = fetch_news_headlines(str(ticker))
+            if _hl:
+                for item in _hl:
+                    st.markdown(_news_item_markdown_html(item), unsafe_allow_html=True)
+            else:
+                st.info("No news found.")
         elif news:
             for item in news:
                 st.markdown(_news_item_markdown_html(item), unsafe_allow_html=True)
