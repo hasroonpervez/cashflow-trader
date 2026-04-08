@@ -14,6 +14,13 @@ if _app_root not in sys.path:
     sys.path.insert(0, _app_root)
 
 import streamlit as st
+try:
+    from streamlit.runtime.scriptrunner import get_script_run_ctx as _get_script_run_ctx
+except Exception:
+    try:
+        from streamlit.scriptrunner import get_script_run_ctx as _get_script_run_ctx
+    except Exception:
+        _get_script_run_ctx = None
 
 st.set_page_config(
     page_title="CashFlow Command Center v22.0",
@@ -55,6 +62,9 @@ import time
 def _is_script_health_probe() -> bool:
     """Best-effort detection of platform health-check requests."""
     try:
+        # Avoid touching request/session context before Streamlit initializes SessionInfo.
+        if _get_script_run_ctx is None or _get_script_run_ctx() is None:
+            return False
         hdrs = st.context.headers
         h = hdrs.to_dict() if hdrs is not None else {}
         low = {str(k).lower(): str(v).lower() for k, v in h.items()}
