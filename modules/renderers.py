@@ -77,6 +77,8 @@ from modules.ui_helpers import (
     _theta_gamma_desk_line,
     earnings_runway_spark_series,
     ledger_theta_desk_day,
+    sentinel_ledger_metrics,
+    sentinel_ledger_table_rows,
     streamlit_df_widget_key,
     streamlit_show_dataframe,
     walk_up_limit_sell_per_share,
