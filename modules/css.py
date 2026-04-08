@@ -798,29 +798,43 @@ div[data-testid="stMetricValue"], .mono, .glance-value, .ticker, .price-value{
 # ─────────────────────────────────────────────────────────────────────────
 _TOGGLE_JS = r"""(function(){
 function resolveDoc(){
+  /* Walk iframe → parent chain: nav lives in the Streamlit app document, not the tiny srcdoc iframe. */
+  var w=window;
+  for(var depth=0;depth<14;depth++){
+    try{
+      var d=w.document;
+      if(d&&d.querySelector('nav.sticky-nav'))return d;
+    }catch(e0){}
+    try{
+      if(w===w.parent)break;
+      w=w.parent;
+    }catch(e1){break}
+  }
   var list=[];
-  try{list.push(window.parent);}catch(e1){}
-  try{list.push(window.top);}catch(e2){}
+  try{list.push(window.parent);}catch(e2){}
+  try{list.push(window.top);}catch(e3){}
   list.push(window);
   for(var i=0;i<list.length;i++){
     try{
-      var d=list[i].document;
-      if(!d)continue;
-      var sb=d.querySelector('section[data-testid="stSidebar"]')||d.querySelector('[data-testid="stSidebar"]');
-      var nav=d.querySelector('nav.sticky-nav');
-      if(sb&&nav)return d;
-    }catch(e3){}
-  }
-  for(var j=0;j<list.length;j++){
-    try{
-      var d2=list[j].document;
-      if(d2&&(d2.querySelector('section[data-testid="stSidebar"]')||d2.querySelector('[data-testid="stSidebar"]')))return d2;
+      var d3=list[i].document;
+      if(!d3)continue;
+      var sb=d3.querySelector('section[data-testid="stSidebar"]')||d3.querySelector('[data-testid="stSidebar"]');
+      var nav=d3.querySelector('nav.sticky-nav');
+      if(sb&&nav)return d3;
     }catch(e4){}
   }
   try{return window.parent.document;}catch(e5){return document;}
 }
 var pd=resolveDoc();
-var pw=pd.defaultView||window;
+var pw=(pd&&pd.defaultView)?pd.defaultView:window;
+/* Arm sticky nav on every iframe boot; sidebar init may early-return after first load. */
+try{
+  if(pd&&!pd.__cfStickyNavArmed){
+    pd.__cfStickyNavArmed=1;
+    var navEl=pd.querySelector('nav.sticky-nav');
+    (navEl||pd).addEventListener('click',cfOnStickyNavClick,true);
+  }
+}catch(eNavArm){}
 if(pw.__cfSidebarToggleInit)return;
 pw.__cfSidebarToggleInit=true;
 var legacy=pd.getElementById('sob-host');
@@ -882,14 +896,25 @@ function onDocClick(ev){
 pd.addEventListener('click',onDocClick,false);
 /* Sticky nav: anchors inside inactive st.tabs are not mounted — switch tab first, then scroll. */
 function cfFindMainDashTabButtons(){
-  var lists=pd.querySelectorAll('[data-baseweb="tab-list"]');
-  for(var i=0;i<lists.length;i++){
-    var tabs=lists[i].querySelectorAll('[role="tab"]');
-    /* Main desk: Setup + Cashflow first; tab count grew (3 → 4 → 5 with Radar). Match by labels, not exact length. */
+  var raw=[],sels=['[data-baseweb="tab-list"]','[role="tablist"]'];
+  for(var s=0;s<sels.length;s++){
+    var nl=pd.querySelectorAll(sels[s]);
+    for(var i=0;i<nl.length;i++)raw.push(nl[i]);
+  }
+  var roots=[];
+  for(var a=0;a<raw.length;a++){
+    var dup=false;
+    for(var b=0;b<a;b++){if(raw[a]===raw[b]){dup=true;break;}}
+    if(!dup)roots.push(raw[a]);
+  }
+  for(var r=0;r<roots.length;r++){
+    var list=roots[r];
+    var tabs=list.querySelectorAll('[role="tab"]');
+    /* Main desk: Setup + Cashflow first; tab count grew with Radar. Match by labels. */
     if(tabs.length<3)continue;
-    var a=(tabs[0].textContent||'').trim();
-    var b=(tabs[1].textContent||'').trim();
-    if(a.indexOf('Setup')>=0&&b.indexOf('Cashflow')>=0)return tabs;
+    var t0=(tabs[0].textContent||'').trim();
+    var t1=(tabs[1].textContent||'').trim();
+    if(t0.indexOf('Setup')>=0&&t1.indexOf('Cashflow')>=0)return tabs;
   }
   return null;
 }
@@ -901,7 +926,13 @@ function cfClickMainDashTab(idx,cb,retries){
     if(cb)cb();
     return;
   }
-  try{tabs[idx].click();}catch(e1){}
+  var tabBtn=tabs[idx];
+  try{tabBtn.click();}catch(e1){}
+  try{
+    tabBtn.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,cancelable:true,view:pw}));
+    tabBtn.dispatchEvent(new MouseEvent('mouseup',{bubbles:true,cancelable:true,view:pw}));
+    tabBtn.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,view:pw}));
+  }catch(e2){}
   /* Extra delay so Streamlit mounts tab panel before scroll (Cloud + 4-tab bar). */
   setTimeout(function(){if(cb)cb();},620);
 }
@@ -962,7 +993,6 @@ function cfOnStickyNavClick(ev){
     }
   });
 }
-pd.addEventListener('click',cfOnStickyNavClick,true);
 function ensureToggle(){
   var fab=pd.getElementById('sob');
   if(!fab){
