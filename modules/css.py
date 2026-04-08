@@ -885,8 +885,8 @@ function cfFindMainDashTabButtons(){
   var lists=pd.querySelectorAll('[data-baseweb="tab-list"]');
   for(var i=0;i<lists.length;i++){
     var tabs=lists[i].querySelectorAll('[role="tab"]');
-    /* v22: four main tabs (Setup, Cashflow, Risk/Intel, Sentinel Ledger). Older builds used three. */
-    if(tabs.length!==3&&tabs.length!==4)continue;
+    /* Main desk: Setup + Cashflow first; tab count grew (3 → 4 → 5 with Radar). Match by labels, not exact length. */
+    if(tabs.length<3)continue;
     var a=(tabs[0].textContent||'').trim();
     var b=(tabs[1].textContent||'').trim();
     if(a.indexOf('Setup')>=0&&b.indexOf('Cashflow')>=0)return tabs;
