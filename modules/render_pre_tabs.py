@@ -44,6 +44,8 @@ from modules.ui_helpers import (
     _iv_rank_pill_html,
     _parse_watchlist_string,
     _render_html_block,
+    EARN_GLANCE_DEFERRED,
+    EARN_GLANCE_FEED_UNAVAILABLE,
     earnings_runway_spark_series,
     expected_move_safety_html,
     render_mode_badge,
@@ -897,7 +899,13 @@ def render_desk_after_context(
             unsafe_allow_html=True,
         )
     with g3:
-        if earn_glance == "Date unavailable from feed":
+        if earn_glance == EARN_GLANCE_DEFERRED:
+            earnings_caption = (
+                "`defer_headlines_earnings` skips the desk earnings fetch on first load. "
+                "Open **Risk, scanner & intel → Upcoming Earnings** for the calendar, "
+                "or set that flag to false in config.json to show the countdown here."
+            )
+        elif earn_glance == EARN_GLANCE_FEED_UNAVAILABLE:
             earnings_caption = "Confirm the next print in your broker or calendar feed"
         elif days_to_earnings is not None:
             de = int(days_to_earnings)

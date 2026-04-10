@@ -42,6 +42,8 @@ from .ui_helpers import (
     _fragment_technical_zone, _df_price_levels,
     _earnings_calendar_column_config,
     _persist_overlay_prefs,
+    EARN_GLANCE_DEFERRED,
+    EARN_GLANCE_FEED_UNAVAILABLE,
 )
 import plotly.graph_objects as go
 
@@ -196,6 +198,7 @@ class DashContext:
     earnings_dt: Any = None
     days_to_earnings: Any = None
     earnings_parse_failed: bool = False
+    earnings_fetch_deferred: bool = False
     earn_glance: str = ""
     # Layout
     mini_mode: bool = False
@@ -265,9 +268,11 @@ def build_context(
             if defer_headlines_earnings:
                 ctx.news = []
                 ctx.earnings_date_raw = None
+                ctx.earnings_fetch_deferred = True
             else:
                 ctx.news = f_news.result()
                 ctx.earnings_date_raw = f_earn.result()
+                ctx.earnings_fetch_deferred = False
 
             if use_panel_daily:
                 ctx.df = gs.active_daily_df
@@ -528,7 +533,11 @@ def _parse_earnings(ctx: DashContext):
         else:
             ctx.earn_glance = f"{ctx.days_to_earnings} days: {ctx.earnings_dt.strftime('%b %d, %Y')}"
     else:
-        ctx.earn_glance = "Date unavailable from feed"
+        ctx.earn_glance = (
+            EARN_GLANCE_DEFERRED
+            if ctx.earnings_fetch_deferred
+            else EARN_GLANCE_FEED_UNAVAILABLE
+        )
 
 
 def _fetch_options_context(ctx: DashContext):

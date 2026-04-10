@@ -611,6 +611,11 @@ def _mini_sparkline(series, color="#00E5FF"):
     return fig
 
 
+# Earnings glance headline — must match branches in modules.pages._parse_earnings
+EARN_GLANCE_FEED_UNAVAILABLE = "Date unavailable from feed"
+EARN_GLANCE_DEFERRED = "Deferred: use Upcoming Earnings tab"
+
+
 def earnings_runway_spark_series(days_to_earnings):
     """Seven-point series for the earnings glance spark: left = more days ago (higher runway), right = now.
 
