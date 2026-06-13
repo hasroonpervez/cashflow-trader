@@ -367,15 +367,7 @@ def quant_edge_score(df, vix_val=None, options_data=None, use_quant=False):
             from .sentiment import QuantSentiment
 
             regime_probs = QuantSentiment.regime_detection(df)
-            # 3-state model: state 0=calm, state 1=medium-vol, state 2=high-vol/stress.
-            # We compute a "blended stress score" using a graduated weight:
-            #   • State 2 (true high-vol) applies full 100% penalty weight.
-            #   • State 1 (transitional/medium-vol) applies 35% partial penalty.
-            # This gives smoother, more nuanced position sizing than a binary high/low switch.
-            high_vol_regime = float(
-                regime_probs.get(2, 0.0)           # full weight on true high-vol state
-                + 0.35 * regime_probs.get(1, 0.0)  # partial weight on transitional state
-            )
+            high_vol_regime = float(regime_probs.get(1, 0.0))
             ffd_series = TA.apply_ffd(df["Close"], d=0.4)
             ffd_last = safe_float(safe_last(ffd_series), 0.0)
             ffd_contrib = float(np.tanh(ffd_last * 650.0) * 18.0)
@@ -386,10 +378,6 @@ def quant_edge_score(df, vix_val=None, options_data=None, use_quant=False):
             breakdown = {
                 **sc,
                 "regime_prob_high_vol": round(high_vol_regime, 4),
-                # Store individual state probs so the diagnostics panel can show all three
-                "regime_prob_calm":   round(float(regime_probs.get(0, 0.33)), 4),
-                "regime_prob_medium": round(float(regime_probs.get(1, 0.33)), 4),
-                "regime_prob_stress": round(float(regime_probs.get(2, 0.33)), 4),
                 "ffd_last": round(ffd_last, 4),
                 "inst_signal": round(inst_signal, 1),
                 "retail_core": retail_mean,
@@ -873,19 +861,8 @@ def detect_diamonds(
             try:
                 from .sentiment import QuantSentiment
                 regime_probs = QuantSentiment.regime_detection(sub)
-                # 3-state model: state 0=calm, state 1=medium-vol, state 2=stress.
-                # For diamond confirmation we compute a "stress exposure" score —
-                # the weighted probability of NOT being in the calm state.
-                # Original 2-state gate: calm_prob < 0.75 → reject.
-                # 3-state equivalent: stress_exposure > 0.25 → reject.
-                # This maps to the same intuition: if more than 25% of the regime
-                # probability mass is on stressed/volatile states, the setup is
-                # too uncertain for a Blue Diamond entry recommendation.
-                _stress_exposure = (
-                    float(regime_probs.get(2, 0.0))           # full weight on high-vol state
-                    + 0.35 * float(regime_probs.get(1, 0.0))  # partial on transitional state
-                )
-                if _stress_exposure > 0.25:
+                safe_regime_prob = float(regime_probs.get(0, 0.5))
+                if safe_regime_prob < 0.75:
                     is_blue_diamond = False
                 if is_blue_diamond:
                     size_suggestion = optimal_pyramid_size(sub)

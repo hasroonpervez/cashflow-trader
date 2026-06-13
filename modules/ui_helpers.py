@@ -1078,40 +1078,18 @@ def _fragment_technical_zone(
         "Tweak layers below; those toggles refresh the visuals without another Yahoo pull.",
         tip_plain="Candles show OHLC. EMA and Bollinger frame trend and volatility. Fib, Gann, and S/R are reference rails you can mute. Diamonds flag confluence. Gold line is the Gold Zone. **Gamma Flip:** MM hedging inflection (neon dashed). **Shadow move:** purple band from whale-volume close range vs IV Expected Move. **OpEx pin:** pink dotted GEX/ΘΓ magnet. Volume / RSI / MACD as labeled.",
     )
-    # ── Chart overlay toggles — grouped by function ──────────────────────────
-    # Grouping gives users a mental model for what each toggle affects:
-    #   Price:     the core price canvas (trend channels, levels)
-    #   Structure: the geometric / pattern overlays (trend systems, Fib, Gann)
-    #   Signals:   event markers (Blue/Pink Diamond confluence signals)
-    # Using st.columns(3) instead of a flat list makes it immediately scannable.
     st.markdown("##### Chart layers")
-    oc_price, oc_struct, oc_signals = st.columns(3)
-    with oc_price:
-        st.markdown(
-            "<div style='font-size:.68rem;font-weight:700;color:#64748b;letter-spacing:.08em;"
-            "text-transform:uppercase;margin-bottom:4px'>📈 Price</div>",
-            unsafe_allow_html=True,
-        )
-        show_ind      = st.toggle("EMAs & Bollinger", key="sb_ema",       on_change=_persist_overlay_prefs)
-        show_sr       = st.toggle("S/R levels",       key="sb_sr",        on_change=_persist_overlay_prefs)
-        show_gold_zone = st.toggle("Gold Zone",       key="sb_gold_zone", on_change=_persist_overlay_prefs)
-    with oc_struct:
-        st.markdown(
-            "<div style='font-size:.68rem;font-weight:700;color:#64748b;letter-spacing:.08em;"
-            "text-transform:uppercase;margin-bottom:4px'>🏗️ Structure</div>",
-            unsafe_allow_html=True,
-        )
-        show_fib  = st.toggle("Fibonacci",  key="sb_fib",   on_change=_persist_overlay_prefs)
-        show_gann = st.toggle("Gann Sq9",   key="sb_gann",  on_change=_persist_overlay_prefs)
-        show_super = st.toggle("Supertrend", key="sb_super", on_change=_persist_overlay_prefs)
-        show_ichi  = st.toggle("Ichimoku",  key="sb_ichi",  on_change=_persist_overlay_prefs)
-    with oc_signals:
-        st.markdown(
-            "<div style='font-size:.68rem;font-weight:700;color:#64748b;letter-spacing:.08em;"
-            "text-transform:uppercase;margin-bottom:4px'>💎 Signals</div>",
-            unsafe_allow_html=True,
-        )
+    o1, o2 = st.columns(2)
+    with o1:
+        show_ind = st.toggle("EMAs & Bollinger", key="sb_ema", on_change=_persist_overlay_prefs)
+        show_gann = st.toggle("Gann Sq9", key="sb_gann", on_change=_persist_overlay_prefs)
+        show_ichi = st.toggle("Ichimoku", key="sb_ichi", on_change=_persist_overlay_prefs)
         show_diamonds = st.toggle("Diamonds", key="sb_diamonds", on_change=_persist_overlay_prefs)
+    with o2:
+        show_fib = st.toggle("Fibonacci", key="sb_fib", on_change=_persist_overlay_prefs)
+        show_sr = st.toggle("S/R levels", key="sb_sr", on_change=_persist_overlay_prefs)
+        show_super = st.toggle("Supertrend", key="sb_super", on_change=_persist_overlay_prefs)
+        show_gold_zone = st.toggle("Gold zone", key="sb_gold_zone", on_change=_persist_overlay_prefs)
 
     _em_ctx = st.session_state.get("_cf_chart_em")
     _iv_em = _dte_em = _exp_em = None

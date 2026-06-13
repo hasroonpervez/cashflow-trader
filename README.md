@@ -1,4 +1,4 @@
-# CashFlow Command Center · v22.2 (Free Edition)
+# CashFlow Command Center · v23.0 (Free Edition)
 
 **Predictive analytics options desk** — one screen for watchlist context, consensus, chains, scanner, and a Sentinel ledger. Built with **Streamlit**; data from **Yahoo Finance** (optional **Alpha Vantage** fallback and fundamentals).
 
@@ -7,10 +7,15 @@
 ## At a glance
 
 - **Options Yield** — Full income workflow: BLUF trade line, GEX / gamma flip, Monte Carlo PoP, spreads, Greeks, multi-ticker scanner.
+- **Vol Skew Card** — Cash Flow tab surfaces put IV vs call IV (10% OTM) with color-coded strategy guidance: elevated put skew → sell CSPs; elevated call skew → sell CCs.
+- **IV Term Structure** — Mini-table showing ATM IV across the next 3 expirations with contango / backwardation label, so you see event risk priced in at a glance.
+- **CSP Payoff Diagram** — Interactive Plotly P&L-at-expiry chart inside each CSP card; shows max profit, breakeven, and max loss with dashed markers for spot/strike/breakeven.
+- **Profit Roll Alerts** — Sentinel Ledger fires live alerts at 50% and 80% profit capture (BS-computed current mark vs entry premium); 21-DTE gamma-risk alert also in place.
+- **3-state Market Regime** — HMM now distinguishes Calm / Transitional / Stress regimes (previously binary). Regime-conditional Kelly haircut is graduated: Stress applies full 50% size reduction, Transitional applies 35% partial.
 - **Equity Radar** — Stock-focused scan: pre-diamond signals, actionable targets, Delta-One setup (same scan payload; options chrome hidden until you switch back).
-- **Sentinel Ledger** — Track legs; pin distance, edge realization, portfolio delta/theta/vega + 1d VaR, and “golden zone” style maturity hints.
+- **Sentinel Ledger** — Track legs; pin distance, edge realization, portfolio delta/theta/vega + 1d VaR, golden-zone maturity hints, and roll alerts.
 - **10x scanner + conviction** — `10x Potential` score, score>=5 screener, and `💎 CONVICTION` when Blue Diamond aligns with 10x.
-- **Market Explosion Radar** — New `🌎 Market Explosion Radar` tab: Tier 1 broad batch filter + Tier 2 deep scan of survivors, ranked by `explosion_score`.
+- **Market Explosion Radar** — `🌎 Market Explosion Radar` tab: Tier 1 broad batch filter + Tier 2 deep scan of survivors, ranked by `explosion_score`.
 - **Intraday confirmation gate** — IMMINENT pre-diamond calls are now checked against 1h RSI + OBV before final upgrade.
 - **Auto scanner refresh** — Scanner can auto-rerun on a timer (`auto_scan_interval`, default 300s) after first manual scan.
 - **Watchlist earnings heat map** — Intel tab shows 30-day earnings urgency buckets (`this_week`, `next_week`, `this_month`, `clear`, `reported`, `unknown`).
@@ -151,6 +156,35 @@ cashflow-trader/
 
 ---
 
+## v23.0 — headline features
+
+> Full expert-panel audit (Art Director · Copywriter · Quant PhD · Options Expert) — all 20 items shipped.
+
+| Area | What shipped |
+|------|--------------|
+| **Vol Skew Card** | Cash Flow tab now shows 10%-OTM put IV vs call IV with color-coded strategy guidance (amber = heavy put skew → sell CSPs; cyan = heavy call skew → sell CCs) |
+| **IV Term Structure** | Collapsible mini-table below the expiry selector: next 3 expirations + ATM IV + contango/backwardation/flat label |
+| **CSP Payoff Diagram** | Interactive Plotly P&L-at-expiry chart inside the CSP card with profit / loss shading, spot / strike / breakeven dashed markers, and summary caption |
+| **Profit Roll Alerts** | Sentinel Ledger fires `st.warning` at ≥50% profit capture and `st.error` at ≥80% — BS-computed current mark vs entry premium. Combined with the existing 21-DTE gamma-risk alert |
+| **3-state HMM** | `n_components=3` (was 2). States sorted ascending by vol: 0=Calm, 1=Transitional, 2=Stress. Diamond gate updated: stress_exposure > 0.25 → filter. A/B diagnostics panel shows all three state probabilities |
+| **Graduated Kelly haircut** | Regime-conditional sizing now uses weighted stress: `prob(state2) + 0.35 × prob(state1)`. Smoother position-size reduction instead of binary on/off |
+| **Chart overlay groups** | 8 flat toggles reorganised into three labelled groups: 📈 Price (EMAs, S/R, Gold Zone) · 🏗️ Structure (Fib, Gann, Supertrend, Ichimoku) · 💎 Signals (Diamonds) |
+| **Terminology** | App-wide: HMM → "Market Regime", FFD → "Stationary Signal", Quant Edge → "Edge Score", dark pool proxy → "Institutional Flow". No model internals in the UI |
+| **Tab renames** | "⚙️ Setup & Signals" → "📍 Signals" · "📊 Trade Ledger" → "📋 My Positions" |
+| **CSS breathing room** | Card margins increased 8→16 px; section separators 12→16 px; added gold gradient tape separator |
+| **Traders' Note** | Plain-English rewrite of the GOD TIER UNICORN note — no FFD / Hurst jargon in user-facing text |
+| **CC sim missed upside** | Premium Simulator now shows a 5th metric: "Missed Upside" ($) — the gain left on the table when stock is called away above the strike |
+| **Scanner leading pillar** | Scanner summary string now names the top active confluence pillar: "Strong bullish confluence (7/9). Led by: Supertrend: Bullish." |
+| **IVR warning** | Cash Flow tab warns when IVR < 30 (cheap implied vol — not an ideal premium-selling environment) |
+| **Weekly bias gate** | Weekly BEARISH signal suppresses new covered-call suggestions and shows an override note |
+| **Kelly → contracts** | Cash Flow tab translates Kelly % into contract count + collateral required for both CC and CSP |
+| **Assignment probability** | CSP card shows put delta as assignment risk % with color coding (green < 20%, amber < 35%, red ≥ 35%) |
+| **Earnings guard** | st.error fires when earnings are ≤3 days away: "Close or hedge now — do not sell premium into this" |
+| **Hurst 252-bar min** | Minimum window for both Hurst methods increased 100→252 bars (1 trading year) for statistical reliability |
+| **Backtest disclaimer** | Premium Simulator labels the proxy formula clearly so users don't confuse it with a live-signal backtest |
+
+---
+
 ## v22.2 — headline features
 
 | Area | What shipped |
@@ -189,6 +223,7 @@ cashflow-trader/
 | v20 | Portfolio heatmap, cluster penalty, Sentinel ledger |
 | v21 | FFD correlation, adaptive whale window, HVN-weighted GEX |
 | v22 | OpEx pin, shadow band, Bayesian-ish news, Equity Radar, ledger alpha columns |
+| v23 | Expert-panel audit: 3-state HMM, vol skew card, term structure, CSP payoff diagram, profit roll alerts, graduated Kelly, chart overlay groups, full terminology cleanup |
 
 ---
 
@@ -215,11 +250,14 @@ Live code builds BBW from Bollinger on closes; skew from `calc_vol_skew`; float/
 
 **Methodology (recent hardening)**
 
-- **Quant Edge (`use_quant_models`)** — Five pillars (trend, momentum, volume, volatility, structure) form a **retail core**. The institutional track (FFD residual + HMM regime probability) is **blended** into that core (default 62% / 38%) instead of replacing it, then MC PoP fusion applies. This reduces wild score jumps when the HMM path errors and falls back to retail.
+- **Quant Edge (`use_quant_models`)** — Five pillars (trend, momentum, volume, volatility, structure) form a **retail core**. The institutional track (Stationary Signal residual + 3-state Market Regime probability) is **blended** into that core (default 62% / 38%) instead of replacing it, then MC PoP fusion applies. This reduces wild score jumps when the HMM path errors and falls back to retail.
+- **3-state Market Regime** — `GaussianHMM(n_components=3)` on [FFD-return, rolling-10-vol] features. States sorted ascending by mean volatility so state 0 = Calm, state 1 = Transitional, state 2 = Stress — deterministic labeling regardless of random init. The regime-conditional Kelly haircut uses a weighted composite `prob(state2) + 0.35 × prob(state1)`, giving a graduated size reduction instead of a binary switch.
 - **Gold Zone** — Component prices are a **weighted** mean (POC and HVN highest, then SMA200, Fib, gamma flip, Gann) rather than equal weighting.
 - **Scanner Kelly** — Continuous Kelly still uses expected return / variance when variance is positive. The discrete fallback now uses **MC PoP** as win probability and **BS short-put credit vs assignment-gap** style win/loss amounts instead of a flat 55% and daily `chg_pct`.
 - **Diamond win rate** — Prefers a **holdout window** (signals only from the first ~75% of bars, forward outcomes on the full series) when history is long enough and the holdout set has enough diamonds; falls back to all signals otherwise. Still not a full walk-forward backtest.
-- **CC backtest (`Backtest.cc_sim`)** — Covered-call premium per entry bar uses **`bs_price`** (same BS engine as the desk), not the old hand-tuned premium formula.
+- **CC backtest (`Backtest.cc_sim`)** — Covered-call premium per entry bar uses **`bs_price`** (same BS engine as the desk). Also tracks `missed_upside` (gain left on table when stock is called away above strike) alongside profit.
+- **Vol skew (`calc_vol_skew`)** — Compares 10%-OTM put IV vs 10%-OTM call IV. Positive skew = puts are bid (bearish hedging, ideal for selling CSPs). Negative = calls are bid (ideal for selling CCs). Displayed prominently in the Cash Flow tab with color-coded guidance.
+- **IV Term Structure** — Loops `opt_exps[:3]`, extracts ATM IV per expiry, labels the shape (Contango / Backwardation / Flat). Near IV > Far IV implies an imminent event risk.
 
 ---
 
