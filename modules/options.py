@@ -328,18 +328,12 @@ def _quant_edge_pillars(df, vix_val):
     if len(df) >= 20:
         atr_s = TA.atr(df)
         cur_atr = safe_float(safe_last(atr_s), 0.0)
-        avg_atr = float(atr_s.iloc[-60:].mean()) if len(df) >= 60 else cur_atr
-        atr_ratio = cur_atr / avg_atr if avg_atr > 0 and np.isfinite(avg_atr) else 1.0
-        # ATR ratio component: 1.0 = average vol (50 pts); lower ATR → higher score (calm = premium-selling edge)
-        atr_score = float(np.clip(50.0 + (1.0 - atr_ratio) * 25.0, 20.0, 90.0))
-        if vix_val and vix_val > 0 and np.isfinite(float(vix_val)):
-            # VIX percentile: VIX 12 = low fear (50 pts for sellers), VIX 30+ = extreme fear (cap 90)
-            # Mapped: score = 50 + (VIX - 18) * 2.5, capped [20, 90]
-            vix_score = float(np.clip(50.0 + (float(vix_val) - 18.0) * 2.5, 20.0, 90.0))
-            # Weighted blend: ATR regime is local, VIX is macro → 60/40 split
-            vol_score = 0.60 * atr_score + 0.40 * vix_score
-        else:
-            vol_score = atr_score
+        avg_atr = atr_s.iloc[-60:].mean() if len(df) >= 60 else cur_atr
+        atr_ratio = cur_atr / avg_atr if avg_atr > 0 else 1
+        vol_score = min(100, max(20, 50 + (atr_ratio - 1) * 30))
+        if vix_val and vix_val > 0:
+            vix_score = min(100, max(20, 30 + (vix_val - 12) * 3))
+            vol_score = (vol_score + vix_score) / 2
         sc["volatility"] = round(float(vol_score), 1)
     else:
         sc["volatility"] = 50.0
@@ -472,56 +466,26 @@ def scan_watchlist_edge_rows(
 
 
 def weekly_trend_label(df_wk):
-    """Weekly bias — 4-signal voting: MACD line vs signal, price vs EMA-20,
-    RSI(14) regime, and OBV trend.  Requires ≥3/4 agreement for BULLISH/BEARISH;
-    otherwise MIXED. Stronger than the previous 2-signal version which was prone
-    to false BULLISH calls in chop above EMA with fading MACD."""
+    """Weekly bias using MACD(12,26,9) and EMA(20) on weekly closes."""
     try:
-        if df_wk is None or not isinstance(df_wk, pd.DataFrame):
+        if df_wk is None:
             return "UNKNOWN", "#64748b"
-        if len(df_wk) < 26 or "Close" not in df_wk.columns:
+        if not isinstance(df_wk, pd.DataFrame):
+            return "UNKNOWN", "#64748b"
+        if len(df_wk) < 26:
+            return "UNKNOWN", "#64748b"
+        if "Close" not in df_wk.columns:
             return "UNKNOWN", "#64748b"
         close = pd.to_numeric(df_wk["Close"], errors="coerce").dropna()
         if len(close) < 26:
             return "UNKNOWN", "#64748b"
-
-        price = safe_float(safe_last(close), 0.0)
-
-        # Signal 1 — MACD line vs signal line
         ml, sl, _ = TA.macd(close, 12, 26, 9)
-        macd_bull = safe_float(safe_last(ml), 0.0) > safe_float(safe_last(sl), 0.0)
-
-        # Signal 2 — Price vs EMA-20
         e20 = safe_float(safe_last(TA.ema(close, 20)), 0.0)
-        above_ema = price > e20 if e20 > 0 else False
-
-        # Signal 3 — RSI regime (>55 bull, <45 bear, else neutral → skip vote)
-        rsi_v = safe_float(safe_last(TA.rsi(close, 14)), 50.0)
-        if rsi_v > 55:
-            rsi_bull = True
-        elif rsi_v < 45:
-            rsi_bull = False
-        else:
-            rsi_bull = None  # neutral — no vote
-
-        # Signal 4 — OBV rising over last 8 bars
-        if "Volume" in df_wk.columns and len(df_wk) >= 20:
-            obv_s = TA.obv(df_wk.tail(20))
-            obv_bull = safe_float(safe_last(obv_s), 0.0) > safe_float(obv_s.iloc[-8] if len(obv_s) >= 8 else obv_s.iloc[0], 0.0)
-        else:
-            obv_bull = None  # no volume → no vote
-
-        # Tally: skip None votes
-        votes = [v for v in [macd_bull, above_ema, rsi_bull, obv_bull] if v is not None]
-        if not votes:
-            return "UNKNOWN", "#64748b"
-        bull_count = sum(1 for v in votes if v)
-        bear_count = len(votes) - bull_count
-        # Need clear majority: ≥75% of active votes
-        threshold = max(2, int(len(votes) * 0.75))
-        if bull_count >= threshold:
+        above_ema = safe_float(safe_last(close), 0.0) > e20
+        macd_bull = safe_float(safe_last(ml), 0.0) > safe_float(safe_last(sl), 0.0)
+        if above_ema and macd_bull:
             return "BULLISH", "#10b981"
-        if bear_count >= threshold:
+        if not above_ema and not macd_bull:
             return "BEARISH", "#ef4444"
         return "MIXED", "#f59e0b"
     except Exception as e:
@@ -716,24 +680,24 @@ def _index_pos(idx_obj):
     return int(arr.flat[-1])
 
 
-def optimal_pyramid_size(df, capital=10000.0, target_vol=0.15, max_shares=500):
-    """Inverse-vol position sizing: S = (Capital × Target_Vol) / (RVol × Price).
-
-    ``max_shares`` cap (default 500) prevents absurd suggestions on low-price /
-    high-vol names (previously uncapped, could return thousands of shares).
+def optimal_pyramid_size(df, capital=10000.0, target_vol=0.15):
+    """
+    Calculates the optimal number of shares to accumulate based on inverse volatility.
+    Formula: S_t = (Capital * Target_Vol) / (Realized_Vol * Price)
     """
     if len(df) < 20:
         return 0
     price = safe_float(safe_last(df["Close"]), 0.0)
     if price <= 0:
         return 0
+    # 20-day annualized realized volatility
     realized_vol = float(df["Close"].pct_change().tail(20).std() * np.sqrt(252))
-    if realized_vol <= 0 or not np.isfinite(realized_vol):
+    if realized_vol <= 0:
         return 0
+
+    # Calculate share size to target a specific portfolio volatility impact
     shares = (capital * target_vol) / (realized_vol * price)
-    if not np.isfinite(shares) or shares <= 0:
-        return 0
-    return max(1, min(int(shares), int(max_shares)))
+    return max(1, int(shares))
 
 
 def quant_trailing_exit(df, atr_multiplier=3.0):

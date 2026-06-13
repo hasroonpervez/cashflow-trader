@@ -501,9 +501,8 @@ def render_setup_tab(chart_mood: str, d: DeskLocals) -> None:
                     )
                 else:
                     st.warning(
-                        "**Quant engine matched Retail.** The FFD/HMM institutional branch did not run "
-                        "(missing `hmmlearn`, insufficient history, or an internal error). "
-                        "Both numbers use the same five-factor model below."
+                        "**Quant engine matched Retail.** The advanced HMM model needs at least 50 bars of history "
+                        "to warm up — both scores are using the standard five-factor model below."
                     )
                     pc1, pc2 = st.columns(2)
                     _dims = ("trend", "momentum", "volume", "volatility", "structure")
@@ -1829,7 +1828,7 @@ def render_intel_tab(d: DeskLocals) -> None:
         )
         _auto_status = st.empty()
         if auto_scan_interval <= 0:
-            _auto_status.caption("Auto refresh disabled (`auto_scan_interval` <= 0).")
+            _auto_status.caption("Auto refresh is disabled. Set a scan interval in Settings to enable it.")
         elif _has_prior_scan:
             _remaining = max(0, int(round(auto_scan_interval - (_now_ts - _last_scan_ts))))
             _mode = str((_scan_bundle or {}).get("scan_trigger") or "manual")
@@ -2158,9 +2157,9 @@ def render_intel_tab(d: DeskLocals) -> None:
                         if _alloc_rows:
                             with st.expander("$50k Kelly-style mix (Blue Diamonds only)", expanded=False):
                                 st.caption(
-                                    "Weights scale with Quant Edge × MC PoP %; each name is scaled by `_simple_corr_haircut`, "
-                                    "then **Sentinel sector guard** (0.5× when that sector is already **>20%** of this capital base), "
-                                    "then **top-3 ledger ρ** (0.5× when FFD correlation vs your three largest legs exceeds **0.80**)."
+                                    "Weights blend Quant Edge × Monte Carlo PoP. "
+                                    "Each position is trimmed when its sector exceeds 20% of capital (sector guard) "
+                                    "and when it's too correlated with your three largest open legs (correlation guard)."
                                 )
                                 _adf = pd.DataFrame(_alloc_rows)
                                 streamlit_show_dataframe(
@@ -2413,10 +2412,6 @@ def render_intel_tab(d: DeskLocals) -> None:
     with n_tab:
         st.markdown(f"#### {_html_mod.escape(str(ticker))} News")
         if defer_meta:
-            st.caption(
-                "**Deferred headlines** — loaded after core desk metrics so the page paints first. "
-                "Set `defer_headlines_earnings: false` in config to bundle news in the initial fetch."
-            )
             _hl = fetch_news_headlines(str(ticker))
             if _hl:
                 for item in _hl:

@@ -88,9 +88,7 @@ def render_watchlist_editor_fragment(cfg_tx: ConfigTransaction) -> None:
 
     with st.expander("Edit watchlist symbols", expanded=_wl_expanded):
         st.caption(
-            "Drop in tickers separated by commas or line breaks. Shuffle the lineup with the controls. "
-            "Your list is saved to **config.json** automatically when it changes (survives closing the browser). "
-            "On Streamlit Cloud, if saving fails, add a `watchlist` key in **App settings** under **Secrets**."
+            "Add tickers separated by commas or line breaks. Your list saves automatically and persists across sessions."
         )
         scanner_watchlist_raw = st.text_area(
             "Watchlist symbols",
@@ -187,9 +185,10 @@ def render_watchlist_editor_fragment(cfg_tx: ConfigTransaction) -> None:
                 if save_config({**_bc, "watchlist": ",".join(w)}):
                     st.rerun()
                 else:
-                    st.error(
-                        "Could not write **config.json** (read-only filesystem). "
-                        "Paste this list into Streamlit **Secrets** as `watchlist = \"...\"` for durable Cloud storage."
+                    st.warning(
+                        "⚠️ Watchlist saved for this session only. On Streamlit Cloud the filesystem is read-only — "
+                        "your list will reset on the next reboot. Add your tickers to **App settings → Secrets** as "
+                        "`watchlist = \"AAPL,TSLA,...\"` to make them permanent."
                     )
 
 
@@ -533,7 +532,7 @@ def render_tape_open_editor_flush(
     if not _flush_ok and "watchlist" in _pending_cfg_keys and not st.session_state.get("_cf_watchlist_disk_warned"):
         st.session_state["_cf_watchlist_disk_warned"] = True
         st.toast(
-            "Watchlist not written to disk. Use Streamlit Secrets `watchlist` for Cloud, or run the app locally.",
+            "Watchlist saved for this session only — won't survive a reboot on Streamlit Cloud.",
             icon="⚠️",
         )
 
@@ -901,9 +900,7 @@ def render_desk_after_context(
     with g3:
         if earn_glance == EARN_GLANCE_DEFERRED:
             earnings_caption = (
-                "`defer_headlines_earnings` skips the desk earnings fetch on first load. "
-                "Open **Risk, scanner & intel → Upcoming Earnings** for the calendar, "
-                "or set that flag to false in config.json to show the countdown here."
+                "Open the Upcoming Earnings tab (Risk, scanner & intel) for the full calendar."
             )
         elif earn_glance == EARN_GLANCE_FEED_UNAVAILABLE:
             earnings_caption = "Confirm the next print in your broker or calendar feed"
