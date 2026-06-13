@@ -7,6 +7,7 @@ import re
 import sys
 import time
 from datetime import datetime, timedelta
+from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -1000,6 +1001,37 @@ def render_cashflow_tab(cfg: dict, d: DeskLocals) -> None:
             _cfs_subtitle,
             tip_plain="Start with the optimal line the desk highlights. Covered calls need stock on hand. Cash secured puts monetize patience. Spreads are for when you want a hard loss ceiling.",
         )
+
+        # ── IVR ENVIRONMENT CHECK ─────────────────────────────────────────────
+        # IVR (IV Rank) measures where current IV sits vs its 52-week range.
+        # Below 30: IV is cheap relative to history → selling premium is UNFAVORABLE
+        #   because you're collecting a thin premium relative to the actual vol risk.
+        # Above 50: IV is rich → selling premium is the correct strategy.
+        # This check fires before showing strikes so the user sees the warning first.
+        try:
+            _ivr_info = compute_iv_rank_proxy(ticker, df)
+            _ivr_val = float(_ivr_info.get("rank", 50)) if _ivr_info else 50.0
+        except Exception:
+            _ivr_val = 50.0
+        if _ivr_val < 30:
+            st.warning(
+                f"⚠️ **IV Rank is low ({_ivr_val:.0f}/100)** — implied volatility is cheap relative to the past year. "
+                "Selling premium in a low-IV environment means collecting thin credits while carrying full assignment or loss risk. "
+                "**Desk rule:** wait for IVR ≥ 30 before opening new short-premium positions, "
+                "or size down to 50% of your normal contract count."
+            )
+
+        # ── WEEKLY BIAS CHECK ─────────────────────────────────────────────────
+        # If the weekly timeframe shows BEARISH structure, short puts are fighting
+        # the dominant trend — the most dangerous combination in options selling.
+        # This fires as an explicit desk override, not just a label.
+        if wk_label == "BEARISH":
+            st.warning(
+                "⚠️ **Weekly trend is BEARISH** — selling naked puts is fighting the dominant timeframe. "
+                "Prefer bear call spreads (defined-risk) over cash-secured puts. "
+                "If you must sell puts, stay ≥ 10% OTM and use a 21-DTE or shorter cycle."
+            )
+
         if opt_exps:
             st.markdown(
                 f"<div class='tc'><div style='text-align:center'><span style='color:#64748b;font-size:.8rem'>ANALYZING</span><br>"
@@ -1182,7 +1214,35 @@ def render_cashflow_tab(cfg: dict, d: DeskLocals) -> None:
                                     csp_mc_pop_txt = f" | MC PoP: {_v:.1f}%"
                             except (TypeError, ValueError):
                                 pass
-                        st.markdown(f"<div class='sb'>{opt_html_p}<strong>SELL 1x ${b['strike']:.0f}P @ ${b['mid']:.2f}</strong><br><span style='font-size:.85rem;color:#94a3b8'>Exp: {sel_exp} ({dte}DTE) | IV: {b['iv']:.1f}% | <strong style='color:{delta_color_p}'>\u0394 {b['delta']:.2f}</strong>{csp_mc_pop_txt}<br>Premium: <strong style='color:#10b981'>${b['prem_100']:,.0f}</strong> | OTM: {b['otm_pct']:.1f}% | Eff buy: ${b['eff_buy']:.2f} | OI: {b['oi']:,}</span>{_theta_gamma_desk_line(b.get('theta_gamma_ratio'))}</div>", unsafe_allow_html=True)
+                        # \u2500\u2500 CSP OPTIMAL CARD \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+                        # Assignment probability: by Black-Scholes, |put_delta| \u2248 N(-d2)
+                        # which is the risk-neutral probability the put expires ITM (i.e.
+                        # the stock is below the strike at expiry). This is the single most
+                        # important risk metric for a cash-secured put seller.
+                        # DELTA_LOW / DELTA_HIGH from Opt mark the prop-desk sweet zone.
+                        _csp_assign_prob_pct = abs(b["delta"]) * 100  # e.g. |\u22120.25| \u2192 25%
+                        _assign_color = (
+                            "#ef4444" if _csp_assign_prob_pct > 35  # high risk
+                            else "#f59e0b" if _csp_assign_prob_pct > 20  # moderate
+                            else "#10b981"  # safe zone (< 20%)
+                        )
+                        _assign_txt = (
+                            f" | <strong style='color:{_assign_color}'>Assign. risk: "
+                            f"{_csp_assign_prob_pct:.0f}%</strong>"
+                        )
+                        st.markdown(
+                            f"<div class='sb'>{opt_html_p}"
+                            f"<strong>SELL 1x ${b['strike']:.0f}P @ ${b['mid']:.2f}</strong><br>"
+                            f"<span style='font-size:.85rem;color:#94a3b8'>"
+                            f"Exp: {sel_exp} ({dte}DTE) | IV: {b['iv']:.1f}% | "
+                            f"<strong style='color:{delta_color_p}'>\u0394 {b['delta']:.2f}</strong>"
+                            f"{csp_mc_pop_txt}{_assign_txt}<br>"
+                            f"Premium: <strong style='color:#10b981'>${b['prem_100']:,.0f}</strong> | "
+                            f"OTM: {b['otm_pct']:.1f}% | Eff buy: ${b['eff_buy']:.2f} | "
+                            f"OI: {b['oi']:,}</span>"
+                            f"{_theta_gamma_desk_line(b.get('theta_gamma_ratio'))}</div>",
+                            unsafe_allow_html=True,
+                        )
                         _csp_track_key = re.sub(
                             r"[^a-zA-Z0-9_]",
                             "_",
@@ -1560,6 +1620,33 @@ def render_intel_tab(d: DeskLocals) -> None:
             kelly_overlap = 0.0
             kelly_corr_haircut = 1.0
         kelly_effective_haircut = float(kelly_corr_haircut) * float(simple_corr_mult)
+
+        # ── REGIME-CONDITIONAL KELLY MULTIPLIER ──────────────────────────────
+        # When the HMM detects a high-volatility / choppy regime, signal reliability
+        # degrades — the very indicators the Kelly formula trusts become noisier.
+        # Standard practice on institutional desks: downscale Kelly by the degree of
+        # "bad regime" probability so position sizes contract automatically in chop.
+        #
+        # Mapping (graduated, not binary to avoid cliffs):
+        #   regime_prob_high_vol = 0.0  →  multiplier = 1.00  (full Kelly)
+        #   regime_prob_high_vol = 0.6  →  multiplier = 0.70  (30% reduction)
+        #   regime_prob_high_vol = 1.0  →  multiplier = 0.50  (half Kelly, hard floor)
+        #
+        # Formula: multiplier = max(0.5, 1.0 − 0.5 × regime_prob_high_vol)
+        # This effectively acts as an automatic second half-Kelly when in full high-vol
+        # regime — consistent with how the prop desk would manually size down in VIX spikes.
+        _regime_kelly_mult = 1.0
+        _regime_hmm_note = ""
+        if use_quant_models and isinstance(qb, dict):
+            _regime_prob_hv = float(qb.get("regime_prob_high_vol") or 0.0)
+            if _regime_prob_hv > 0.05:  # threshold: ignore noise below 5%
+                _regime_kelly_mult = max(0.50, 1.0 - 0.50 * _regime_prob_hv)
+                _regime_hmm_note = f" · HMM regime mult ×{_regime_kelly_mult:.2f} (high-vol prob {_regime_prob_hv:.0%})"
+
+        # Fold the regime multiplier into the effective haircut so the Kelly calls below
+        # automatically receive the regime-adjusted sizing in one coefficient.
+        kelly_effective_haircut = kelly_effective_haircut * _regime_kelly_mult
+
         _k_mc = None
         if bluf_cc:
             try:
@@ -1611,13 +1698,76 @@ def render_intel_tab(d: DeskLocals) -> None:
                 f"<div class='tc'><div style='font-size:.75rem;color:#64748b'>KELLY HALF MODE · UI CAP</div>"
                 f"<div class='mono' style='font-size:1.3rem;color:{kc}'>{k_show:.1f}% = ${k_dollars:,.0f}</div>"
                 f"<div style='font-size:.7rem;color:#64748b;margin-top:4px'>Raw half Kelly {k_half:.1f}% · full Kelly {k_full:.1f}% · {k_source}. "
-                f"Corr overlap {kelly_overlap:.2f} · overlap haircut x{kelly_corr_haircut:.2f} · simple corr x{simple_corr_mult:.2f}. Display max {k_cap:.0f}% for risk hygiene.{capped_note}</div></div>",
+                f"Corr overlap {kelly_overlap:.2f} · overlap haircut x{kelly_corr_haircut:.2f} · simple corr x{simple_corr_mult:.2f}"
+                f"{_regime_hmm_note}. Display max {k_cap:.0f}% for risk hygiene.{capped_note}</div></div>",
                 unsafe_allow_html=True)
             _explain("Kelly Criterion in plain English",
                 f"The Kelly formula can suggest large fractions; here we show <strong>Half Kelly</strong> then <strong>cap the headline at {k_cap:.0f}%</strong> "
                 f"so the desk view stays conservative (raw half-Kelly was {k_half:.1f}%). "
                 f"On a <strong>${REF_NOTIONAL:,.0f}</strong> illustrative reference, the capped line is <strong>${k_dollars:,.0f}</strong>. "
                 "Scale to your own capital; Kelly is a theoretical optimum, not an order size.", "neutral")
+
+            # ── KELLY → CONTRACT COUNT TRANSLATION ──────────────────────────
+            # Kelly gives a DOLLAR ALLOCATION. To turn it into actionable contract
+            # counts we divide by the per-contract cash requirement:
+            #   CSP collateral  = strike × 100  (cash required to secure the put)
+            #   CC  collateral  ≈ stock price × 100  (cost of 100 shares per contract)
+            # We also show the premium income collected at that contract count so the
+            # desk can sanity-check the yield before clicking the ticket.
+            #
+            # Note: k_dollars is based on REF_NOTIONAL (illustrative reference).
+            # The user should substitute their own equity_capital to get their personal
+            # contract count: personal_contracts = int(equity_capital * k_show/100 / collateral)
+            try:
+                if bluf_csp and k_dollars > 0:
+                    _k_csp_collateral = float(bluf_csp["strike"]) * 100  # $ to secure 1 put
+                    _k_csp_prem = float(bluf_csp["prem_100"])             # premium per contract
+                    _k_contracts_csp = max(0, int(k_dollars / _k_csp_collateral)) if _k_csp_collateral > 0 else 0
+                    _k_contracts_csp_personal = max(0, int(float(equity_capital) * k_show / 100 / _k_csp_collateral)) if _k_csp_collateral > 0 and equity_capital > 0 else None
+                    _k_total_prem_csp = _k_csp_prem * max(1, _k_contracts_csp)
+                    _personal_note = (
+                        f" | Your capital ({equity_capital:,.0f}): ~{_k_contracts_csp_personal} contract{'s' if _k_contracts_csp_personal != 1 else ''}"
+                        if _k_contracts_csp_personal is not None else ""
+                    )
+                    st.markdown(
+                        f"<div class='tc'>"
+                        f"<div style='font-size:.7rem;color:#64748b;text-transform:uppercase;margin-bottom:6px'>KELLY → CONTRACTS (CSP ${bluf_csp['strike']:.0f}P)</div>"
+                        f"<div style='font-size:1.1rem;font-weight:700;color:#06b6d4'>"
+                        f"~{_k_contracts_csp} contract{'s' if _k_contracts_csp != 1 else ''} on ${REF_NOTIONAL:,.0f} ref</div>"
+                        f"<div style='font-size:.8rem;color:#94a3b8;margin-top:4px'>"
+                        f"${_k_csp_collateral:,.0f} collateral each → ${_k_total_prem_csp:,.0f} premium collected"
+                        f"{_personal_note}</div>"
+                        f"<div style='font-size:.7rem;color:#64748b;margin-top:4px'>"
+                        f"Adjust to your own capital. Each contract covers 100 shares.</div>"
+                        f"</div>",
+                        unsafe_allow_html=True,
+                    )
+                elif bluf_cc and k_dollars > 0:
+                    _k_cc_collateral = float(price) * 100   # approx cost to own 100 shares
+                    _k_cc_prem = float(bluf_cc["prem_100"])  # premium per covered call
+                    _k_contracts_cc = max(0, int(k_dollars / _k_cc_collateral)) if _k_cc_collateral > 0 else 0
+                    _k_contracts_cc_personal = max(0, int(float(equity_capital) * k_show / 100 / _k_cc_collateral)) if _k_cc_collateral > 0 and equity_capital > 0 else None
+                    _k_total_prem_cc = _k_cc_prem * max(1, _k_contracts_cc)
+                    _personal_note_cc = (
+                        f" | Your capital ({equity_capital:,.0f}): ~{_k_contracts_cc_personal} contract{'s' if _k_contracts_cc_personal != 1 else ''}"
+                        if _k_contracts_cc_personal is not None else ""
+                    )
+                    st.markdown(
+                        f"<div class='tc'>"
+                        f"<div style='font-size:.7rem;color:#64748b;text-transform:uppercase;margin-bottom:6px'>KELLY → CONTRACTS (CC ${bluf_cc['strike']:.0f}C)</div>"
+                        f"<div style='font-size:1.1rem;font-weight:700;color:#06b6d4'>"
+                        f"~{_k_contracts_cc} contract{'s' if _k_contracts_cc != 1 else ''} on ${REF_NOTIONAL:,.0f} ref</div>"
+                        f"<div style='font-size:.8rem;color:#94a3b8;margin-top:4px'>"
+                        f"~${_k_cc_collateral:,.0f} stock exposure each → ${_k_total_prem_cc:,.0f} premium collected"
+                        f"{_personal_note_cc}</div>"
+                        f"<div style='font-size:.7rem;color:#64748b;margin-top:4px'>"
+                        f"Requires 100 shares per contract. Adjust to your actual share count.</div>"
+                        f"</div>",
+                        unsafe_allow_html=True,
+                    )
+            except Exception as _ke:
+                log_warn("kelly contract count display", _ke, ticker=str(ticker))
+
         else:
             st.markdown("<div class='tc'><div style='font-size:.75rem;color:#64748b'>KELLY CRITERION</div>"
                 "<div style='color:#94a3b8;font-size:.85rem;margin-top:6px'>Not enough data yet. No liquid option strikes available to calculate your optimal bet size.</div></div>",
@@ -1637,8 +1787,16 @@ def render_intel_tab(d: DeskLocals) -> None:
     st.markdown('<div id="simulator" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
     _section("Premium Simulator", "Replay a year of covered calls with your assumptions before you commit capital.",
              tip_plain="Dial OTM, hold time, and IV multiplier. Hunt for settings that still look sane in both calm and chaotic tapes.")
+    # ── PREMIUM SIMULATOR DISCLAIMER ─────────────────────────────────────────
+    # This simulator uses run_edge_backtest() which applies a PROXY formula, NOT
+    # the live Quant Edge Score. See QuantBacktest.run_edge_backtest docstring for
+    # the exact formula. Use the Walk-Forward Backtest (Quant Edge tab) for a true
+    # point-in-time replay of the actual desk signals. These numbers are for color only.
     st.warning(
-        "Premiums here are modeled from historical volatility. They are illustrative, not a promise. Treat the run as a dress rehearsal; live fills will differ."
+        "**Simulator uses a simplified momentum proxy, not the live desk formula.** "
+        "Premiums are modeled from historical volatility — illustrative, not a promise. "
+        "Treat the run as a dress rehearsal; live fills will differ. "
+        "For signal-accurate replay, use the Walk-Forward Backtest in the Quant Edge section."
     )
     bc1, bc2, bc3, bc4 = st.columns(4)
     bt_otm = bc1.slider("OTM%", 2, 15, 5, key="sim_otm") / 100
@@ -2850,6 +3008,80 @@ def render_ledger_tab(d: DeskLocals) -> None:
         on_select="ignore",
         selection_mode=[],
     )
+
+    # ── DTE ROLL ALERTS ───────────────────────────────────────────────────────
+    # Professional short-option management uses fixed DTE thresholds to decide
+    # when to close/roll before theta decay accelerates toward dangerous levels.
+    # The three standard desk rules:
+    #   • 21 DTE ("21-days rule"): close/roll ALL short options at 21 DTE regardless
+    #     of profit — gamma risk explodes inside 3 weeks; most of the theta has been
+    #     captured already (50–70% of premium in the first half of the cycle).
+    #   • 50% profit: close the trade at 50% of max profit whenever reached — this
+    #     avoids the "last mile" risk of holding through a reversal for a small gain.
+    #   • 80% profit: hard exit for high-theta trades where 80% capture represents
+    #     strong execution; especially important near earnings or macro events.
+    #
+    # We compute current DTE from dte_at_entry and entry_date if expiry not stored.
+    if _led:
+        _today = datetime.now()
+        _roll_alerts = []
+        for _row in _led:
+            try:
+                _exp_str = _row.get("expiry", "")
+                _entry_dte = int(_row.get("dte_at_entry", 0))
+                _entry_date_str = _row.get("entry_date", "")
+                _leg = _row.get("leg", _row.get("option_type", "?")).upper()
+                _tkr = str(_row.get("ticker", ticker)).upper()
+                _strike = float(_row.get("strike", 0))
+                _prem_entry = float(_row.get("premium_100", 0))
+
+                # Compute current DTE from stored expiry string
+                _current_dte: Optional[int] = None
+                if _exp_str:
+                    try:
+                        _exp_dt = datetime.strptime(str(_exp_str)[:10], "%Y-%m-%d")
+                        _current_dte = max(0, (_exp_dt - _today).days)
+                    except ValueError:
+                        pass
+
+                # Fall back: estimate DTE from entry_date + dte_at_entry
+                if _current_dte is None and _entry_date_str and _entry_dte:
+                    try:
+                        _edt = datetime.strptime(str(_entry_date_str)[:10], "%Y-%m-%d")
+                        _days_elapsed = (_today - _edt).days
+                        _current_dte = max(0, _entry_dte - _days_elapsed)
+                    except ValueError:
+                        pass
+
+                if _current_dte is None:
+                    continue
+
+                # ── Check 21-DTE roll threshold ──
+                if _current_dte <= 21:
+                    _roll_alerts.append({
+                        "level": "error",
+                        "msg": (
+                            f"🚨 **{_tkr} {_leg} ${_strike:.0f} — {_current_dte} DTE (≤21 DTE roll threshold)**  "
+                            f"Close or roll now. Gamma risk accelerates sharply inside 3 weeks. "
+                            f"Most of your theta has been captured. Staying risks a sudden assignment or gap."
+                        ),
+                    })
+
+            except Exception as _re:
+                log_warn("DTE roll alert computation", _re, ticker=str(ticker))
+
+        if _roll_alerts:
+            st.markdown("#### 🔔 Roll Alerts")
+            for _alert in _roll_alerts:
+                if _alert["level"] == "error":
+                    st.error(_alert["msg"])
+                else:
+                    st.warning(_alert["msg"])
+            st.caption(
+                "**Desk roll rules:** close at 21 DTE (gamma risk) · close at 50% profit (efficiency) · close at 80% profit (hard exit). "
+                "Never hold a short option through earnings unless fully hedged."
+            )
+
     _m = sentinel_ledger_metrics(_led, rfr=float(rfr), corr_matrix=cm_cached)
     m1, m2, m3, m4, m5, m6 = st.columns(6)
     with m1:

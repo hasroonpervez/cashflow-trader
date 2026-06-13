@@ -848,6 +848,17 @@ def render_desk_after_context(
             Assignment risk on short calls jumps with that backdrop. We pause auto alerts until after {safe_html(_ed)}.</span></div>""",
             unsafe_allow_html=True,
         )
+        # ── CRITICAL: ≤ 3 DAYS TO PRINT — REDUCE POSITION SIZE ──────────────
+        # Inside 3 calendar days the binary vol event dominates all other signals.
+        # Short options face IV crush risk AND gap-move assignment risk simultaneously.
+        # The desk rule: cut new entries in half, close short delta within 1 strike of ATM.
+        if days_to_earnings is not None and int(days_to_earnings) <= 3:
+            st.error(
+                f"🚨 **Earnings in {int(days_to_earnings)} day{'s' if int(days_to_earnings) != 1 else ''} — reduce position size immediately.** "
+                "Binary event risk is maximum: IV can crush 20-40% the morning after the print AND the stock can gap 5-15% on the news. "
+                "Desk rule: close or hedge any short option within 2 strikes of the money before market close today. "
+                "Do not open new premium-selling positions until after the earnings date."
+            )
 
     vix_disp = f"{vix_v:.1f}" if vix_v else "N/A"
     if vix_v and vix_v > 25:

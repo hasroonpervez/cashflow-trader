@@ -88,59 +88,98 @@ _NEWS_LEXICON.sort(key=lambda x: -len(x[0]))
 _FORWARD_W, _TRAIL_W = 1.45, 0.82
 
 
+@st.cache_data(ttl=900, show_spinner=False)
+def _regime_detection_cached(close_tuple: tuple, n_regimes: int = 2) -> dict:
+    """HMM regime fit on a tuple-serialized close series (cacheable by st.cache_data).
+
+    Called by QuantSentiment.regime_detection. Caching at 900 s avoids re-fitting a new
+    HMM on every call inside detect_diamonds (which iterates over 320 bars) — previously
+    that caused O(n_bars × HMM_fit) latency on every quant-mode scan.
+    """
+    from .ta import TA
+
+    if not HMM_AVAILABLE or not close_tuple:
+        return {0: 0.5, 1: 0.5}
+
+    close_s = pd.Series(close_tuple, dtype=float)
+    if len(close_s) < 50:
+        return {0: 0.5, 1: 0.5}
+
+    stationary_close = TA.apply_ffd(close_s, d=0.4)
+    if stationary_close is None or len(stationary_close) < 40:
+        return {0: 0.5, 1: 0.5}
+
+    returns = stationary_close.diff().replace([np.inf, -np.inf], np.nan).dropna()
+    volatility = returns.rolling(window=10).std().dropna()
+    data = pd.concat([returns, volatility], axis=1).dropna()
+    if data.empty or len(data) < 40:
+        return {0: 0.5, 1: 0.5}
+
+    X = np.asarray(data.values, dtype=np.float64)
+    X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
+    if len(X) > _HMM_MAX_ROWS:
+        X = X[-_HMM_MAX_ROWS:]
+    std = X.std(axis=0)
+    std = np.where(std < 1e-8, 1.0, std)
+    X = X / std
+
+    # ── HMM MODEL SETUP ──────────────────────────────────────────────────────
+    # Gaussian HMM with diagonal covariance on [FFD-return, rolling-vol] features.
+    # random_state=42 seeds the K-means initializer; combined with the sort below
+    # this gives deterministic state labeling across restarts and tickers.
+    # "diag" covariance is faster than "full" and sufficient given the 2 features.
+    model = hmm.GaussianHMM(
+        n_components=n_regimes,
+        covariance_type="diag",
+        n_iter=_HMM_N_ITER,
+        tol=_HMM_TOL,
+        random_state=42,
+    )
+    hmm_log = logging.getLogger("hmmlearn")
+    prev_lvl = hmm_log.level
+    try:
+        hmm_log.setLevel(logging.CRITICAL)
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            model.fit(X)
+        probabilities = model.predict_proba(X)
+
+        # ── DETERMINISTIC STATE LABELING ────────────────────────────────────
+        # HMM does NOT guarantee consistent state indices across fits — without
+        # sorting, state 0 could be the high-vol regime on one ticker and the
+        # calm regime on another. We fix this by sorting states ascending by
+        # their mean volatility feature (column 1 in our [returns, vol] matrix).
+        # After sorting:
+        #   state 0 → calmest / low-vol (bullish-drift) regime
+        #   state 1 → elevated-vol / choppy regime
+        # All downstream consumers (options.py line 864, options.py line 370)
+        # rely on state 0 = calm and state 1 = high-vol, so this sort is
+        # REQUIRED for correct signal generation, not just cosmetic.
+        if model.means_.shape[0] > 1:
+            vol_col = 1  # column index of scaled volatility in the feature matrix
+            state_order = np.argsort(model.means_[:, vol_col])  # ascending vol → state 0 = calm
+            # Reorder probability columns so state indices match our convention
+            probabilities = probabilities[:, state_order]
+
+        current_probs = probabilities[-1]
+        return {i: float(prob) for i, prob in enumerate(current_probs)}
+    except Exception as e:
+        log_warn("_regime_detection_cached HMM fit", e)
+        return {0: 0.5, 1: 0.5}
+    finally:
+        hmm_log.setLevel(prev_lvl)
+
+
 class QuantSentiment:
     @staticmethod
     def regime_detection(df, n_regimes=2):
-        """
-        Uses a Gaussian Hidden Markov Model to probabilistically classify market regimes.
-        Returns a dictionary of state probabilities for the latest day.
-        """
-        from .ta import TA
-
-        if not HMM_AVAILABLE or df is None or len(df) < 50:
+        """HMM regime detection — delegates to the cached function to avoid re-fitting
+        on every call (critical: was previously uncached and called inside a 320-bar loop).
+        Returns dict of state probabilities for the latest bar."""
+        if df is None or len(df) < 50 or "Close" not in df.columns:
             return {0: 0.5, 1: 0.5}
-
-        stationary_close = TA.apply_ffd(df["Close"], d=0.4)
-        if stationary_close is None or len(stationary_close) < 40:
-            return {0: 0.5, 1: 0.5}
-
-        returns = stationary_close.diff().replace([np.inf, -np.inf], np.nan).dropna()
-        volatility = returns.rolling(window=10).std().dropna()
-        data = pd.concat([returns, volatility], axis=1).dropna()
-        if data.empty or len(data) < 40:
-            return {0: 0.5, 1: 0.5}
-
-        X = np.asarray(data.values, dtype=np.float64)
-        X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
-        # Tail only: faster fit, stable for Cloud; last row stays the "current" bar.
-        if len(X) > _HMM_MAX_ROWS:
-            X = X[-_HMM_MAX_ROWS:]
-        # Light scale — helps full-cov numerical stability; we use diag below anyway.
-        std = X.std(axis=0)
-        std = np.where(std < 1e-8, 1.0, std)
-        X = X / std
-
-        model = hmm.GaussianHMM(
-            n_components=n_regimes,
-            covariance_type="diag",
-            n_iter=_HMM_N_ITER,
-            tol=_HMM_TOL,
-            random_state=42,
-        )
-        hmm_log = logging.getLogger("hmmlearn")
-        prev_lvl = hmm_log.level
-        try:
-            hmm_log.setLevel(logging.CRITICAL)
-            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-                model.fit(X)
-            probabilities = model.predict_proba(X)
-            current_probs = probabilities[-1]
-            return {i: float(prob) for i, prob in enumerate(current_probs)}
-        except Exception as e:
-            log_warn("QuantSentiment.regime_detection HMM fit", e)
-            return {0: 0.5, 1: 0.5}
-        finally:
-            hmm_log.setLevel(prev_lvl)
+        # Serialize to tuple for st.cache_data hashability; tail 250 bars is sufficient
+        close_tail = tuple(df["Close"].tail(250).dropna().tolist())
+        return _regime_detection_cached(close_tail, n_regimes)
 
 
 class Sentiment:
@@ -310,8 +349,22 @@ class QuantBacktest:
     @staticmethod
     def run_edge_backtest(df, threshold=70, hold_days=5):
         """
-        Runs a fast, vectorized historical backtest using a momentum/volatility proxy
-        to simulate historical edge scores without locking up the UI.
+        Fast, vectorized historical backtest using a MOMENTUM/RSI PROXY score.
+
+        ⚠️  PROXY DISCLAIMER — READ BEFORE INTERPRETING RESULTS:
+        This function uses a simplified surrogate formula:
+            Hist_Edge = clip(0.4 × SMA50_trend_score + 0.6 × RSI − vol_penalty, 0, 100)
+        where SMA50_trend_score ∈ {60 (above SMA50), 40 (below)} and vol_penalty = −20
+        when 20d realized vol > 30%.
+
+        This is NOT the live Quant Edge Score, which combines 7 weighted pillars:
+        Supertrend (2pts), Ichimoku (2pts), ADX/DI+ (1pt), OBV (1pt), RSI Divergence
+        (1pt), Gold Zone (1pt), and Structure (1pt). The proxy was chosen because
+        live-pillar replay requires point-in-time indicator calculation at every
+        historical bar (expensive); the proxy runs in milliseconds.
+
+        Use WalkForwardBacktest.run() for a true Blue Diamond replay that uses the
+        real confluence scoring at each bar. Results here are illustrative only.
         """
         if df is None or len(df) < hold_days + 50:
             return None
