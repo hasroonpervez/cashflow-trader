@@ -157,6 +157,9 @@ def retry_fetch(fn, retries=3, delay=2):
 
     Timeout / curl (28) returns immediately (no retries) so one slow Yahoo response
     cannot stack into tens of seconds per ticker.
+
+    Rate-limit errors (429) get a longer first sleep (8 s) and only 2 retries max,
+    since hammering Yahoo immediately after a 429 worsens the backoff window.
     """
     for attempt in range(retries):
         try:
@@ -164,7 +167,12 @@ def retry_fetch(fn, retries=3, delay=2):
         except Exception as e:
             if _is_yahoo_timeout_error(e):
                 return None
-            if attempt < retries - 1:
+            if _is_yahoo_rate_limit_error(e):
+                if attempt < min(retries - 1, 1):
+                    time.sleep(8.0 * (attempt + 1))
+                else:
+                    return None
+            elif attempt < retries - 1:
                 time.sleep(delay * (attempt + 1))
     return None
 
@@ -1224,27 +1232,36 @@ def compute_iv_rank_proxy(sym: str, spot: float, ref_iv_pct: float):
         return None
 
 
+def _parse_news_items(raw: list, limit: int = 8) -> list:
+    """Shared news-item parser for both fetch_news and fetch_news_headlines.
+    Handles both old yfinance flat dict and new nested ``content`` dict format.
+    Eliminates the ~95% duplicate code that previously existed between the two functions."""
+    items = []
+    for n in raw[:limit]:
+        title = (n.get("title") or n.get("content", {}).get("title", "") or "").strip()
+        if not title:
+            continue
+        link = n.get("link") or n.get("content", {}).get("canonicalUrl", {}).get("url", "")
+        pub = n.get("publisher") or n.get("content", {}).get("provider", {}).get("displayName", "")
+        pt = ""
+        try:
+            ts = n.get("providerPublishTime") or n.get("content", {}).get("pubDate", "")
+            if isinstance(ts, (int, float)):
+                pt = datetime.fromtimestamp(ts).strftime("%b %d, %H:%M")
+            elif isinstance(ts, str) and ts:
+                pt = ts[:16]
+        except Exception as _e:
+            log_warn("_parse_news_items timestamp", _e)
+        items.append({"title": title, "link": link, "pub": pub, "time": pt})
+    return items
+
+
 @st.cache_data(ttl=600)
 def fetch_news(ticker):
+    """Recent Yahoo headlines (600 s TTL) for news feed display."""
     try:
-        raw = _yfinance_ticker(ticker).news or []
-        items = []
-        for n in raw[:8]:
-            title = n.get("title") or n.get("content", {}).get("title", "")
-            link = n.get("link") or n.get("content", {}).get("canonicalUrl", {}).get("url", "")
-            pub = n.get("publisher") or n.get("content", {}).get("provider", {}).get("displayName", "")
-            pt = ""
-            try:
-                ts = n.get("providerPublishTime") or n.get("content", {}).get("pubDate", "")
-                if isinstance(ts, (int, float)):
-                    pt = datetime.fromtimestamp(ts).strftime("%b %d, %H:%M")
-                elif isinstance(ts, str) and ts:
-                    pt = ts[:16]
-            except Exception as e:
-                log_warn("fetch_news item timestamp", e)
-            if title:
-                items.append({"title": title, "link": link, "pub": pub, "time": pt})
-        return items
+        raw = _yfinance_ticker(str(ticker).upper().strip()).news or []
+        return _parse_news_items(raw, limit=8)
     except Exception as e:
         log_warn("fetch_news", e, ticker=str(ticker))
         return []
@@ -1252,29 +1269,15 @@ def fetch_news(ticker):
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_news_headlines(symbol: str):
-    """Latest 5–8 Yahoo headlines for NLP bias (longer TTL than general news to protect rate limits)."""
+    """Latest 5–8 Yahoo headlines for NLP bias (3600 s TTL to protect rate limits).
+    Uses shared _parse_news_items parser — previously this function duplicated
+    all parsing logic from fetch_news."""
     try:
         sym = str(symbol).upper().strip()
         if not sym:
             return []
         raw = _yfinance_ticker(sym).news or []
-        out = []
-        for n in raw[:8]:
-            title = (n.get("title") or n.get("content", {}).get("title", "") or "").strip()
-            link = n.get("link") or n.get("content", {}).get("canonicalUrl", {}).get("url", "")
-            pub = n.get("publisher") or n.get("content", {}).get("provider", {}).get("displayName", "")
-            pt = ""
-            try:
-                ts = n.get("providerPublishTime") or n.get("content", {}).get("pubDate", "")
-                if isinstance(ts, (int, float)):
-                    pt = datetime.fromtimestamp(ts).strftime("%b %d, %H:%M")
-                elif isinstance(ts, str) and ts:
-                    pt = ts[:16]
-            except Exception as e:
-                log_warn("fetch_news_headlines item timestamp", e)
-            if title:
-                out.append({"title": title, "link": link, "pub": pub, "time": pt})
-        return out[:8] if out else []
+        return _parse_news_items(raw, limit=8)
     except Exception as e:
         log_warn("fetch_news_headlines", e, ticker=str(symbol))
         return []

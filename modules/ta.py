@@ -115,10 +115,16 @@ class TA:
 
     @staticmethod
     def rsi(s, p=14):
-        d = s.diff()
-        g = d.where(d > 0, 0).rolling(p).mean()
-        l = (-d.where(d < 0, 0)).rolling(p).mean()
-        return 100 - 100 / (1 + g / l)
+        """Wilder's RSI — EWM with com=p-1 (α=1/p), matching TradingView/Bloomberg.
+        Previous implementation used simple rolling mean which gives systematically
+        different (incorrect) RSI values, distorting all signal logic downstream."""
+        delta = pd.to_numeric(s, errors="coerce").diff()
+        gain = delta.clip(lower=0)
+        loss = (-delta).clip(lower=0)
+        avg_gain = gain.ewm(com=p - 1, min_periods=p, adjust=False).mean()
+        avg_loss = loss.ewm(com=p - 1, min_periods=p, adjust=False).mean()
+        rs = avg_gain / avg_loss.replace(0, np.nan)
+        return 100.0 - (100.0 / (1.0 + rs))
 
     @staticmethod
     def rsi2(s): return TA.rsi(s, 2)
@@ -144,14 +150,21 @@ class TA:
 
     @staticmethod
     def stoch(df, k=14, d=3):
-        lo = df["Low"].rolling(k).min(); hi = df["High"].rolling(k).max()
-        kv = 100 * (df["Close"] - lo) / (hi - lo)
+        """Stochastic oscillator with zero-division guard for halts / pre-market bars."""
+        lo = df["Low"].rolling(k).min()
+        hi = df["High"].rolling(k).max()
+        denom = (hi - lo).replace(0, np.nan)  # avoid inf when hi==lo
+        kv = 100 * (df["Close"] - lo) / denom
         return kv, kv.rolling(d).mean()
 
     @staticmethod
     def vwap(df):
+        """Period-anchored VWAP from first bar in DataFrame.
+        Zero-volume guard prevents inf on bars with no trades."""
         tp = (df["High"] + df["Low"] + df["Close"]) / 3
-        return (tp * df["Volume"]).cumsum() / df["Volume"].cumsum()
+        cum_vol = df["Volume"].cumsum()
+        denom = cum_vol.replace(0, np.nan)
+        return (tp * df["Volume"]).cumsum() / denom
 
     @staticmethod
     def ichimoku(df):
@@ -193,13 +206,15 @@ class TA:
 
     @staticmethod
     def adx(df, p=14):
-        atr_v = TA.atr(df, p)
+        """ADX with zero-division guards on ATR and DI sum."""
+        atr_v = TA.atr(df, p).replace(0, np.nan)
         dm_p = df["High"].diff(); dm_n = -df["Low"].diff()
         dm_p = dm_p.where((dm_p > dm_n) & (dm_p > 0), 0)
         dm_n = dm_n.where((dm_n > dm_p) & (dm_n > 0), 0)
         di_p = 100 * dm_p.rolling(p).mean() / atr_v
         di_n = 100 * dm_n.rolling(p).mean() / atr_v
-        dx = 100 * abs(di_p - di_n) / (di_p + di_n)
+        di_sum = (di_p + di_n).replace(0, np.nan)
+        dx = 100 * (di_p - di_n).abs() / di_sum
         return dx.rolling(p).mean(), di_p, di_n
 
     @staticmethod
