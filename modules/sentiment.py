@@ -276,9 +276,17 @@ class Backtest:
             if exit_p >= strike:
                 profit = (strike - entry) + prem
                 out = "Called Away"
+                # ── MISSED UPSIDE (capped-gain cost) ──────────────────────────
+                # When the stock is called away, the seller misses ALL gains
+                # above the strike. This is the hidden cost of selling CCs on
+                # a strong runner. Displaying it helps the user decide whether
+                # the premium collected was worth the cap.
+                # missed_upside = 0 when stock ends below strike (good outcome).
+                missed_up = max(0.0, exit_p - strike)
             else:
                 profit = prem + (exit_p - entry)
                 out = "Expired OTM"
+                missed_up = 0.0  # no upside was capped; option expired worthless
             results.append(
                 {
                     "entry_date": df.index[i],
@@ -291,6 +299,8 @@ class Backtest:
                     "profit": profit,
                     "ret_pct": profit / entry * 100,
                     "outcome": out,
+                    # Missed upside: what you left on the table when called away
+                    "missed_upside": missed_up,
                 }
             )
             i += hold

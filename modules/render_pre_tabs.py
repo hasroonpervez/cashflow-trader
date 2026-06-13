@@ -363,7 +363,7 @@ def render_mission_control_hud(cfg_tx: ConfigTransaction, cfg: dict, saved_scann
         st.toggle(
             "🔬 Enable Quant/Institutional Models",
             key="sb_use_quant",
-            help="Replaces standard Black-Scholes and RSI logic with Corrado-Su pricing, Fractional Differentiation, and HMM Regime Detection.",
+            help="Upgrades pricing and signals: Corrado-Su option pricing (fat-tail adjusted), Stationary Signal analysis, and Market Regime detection for smarter position sizing.",
             on_change=_persist_use_quant_models,
         )
 

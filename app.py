@@ -214,7 +214,7 @@ def main():
             log_warn("pwa install toast hint", e)
         st.session_state["_cf_pwa_toast_shown"] = True
 
-    st.caption("Predictive Pinning, Bayesian News Nuance, & Shadow Liquidity Architecture.")
+    st.caption("Real-time signals · Options desk · Diamond alerts · Market radar")
     render_watchlist_editor_fragment(cfg_tx)
     apply_auto_watchlist_to_cfg_tx(cfg_tx)
     cfg = cfg_tx.current
@@ -327,11 +327,11 @@ def main():
 
     dash_tab_setup, dash_tab_cashflow, dash_tab_intel, dash_tab_ledger, dash_tab_radar = st.tabs(
         [
-            "Setup & quant",
-            "Cashflow & strikes",
-            "Risk, scanner & intel",
-            "📊 Sentinel Ledger",
-            "🌎 Market Explosion Radar",
+            "📍 Signals",
+            "💰 Cash Flow",
+            "🔍 Scanner & Intel",
+            "📋 My Positions",
+            "🌎 Market Radar",
         ]
     )
 

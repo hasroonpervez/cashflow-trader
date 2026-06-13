@@ -167,7 +167,7 @@ def render_equity_setup_desk(scanner_results, selectbox_key: str, prefer_ticker=
                 )
         qe_disp = f"{float(qs_raw):.0f}/100" if isinstance(qs_raw, (int, float)) else str(qs_raw)
         with st.container(border=True):
-            st.metric("Quant Edge (QE)", qe_disp, help="Same QE score as the scanner row.")
+            st.metric("Edge Score", qe_disp, help="Overall signal strength 0–100 across Trend, Momentum, Volume, Volatility, and Structure pillars.")
     with eq_tab2:
         st.markdown("### Trade Management")
         r_col1, r_col2, r_col3 = st.columns(3)
@@ -445,8 +445,9 @@ def render_setup_tab(chart_mood: str, d: DeskLocals) -> None:
                 "You collect the premium and the stock comes back to you. Time decay works in your favor.", "bull")
 
         _qe_blurb = (
-            "Institutional mode: headline score <strong>blends</strong> the five retail pillars with "
-            "<strong>FFD</strong> + <strong>HMM regime</strong> (open A/B diagnostics)."
+            # Institutional mode: replace FFD/HMM jargon with user-friendly labels
+            "Institutional mode: <strong>Edge Score</strong> blends the five core pillars with "
+            "<strong>Stationary Signal</strong> + <strong>Market Regime</strong> analysis (open diagnostics below)."
             if use_quant_models and isinstance(qb, dict) and qb.get("model") == "blended"
             else "Composite from five checks: trend, momentum, volume, volatility, structure."
         )
@@ -464,31 +465,35 @@ def render_setup_tab(chart_mood: str, d: DeskLocals) -> None:
             inst_score, inst_breakdown = qs, qb
             delta_q = inst_score - retail_score
             st.metric(
-                label="Quant Edge (Institutional)",
+                label="Edge Score (Institutional)",
                 value=f"{inst_score:.0f}/100",
-                delta=f"{delta_q:+.0f} vs Retail",
+                delta=f"{delta_q:+.0f} vs Core",
                 delta_color="normal" if delta_q >= 0 else "inverse",
             )
             with st.expander("🔬 A/B Engine Diagnostics"):
-                st.caption("Comparing standard RSI/MA logic against FFD/HMM models.")
+                st.caption("Comparing core RSI/MA signals against institutional Stationary Signal + Market Regime analysis.")
                 col1, col2 = st.columns(2)
                 col1.metric("Retail Engine", f"{retail_score:.0f}")
                 col2.metric("Quant Engine", f"{inst_score:.0f}", delta=f"{delta_q:+.0f} vs retail")
                 _is_blended = isinstance(inst_breakdown, dict) and inst_breakdown.get("model") == "blended"
                 if _is_blended:
                     st.success(
-                        "Institutional path active: headline **Quant** score **blends** the five retail pillars with "
-                        "**FFD** and **HMM regime** (then MC PoP fusion when chain data exists)."
+                        "Institutional mode active: **Edge Score** blends the five core pillars with "
+                        "**Stationary Signal** + **Market Regime** analysis, then fuses Monte Carlo PoP when chain data exists."
                     )
                     i1, i2, i3, i4 = st.columns(4)
                     _rp = float(inst_breakdown.get("regime_prob_high_vol") or 0.0)
                     _ffd = float(inst_breakdown.get("ffd_last") or 0.0)
                     _rc = float(inst_breakdown.get("retail_core") or retail_score)
                     _ins = float(inst_breakdown.get("inst_signal") or inst_score)
-                    i1.metric("High-vol regime (HMM)", f"{_rp * 100:.1f}%", help="Probability mass in the high-volatility state.")
-                    i2.metric("FFD residual", f"{_ffd:.4f}", help="Fractional differentiation signal (stationary momentum memory).")
-                    i3.metric("Retail core (5 pillars)", f"{_rc:.1f}", help="Mean of trend, momentum, volume, volatility, structure.")
-                    i4.metric("Inst. track", f"{_ins:.1f}", help="FFD+HMM signal before blend with retail core.")
+                    # ── DIAGNOSTIC LABELS — user-facing names, no model jargon ─────
+                    # "Market Regime" replaces "HMM" (user doesn't need to know it's a HMM).
+                    # "Stationary Signal" replaces "FFD residual" (FFD is an internal name).
+                    # "Institutional Track" replaces "Inst. track" for clarity.
+                    i1.metric("Market Regime (high-vol)", f"{_rp * 100:.1f}%", help="How confident the desk is that we're in a choppy, high-volatility environment right now. Higher = stay cautious.")
+                    i2.metric("Stationary Signal", f"{_ffd:.4f}", help="A momentum-memory signal derived by making prices stationary — it captures trend persistence without the drift noise of raw returns.")
+                    i3.metric("Core Edge (5 pillars)", f"{_rc:.1f}", help="Average of Trend, Momentum, Volume, Volatility, and Structure scores — the base edge before institutional blending.")
+                    i4.metric("Institutional Track", f"{_ins:.1f}", help="The blended institutional signal before it fuses with the core edge. Driven by Stationary Signal + Market Regime.")
                     st.markdown("##### Retail: five pillars (20% each)")
                     _pillars = {k: retail_breakdown.get(k) for k in ("trend", "momentum", "volume", "volatility", "structure") if k in retail_breakdown}
                     streamlit_show_dataframe(
@@ -1039,6 +1044,104 @@ def render_cashflow_tab(cfg: dict, d: DeskLocals) -> None:
                 unsafe_allow_html=True,
             )
             sel_exp = st.selectbox("Expiration", opt_exps[:10], index=min(2, len(opt_exps) - 1), key="sel_exp")
+
+            # ─── IV Term Structure Mini-Table ────────────────────────────────────────
+            # Show ATM implied volatility across the next 3 available expirations so
+            # the desk can instantly see whether the market is pricing near-term or
+            # far-term risk more heavily.
+            #
+            #   Contango    (near IV < far IV): calm near-term; far-month risk priced in
+            #   Backwardation (near IV > far IV): event fear near-term (earnings, macro)
+            #
+            # Each `fetch_options` call is individually cached (@st.cache_data ttl=300),
+            # so repeated renders are free after the first page load.
+            _term_rows = []
+            for _ts_exp in opt_exps[:3]:
+                try:
+                    _ts_dte = max(1, (datetime.strptime(_ts_exp, "%Y-%m-%d") - datetime.now()).days)
+                    _ts_result, _ = fetch_options(ticker, _ts_exp)
+                    _ts_calls = (
+                        _ts_result[0]
+                        if isinstance(_ts_result, (tuple, list)) and len(_ts_result) == 2
+                        else pd.DataFrame()
+                    )
+                    _ts_calls = _ts_calls if isinstance(_ts_calls, pd.DataFrame) else pd.DataFrame()
+                    # ATM IV: nearest call strike to current spot price
+                    if (
+                        not _ts_calls.empty
+                        and "strike" in _ts_calls.columns
+                        and "impliedVolatility" in _ts_calls.columns
+                    ):
+                        _atm_row = _ts_calls.iloc[(_ts_calls["strike"] - price).abs().argsort()[:1]]
+                        _raw_iv = _atm_row["impliedVolatility"].values[0] if not _atm_row.empty else None
+                        if _raw_iv and np.isfinite(float(_raw_iv)) and float(_raw_iv) > 0:
+                            _ts_atm_strike = float(_atm_row["strike"].values[0])
+                            _term_rows.append({
+                                "Expiry": _ts_exp,
+                                "DTE": _ts_dte,
+                                "ATM strike": f"${_ts_atm_strike:.0f}",
+                                "ATM IV": round(float(_raw_iv) * 100, 1),
+                            })
+                except Exception as _te:
+                    log_warn("term structure mini-table fetch", _te, ticker=str(ticker))
+
+            if len(_term_rows) >= 2:
+                # Determine term structure shape from first vs last row
+                _ts_near = _term_rows[0]["ATM IV"]
+                _ts_far  = _term_rows[-1]["ATM IV"]
+                if _ts_near > _ts_far + 2:
+                    _ts_shape_label = "📈 Backwardation"
+                    _ts_shape_color = "#f59e0b"
+                    _ts_shape_tip   = "Near-term vol is elevated — market sees an event risk ahead (earnings, macro)."
+                elif _ts_far > _ts_near + 2:
+                    _ts_shape_label = "📉 Contango"
+                    _ts_shape_color = "#10b981"
+                    _ts_shape_tip   = "Far-month vol is higher — near-term looks calm. Better environment for premium sellers."
+                else:
+                    _ts_shape_label = "➡️ Flat"
+                    _ts_shape_color = "#94a3b8"
+                    _ts_shape_tip   = "Vol is priced evenly across expirations — no strong near/far bias."
+
+                with st.expander(
+                    f"📊 IV Term Structure — {_ts_shape_label}  (near {_ts_near:.0f}% → far {_ts_far:.0f}%)",
+                    expanded=False,
+                ):
+                    st.caption(f"**{_ts_shape_label}:** {_ts_shape_tip}")
+                    # Build styled HTML rows
+                    _ts_html_rows = ""
+                    for _tr in _term_rows:
+                        _iv_val = _tr["ATM IV"]
+                        # Colour by distance from the near-term IV (highest=warmest)
+                        _iv_pct_of_max = _iv_val / max(r["ATM IV"] for r in _term_rows) if _term_rows else 1.0
+                        _iv_color = (
+                            "#f59e0b" if _iv_pct_of_max > 0.9
+                            else "#e2e8f0" if _iv_pct_of_max > 0.7
+                            else "#64748b"
+                        )
+                        _ts_html_rows += (
+                            f"<tr>"
+                            f"<td style='padding:5px 10px;color:#94a3b8'>{_tr['Expiry']}</td>"
+                            f"<td style='padding:5px 10px;color:#e2e8f0;text-align:center'>{_tr['DTE']} days</td>"
+                            f"<td style='padding:5px 10px;color:#94a3b8;text-align:center'>{_tr['ATM strike']}</td>"
+                            f"<td style='padding:5px 10px;font-weight:700;color:{_iv_color};text-align:center'>{_iv_val:.1f}%</td>"
+                            f"</tr>"
+                        )
+                    st.markdown(
+                        f"""<table style="width:100%;border-collapse:collapse;font-size:.85rem;
+                                          background:rgba(15,23,42,.6);border-radius:8px">
+                          <thead>
+                            <tr style="border-bottom:1px solid #334155">
+                              <th style="padding:5px 10px;color:#64748b;font-weight:600;text-align:left">Expiry</th>
+                              <th style="padding:5px 10px;color:#64748b;font-weight:600;text-align:center">DTE</th>
+                              <th style="padding:5px 10px;color:#64748b;font-weight:600;text-align:center">ATM Strike</th>
+                              <th style="padding:5px 10px;color:#64748b;font-weight:600;text-align:center">ATM IV</th>
+                            </tr>
+                          </thead>
+                          <tbody>{_ts_html_rows}</tbody>
+                        </table>""",
+                        unsafe_allow_html=True,
+                    )
+
             dte = max(1, (datetime.strptime(sel_exp, "%Y-%m-%d") - datetime.now()).days)
             try:
                 result_sel, _ = fetch_options(ticker, sel_exp)
@@ -1099,6 +1202,96 @@ def render_cashflow_tab(cfg: dict, d: DeskLocals) -> None:
                         st.caption("MC PoP chain table unavailable for this expiration.")
                 _desk_poc = gold_zone_components.get("POC") if isinstance(gold_zone_components, dict) else None
                 _desk_hvn = gold_zone_components.get("HVN") if isinstance(gold_zone_components, dict) else None
+
+                # ─── Vol Skew Card ───────────────────────────────────────────────────────────
+                # Compare 10%-OTM put IV vs 10%-OTM call IV.
+                # Positive skew  = put IV > call IV  → puts are expensive → sell CSPs
+                # Negative skew  = call IV > put IV  → calls are expensive → sell CCs
+                # This is the single most important structural edge-selector for premium sellers.
+                _skew_v, _skew_p_iv, _skew_c_iv = calc_vol_skew(price, calls, puts)
+                if _skew_v is not None:
+                    # Determine signal tier and colour
+                    if _skew_v > 10:
+                        _skew_color = "#f59e0b"   # amber — heavy put skew
+                        _skew_icon  = "🔥"
+                        _skew_label = "Heavy Put Skew"
+                        _skew_guide = (
+                            "Puts are <strong>heavily bid</strong> — smart money is paying up "
+                            "for downside protection. Put premium is very expensive right now. "
+                            "<strong>Prime edge: sell cash-secured puts</strong> and collect that "
+                            "rich premium while the crowd hedges."
+                        )
+                    elif _skew_v > 3:
+                        _skew_color = "#f59e0b"
+                        _skew_icon  = "⚡"
+                        _skew_label = "Elevated Put Skew"
+                        _skew_guide = (
+                            "Moderate put premium elevation — bearish hedging is active. "
+                            "<strong>Slight edge to selling cash-secured puts.</strong> "
+                            "Both strategies are viable; use Signal tab to confirm direction."
+                        )
+                    elif _skew_v < -10:
+                        _skew_color = "#06b6d4"   # cyan — heavy call skew
+                        _skew_icon  = "🚀"
+                        _skew_label = "Heavy Call Skew"
+                        _skew_guide = (
+                            "Calls are <strong>heavily bid</strong> — upside speculation is "
+                            "elevated. Call premium is very expensive right now. "
+                            "<strong>Prime edge: sell covered calls</strong> and collect that "
+                            "inflated call premium while the crowd chases."
+                        )
+                    elif _skew_v < -3:
+                        _skew_color = "#06b6d4"
+                        _skew_icon  = "📈"
+                        _skew_label = "Elevated Call Skew"
+                        _skew_guide = (
+                            "Calls are bid above average — bullish speculation is active. "
+                            "<strong>Slight edge to selling covered calls.</strong> "
+                            "Either strategy is viable; use Signal tab to confirm direction."
+                        )
+                    else:
+                        _skew_color = "#10b981"   # green — balanced
+                        _skew_icon  = "⚖️"
+                        _skew_label = "Balanced Skew"
+                        _skew_guide = (
+                            "Put and call premium are roughly equal — no institutional hedging "
+                            "bias detected. Both covered calls and cash-secured puts offer fair "
+                            "premium. Let your directional view (Signal tab) decide."
+                        )
+                    # Format display values
+                    _put_iv_txt  = f"{_skew_p_iv:.1f}%" if _skew_p_iv is not None else "—"
+                    _call_iv_txt = f"{_skew_c_iv:.1f}%" if _skew_c_iv is not None else "—"
+                    _skew_txt    = f"+{_skew_v:.1f}%" if _skew_v >= 0 else f"{_skew_v:.1f}%"
+                    st.markdown(
+                        f"""<div style="background:rgba(15,23,42,.75);border:1.5px solid {_skew_color};
+                                        border-radius:10px;padding:12px 16px;margin:6px 0 14px 0">
+                          <div style="font-size:.68rem;font-weight:700;color:{_skew_color};
+                                      letter-spacing:.09em;margin-bottom:8px">
+                            {_skew_icon} VOL SKEW SIGNAL — STRATEGY EDGE
+                          </div>
+                          <div style="display:flex;gap:28px;flex-wrap:wrap;margin-bottom:8px">
+                            <div>
+                              <div style="font-size:.7rem;color:#64748b;margin-bottom:2px">Put IV (10% OTM)</div>
+                              <div style="font-size:1.05rem;font-weight:700;color:#f87171">{_put_iv_txt}</div>
+                            </div>
+                            <div>
+                              <div style="font-size:.7rem;color:#64748b;margin-bottom:2px">Call IV (10% OTM)</div>
+                              <div style="font-size:1.05rem;font-weight:700;color:#34d399">{_call_iv_txt}</div>
+                            </div>
+                            <div>
+                              <div style="font-size:.7rem;color:#64748b;margin-bottom:2px">Skew (Put − Call)</div>
+                              <div style="font-size:1.15rem;font-weight:800;color:{_skew_color}">{_skew_txt}</div>
+                            </div>
+                            <div>
+                              <div style="font-size:.7rem;color:#64748b;margin-bottom:2px">Signal</div>
+                              <div style="font-size:.9rem;font-weight:700;color:{_skew_color}">{_skew_label}</div>
+                            </div>
+                          </div>
+                          <div style="font-size:.82rem;color:#cbd5e1;line-height:1.55">{_skew_guide}</div>
+                        </div>""",
+                        unsafe_allow_html=True,
+                    )
+
                 s1, s2 = st.columns(2)
                 with s1:
                     st.markdown("#### Covered Calls")
@@ -1318,6 +1511,111 @@ def render_cashflow_tab(cfg: dict, d: DeskLocals) -> None:
                                 on_select="ignore",
                                 selection_mode=[],
                             )
+
+                        # ─── CSP Payoff Diagram ───────────────────────────────────────────
+                        # Interactive Plotly chart showing the P&L profile of this specific
+                        # cash-secured put at expiry across a range of stock prices.
+                        #
+                        # Mechanics of a short CSP (sell 1 contract at strike K, premium P):
+                        #   • Stock ≥ K             → profit = +P  (put expires worthless)
+                        #   • Stock = K − P/100     → breakeven (profit = $0)
+                        #   • Stock < K             → P&L = P − (K − stock) × 100  (losing)
+                        #   • Collateral locked      = K × 100  (cash pledged for assignment)
+                        #
+                        # Visualizing this helps the trader immediately see how much buffer
+                        # they have before the trade starts losing money, and what the worst-
+                        # case loss is vs. the premium received.
+                        with st.expander("📉 CSP Payoff at Expiry", expanded=False):
+                            try:
+                                # `go` is imported at module top as `plotly.graph_objects`
+                                _pf_strike    = float(b["strike"])
+                                _pf_prem_100  = float(b["prem_100"])
+                                _pf_breakeven = _pf_strike - _pf_prem_100 / 100.0
+                                _pf_max_loss  = -(_pf_strike * 100.0 - _pf_prem_100)
+
+                                # Price axis: 60% to 130% of strike (captures full loss range)
+                                _pf_prices = np.linspace(_pf_strike * 0.60, _pf_strike * 1.30, 300)
+                                _pf_pnl = np.where(
+                                    _pf_prices >= _pf_strike,
+                                    _pf_prem_100,                                      # OTM: keep premium
+                                    _pf_prem_100 - (_pf_strike - _pf_prices) * 100.0, # ITM: lose on stock move
+                                )
+
+                                _pf_fig = go.Figure()
+                                # Green fill above zero (profit zone)
+                                _pf_fig.add_trace(go.Scatter(
+                                    x=_pf_prices.tolist() + _pf_prices[::-1].tolist(),
+                                    y=np.where(_pf_pnl >= 0, _pf_pnl, 0.0).tolist() + [0.0] * len(_pf_prices),
+                                    fill="toself",
+                                    fillcolor="rgba(16,185,129,0.12)",
+                                    line=dict(width=0),
+                                    showlegend=False,
+                                    hoverinfo="skip",
+                                ))
+                                # Red fill below zero (loss zone)
+                                _pf_fig.add_trace(go.Scatter(
+                                    x=_pf_prices.tolist() + _pf_prices[::-1].tolist(),
+                                    y=np.where(_pf_pnl < 0, _pf_pnl, 0.0).tolist() + [0.0] * len(_pf_prices),
+                                    fill="toself",
+                                    fillcolor="rgba(239,68,68,0.10)",
+                                    line=dict(width=0),
+                                    showlegend=False,
+                                    hoverinfo="skip",
+                                ))
+                                # Main P&L line
+                                _pf_fig.add_trace(go.Scatter(
+                                    x=_pf_prices,
+                                    y=_pf_pnl,
+                                    mode="lines",
+                                    line=dict(color="#06b6d4", width=2.5),
+                                    name="P&L",
+                                    hovertemplate="Stock: $%{x:.2f}<br>P&L: $%{y:,.0f}<extra></extra>",
+                                ))
+                                # Vertical markers: current price, strike, breakeven
+                                for _vx, _vc, _vl in [
+                                    (float(price), "#f59e0b", f"Spot ${price:.2f}"),
+                                    (_pf_strike, "#ef4444", f"Strike ${_pf_strike:.0f}"),
+                                    (_pf_breakeven, "#94a3b8", f"B/E ${_pf_breakeven:.2f}"),
+                                ]:
+                                    _pf_fig.add_vline(
+                                        x=_vx,
+                                        line_width=1.5, line_dash="dash", line_color=_vc,
+                                        annotation_text=_vl,
+                                        annotation_position="top",
+                                        annotation_font_size=10,
+                                        annotation_font_color=_vc,
+                                    )
+                                # Zero P&L baseline
+                                _pf_fig.add_hline(y=0, line_width=1, line_color="#475569")
+                                _pf_fig.update_layout(
+                                    height=250,
+                                    margin=dict(l=0, r=0, t=24, b=30),
+                                    paper_bgcolor="rgba(0,0,0,0)",
+                                    plot_bgcolor="rgba(0,0,0,0)",
+                                    showlegend=False,
+                                    xaxis=dict(
+                                        title="Stock price at expiry",
+                                        color="#64748b",
+                                        gridcolor="#1e293b",
+                                        tickprefix="$",
+                                    ),
+                                    yaxis=dict(
+                                        title="P&L ($)",
+                                        color="#64748b",
+                                        gridcolor="#1e293b",
+                                        tickprefix="$",
+                                    ),
+                                )
+                                st.plotly_chart(_pf_fig, use_container_width=True, config=_PLOTLY_UI_CONFIG)
+                                st.caption(
+                                    f"Max profit: **${_pf_prem_100:,.0f}** (stock stays above ${_pf_strike:.0f}) · "
+                                    f"Breakeven: **${_pf_breakeven:.2f}** · "
+                                    f"Max loss (stock → $0): **${abs(_pf_max_loss):,.0f}** "
+                                    f"(collateral locked: ${_pf_strike * 100:,.0f})"
+                                )
+                            except Exception as _pfe:
+                                log_warn("CSP payoff diagram", _pfe, ticker=str(ticker))
+                                st.caption("Payoff diagram unavailable.")
                     else:
                         st.info("No put strikes met pricing/liquidity checks in this snapshot. Try a nearby expiry or refresh.")
 
@@ -1806,11 +2104,24 @@ def render_intel_tab(d: DeskLocals) -> None:
     br = run_cc_sim_cached(ticker, bt_per, bt_otm, bt_hold, bt_iv)
     if not br.empty:
         tp = br["premium"].sum() * 1
-        m1, m2, m3, m4 = st.columns(4)
+        # ── CC SIM METRICS + MISSED UPSIDE ──────────────────────────────────
+        # "Missed Upside" shows the total gain capped by selling calls on
+        # winning trades — the hidden cost of covered calls on strong movers.
+        # If premium collected > missed upside the strategy added value;
+        # if missed_upside >> premium you sold the ceiling for too cheap.
+        _missed_up_total = float(br.get("missed_upside", pd.Series([0.0])).sum()) if "missed_upside" in br.columns else 0.0
+        _called_away_pct = float((br["outcome"] == "Called Away").mean() * 100) if "outcome" in br.columns else 0.0
+        m1, m2, m3, m4, m5 = st.columns(5)
         m1.metric("Trades", len(br))
         m2.metric("Win Rate", f"{(br['profit'] > 0).mean() * 100:.0f}%")
         m3.metric("Avg Ret", f"{br['ret_pct'].mean():.1f}%")
         m4.metric("Est Premium", f"${tp:,.0f}")
+        m5.metric(
+            "Missed Upside",
+            f"${_missed_up_total:,.0f}",
+            help=f"Total gain left on the table when stock was called away ({_called_away_pct:.0f}% of trades). "
+                 f"If this >> Est Premium, the OTM% was too tight for the underlying's volatility.",
+        )
         _cum = br["ret_pct"].cumsum().astype(float)
         if not mini_mode:
             fig_b = go.Figure()
@@ -2672,14 +2983,14 @@ def render_intel_tab(d: DeskLocals) -> None:
             ("Volatility Skew", "When put options cost much more than call options, big institutions are buying crash insurance. That means premiums are fat for you to sell. But it also means the smart money is nervous. Collect the cash but stay aware."),
             ("Expected Value", "EV is your long run profit per trade. Multiply win rate by gain, then subtract loss rate times loss. Positive EV means a real edge. Negative EV means pass."),
             ("Gann Square of 9", "These are natural support and resistance levels calculated from mathematical spirals. Stocks tend to stop or bounce at these prices. Use them to pick smarter strike prices for your options."),
-            ("Quant Edge Score", "Your overall score from 0 to 100. It checks five things: Trend, Momentum, Volume, Volatility, and Structure. Above 70 means prime conditions to sell options. Below 40 means wait for a better setup."),
+            ("Edge Score", "Your overall signal strength from 0 to 100. It checks five things: Trend, Momentum, Volume, Volatility, and Structure. Above 70 means prime conditions to sell options. Below 40 means wait for a better setup."),
             ("Shadow Move (purple band)", "The <strong>Shadow</strong> is built from days when volume Z-score says <strong>whale</strong> activity (Z &gt; 2). We sort those closes by price and capture the middle <strong>70% of whale volume</strong> — that price range is shaded <strong>purple</strong> on the chart. Compare it to the gold <strong>Expected Move (1σ)</strong> rails: if the shadow is <strong>narrower</strong> than IV implies, vol may be rich; if <strong>wider</strong>, a larger move than options price may be brewing."),
             ("Shadow breakout (regime calibration)", "When <strong>spot steps outside</strong> the purple Shadow band but <strong>still sits inside</strong> the IV <strong>1σ Expected Move</strong>, the chart tab shows a <strong>purple calibration banner</strong>. Whale prints already led price <strong>past</strong> the liquidity cluster while options vol has <strong>not</strong> fully caught up — watch for institutional-led <strong>trend continuation or reversal</strong> before retail reprices risk."),
             ("Predicted OpEx pin", "A <strong>pink dotted</strong> line estimates where price may <strong>pin</strong> into expiry: we find the strongest dealer <strong>gamma wall</strong> (|GEX| near spot when it matters), then blend toward spot using your desk <strong>Θ/Γ</strong> — high decay efficiency makes the wall more <strong>magnetic</strong>. It is a positioning heuristic, not a settlement promise."),
             ("News bias (Bayesian-style)", "Headlines are scored with a <strong>weighted lexicon</strong>: <strong>forward</strong> phrases (guidance, outlook, forecast) count more than <strong>trailing</strong> words (beat, miss). A line like <em>missed earnings but raised guidance</em> tilts <strong>bullish</strong> because forward guidance outweighs the backward print. Empty or neutral text scores zero."),
-            ("Sentinel Ledger & Edge realization", "Use <strong>Track Trade</strong> on the optimal CC or CSP row to log a leg for this session. The ledger shows model <strong>Δ</strong>, <strong>Θ/day</strong>, and unrealized P&amp;L vs entry premium. <strong>Edge realization %</strong> compares today’s <strong>Quant Edge</strong> to the score stored at track time for the <strong>active ticker</strong> (capped at 150%)."),
+            ("My Positions & Edge realization", "Use <strong>Track Trade</strong> on the optimal CC or CSP row to log a leg for this session. The ledger shows model <strong>Δ</strong>, <strong>Θ/day</strong>, and unrealized P&amp;L vs entry premium. <strong>Edge realization %</strong> compares today’s <strong>Edge Score</strong> to the score stored at track time for the <strong>active ticker</strong> (capped at 150%)."),
             ("Pin maturity — Golden zone", "For rows tracked with v22+ snapshots: inside <strong>14 DTE</strong>, if <strong>|Dist. to pin %|</strong> has <strong>shrunk</strong> versus entry and your desk <strong>Θ/day</strong> has <strong>grown</strong> versus entry, the ledger shows <strong>✨ Golden zone</strong> — the window where pin gravity and daily decay often peak together. Older rows without snapshots show a dash."),
-            ("Market Scanner", "The Scanner checks your entire watchlist in seconds. It calculates Confluence Points, Diamond Status, Gold Zone distance, and Quant Edge for every ticker. Sort by confluence to find the strongest setups across all your stocks. Tickers with 7+ confluence and a Blue Diamond are your best opportunities."),
+            ("Market Scanner", "The Scanner checks your entire watchlist in seconds. It calculates Confluence Points, Diamond Status, Gold Zone distance, and Edge Score for every ticker. Sort by confluence to find the strongest setups across all your stocks. Tickers with 7+ confluence and a Blue Diamond are your best opportunities."),
             ("Market Explosion Radar", "Use the <strong>Radar</strong> tab for a two-tier hunt: <strong>Tier 1</strong> quickly filters a broad universe for squeeze/trend/relative-strength setups, then <strong>Tier 2</strong> runs deep per-ticker diagnostics (pre-diamond + 10x + GEX). Highest-scoring hits are saved to <strong>radar_hits.json</strong> so you can review signal quality over time."),
             ("Header shortcuts (Strategies/Risk/Scanner/News/Guide)", "Top nav links jump to sections inside Streamlit tabs. If you click <strong>Strategies</strong>, <strong>Risk</strong>, <strong>Scanner</strong>, <strong>News</strong>, or <strong>Guide</strong>, the app first activates the correct tab and then scrolls to that anchor. <strong>Guide</strong> also opens the Quick Reference expander automatically."),
         ]
@@ -3066,6 +3377,62 @@ def render_ledger_tab(d: DeskLocals) -> None:
                             f"Most of your theta has been captured. Staying risks a sudden assignment or gap."
                         ),
                     })
+
+                # ── Check 50% / 80% profit capture thresholds ────────────────────
+                # Premium sellers' desk rule: don't ride a winner all the way to zero.
+                # At 50% profit the risk/reward tilts against you — you keep 50% of
+                # max gain but still carry 100% of the downside tail risk.
+                # At 80% capture it's a hard desk exit: the remaining edge is tiny
+                # relative to the gamma and event risk of holding.
+                #
+                # We compute current theoretical option price via Black-Scholes,
+                # which requires the CURRENT stock price for the row's ticker.
+                # For the active ticker we use the already-loaded `price`. For any
+                # other tickers in the ledger we skip the alert (no live price
+                # available without a fresh fetch).
+                if _prem_entry > 0 and _current_dte is not None:
+                    try:
+                        _iv_row = float(_row.get("iv", 30) or 30) / 100.0
+                        _opt_type = str(_row.get("option_type", "put")).lower().strip()
+                        if _opt_type not in ("call", "put"):
+                            _opt_type = "put"
+                        # Use active ticker's spot price; skip rows for other tickers
+                        # to avoid stale-data false alerts.
+                        if _tkr == str(ticker).upper() and price is not None and price > 0:
+                            _T_row = max(_current_dte, 1) / 365.0  # years to expiry
+                            _bs_now = float(bs_price(
+                                price, _strike, _T_row, float(rfr), _iv_row, _opt_type
+                            ))
+                            # Current mark per 100 shares (matches premium_100 units)
+                            _current_prem_100 = _bs_now * 100.0
+                            # Profit = entry premium collected − current mark to buy-back
+                            # Short option: profit when current price < entry price.
+                            _profit_pct = (
+                                (_prem_entry - _current_prem_100) / _prem_entry * 100.0
+                            ) if _prem_entry > 0 else 0.0
+
+                            if _profit_pct >= 80.0:
+                                _roll_alerts.append({
+                                    "level": "error",
+                                    "msg": (
+                                        f"💰 **{_tkr} {_leg} ${_strike:.0f} — {_profit_pct:.0f}% profit captured (≥80% hard exit)**  "
+                                        f"Entry: ${_prem_entry:,.0f} | Est. current mark: ${_current_prem_100:,.0f}.  "
+                                        f"Buy this position back NOW. The remaining edge ({100-_profit_pct:.0f}%) "
+                                        f"is tiny vs the tail risk of holding through a reversal or event."
+                                    ),
+                                })
+                            elif _profit_pct >= 50.0:
+                                _roll_alerts.append({
+                                    "level": "warning",
+                                    "msg": (
+                                        f"🎯 **{_tkr} {_leg} ${_strike:.0f} — {_profit_pct:.0f}% profit captured (≥50% close rule)**  "
+                                        f"Entry: ${_prem_entry:,.0f} | Est. current mark: ${_current_prem_100:,.0f}.  "
+                                        f"Consider closing. You've banked half the premium "
+                                        f"while still carrying full downside risk — desk rule says take it."
+                                    ),
+                                })
+                    except Exception as _pe:
+                        log_warn("profit capture alert computation", _pe, ticker=str(ticker))
 
             except Exception as _re:
                 log_warn("DTE roll alert computation", _re, ticker=str(ticker))
