@@ -936,13 +936,8 @@ def traders_note_markdown(
         hh = c.get("hurst_exponent")
         hs = f"{float(hh):.2f}" if hh is not None and np.isfinite(float(hh)) else "—"
         parts.append(
-            # Plain-English rewrite: FFD→"Stationary Signal", Hurst→"Trend Persistence"
-            # Model internals (Hurst H-value, FFD acronym) should never appear to end users.
-            "**Unicorn Setup ★ — All four institutional filters aligned:** "
-            "**Trend persistence is high** (momentum is self-reinforcing, not random), "
-            "**fundamentals gate is on** (strong free-cash-flow), and a **whale sweep is live** — "
-            f"the desk sees this confluence (persistence score **{hs}**) very rarely. "
-            "**Rare tape — not a forecast:** manage gap risk and headline risk before sizing up."
+            "**GOD TIER UNICORN — 10x sieve:** FFD shows **stationary memory** vs raw returns, Hurst is **trending**, **FCF / fundamental** gate is **on**, and a **whale sweep** is live — "
+            f"all four institutional filters aligned (Hurst **{hs}**). **Rare tape**; still not a forecast — manage **gap** and **headline** risk."
         )
     elif c.get("fundamental_fcf_strong") and isinstance(c.get("fundamental_sieve"), dict):
         fs = c.get("fundamental_sieve") or {}

@@ -482,15 +482,28 @@ def render_setup_tab(chart_mood: str, d: DeskLocals) -> None:
                         "**Stationary Signal** + **Market Regime** analysis, then fuses Monte Carlo PoP when chain data exists."
                     )
                     i1, i2, i3, i4 = st.columns(4)
-                    _rp = float(inst_breakdown.get("regime_prob_high_vol") or 0.0)
+                    _rp  = float(inst_breakdown.get("regime_prob_high_vol") or 0.0)
                     _ffd = float(inst_breakdown.get("ffd_last") or 0.0)
-                    _rc = float(inst_breakdown.get("retail_core") or retail_score)
+                    _rc  = float(inst_breakdown.get("retail_core") or retail_score)
                     _ins = float(inst_breakdown.get("inst_signal") or inst_score)
+                    # Extract per-state probabilities from the 3-state HMM
+                    _rp_calm   = float(inst_breakdown.get("regime_prob_calm")   or 0.0)
+                    _rp_medium = float(inst_breakdown.get("regime_prob_medium") or 0.0)
+                    _rp_stress = float(inst_breakdown.get("regime_prob_stress") or 0.0)
                     # ── DIAGNOSTIC LABELS — user-facing names, no model jargon ─────
                     # "Market Regime" replaces "HMM" (user doesn't need to know it's a HMM).
                     # "Stationary Signal" replaces "FFD residual" (FFD is an internal name).
                     # "Institutional Track" replaces "Inst. track" for clarity.
-                    i1.metric("Market Regime (high-vol)", f"{_rp * 100:.1f}%", help="How confident the desk is that we're in a choppy, high-volatility environment right now. Higher = stay cautious.")
+                    # We show the 3-state regime breakdown: Calm / Transitional / Stress.
+                    i1.metric(
+                        "Market Regime (stress)",
+                        f"{_rp * 100:.1f}%",
+                        help=(
+                            "Composite stress exposure from the 3-state Market Regime model: "
+                            f"Calm {_rp_calm*100:.0f}% · Transitional {_rp_medium*100:.0f}% · Stress {_rp_stress*100:.0f}%. "
+                            "Higher = model is in a choppy/high-vol state. The desk auto-reduces position size when this rises."
+                        ),
+                    )
                     i2.metric("Stationary Signal", f"{_ffd:.4f}", help="A momentum-memory signal derived by making prices stationary — it captures trend persistence without the drift noise of raw returns.")
                     i3.metric("Core Edge (5 pillars)", f"{_rc:.1f}", help="Average of Trend, Momentum, Volume, Volatility, and Structure scores — the base edge before institutional blending.")
                     i4.metric("Institutional Track", f"{_ins:.1f}", help="The blended institutional signal before it fuses with the core edge. Driven by Stationary Signal + Market Regime.")

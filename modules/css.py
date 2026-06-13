@@ -418,20 +418,15 @@ div[data-testid="stMetric"] [data-testid="stMetricDeltaInverseIcon-Down"]{
 .stTabs [aria-selected="true"]{background:var(--bg2)!important;color:var(--cyan)!important}
 .stButton>button{background:linear-gradient(135deg,var(--blue),var(--purple))!important;color:#fff!important;border:none!important;border-radius:8px!important;font-weight:600!important;padding:8px 24px!important}
 .stSelectbox>div>div,.stNumberInput>div>div>input,.stTextInput>div>div>input{background:var(--bg2)!important;border-color:var(--bdr)!important;color:var(--t1)!important}
-/* ── BENTO CARD BREATHING ROOM ──────────────────────────────────────────────
-   Increased margins from 8px to 16px so sections no longer feel like a
-   spreadsheet dump. Each card group gets visual separation from the next.
-   Art Director note: a single 16px gap reads as intentional white space;
-   8px reads as an accident. ─────────────────────────────────────────────── */
-.tc{background:var(--glass-bg);border:1px solid var(--glass-bdr);border-radius:12px;padding:14px 16px;margin-bottom:16px;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);box-shadow:inset 0 1px 1px rgba(255,255,255,.05),0 10px 26px rgba(2,6,23,.36)}
-.sb{background:linear-gradient(135deg,rgba(16,185,129,.12),rgba(5,150,105,.05));border-left:3px solid var(--green);border-radius:8px;padding:16px;margin:12px 0 16px 0}
-.sr{background:linear-gradient(135deg,rgba(239,68,68,.12),rgba(220,38,38,.05));border-left:3px solid var(--red);border-radius:8px;padding:16px;margin:12px 0 16px 0}
-.sn{background:linear-gradient(135deg,rgba(245,158,11,.12),rgba(217,119,6,.05));border-left:3px solid var(--amber);border-radius:8px;padding:16px;margin:12px 0 16px 0}
-.tip{background:var(--bg1);border:1px solid var(--bdr);border-radius:8px;padding:12px 16px;font-size:.85rem;color:var(--t2);margin:4px 0 16px 0}
+.tc{background:var(--glass-bg);border:1px solid var(--glass-bdr);border-radius:12px;padding:12px 14px;margin-bottom:8px;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);box-shadow:inset 0 1px 1px rgba(255,255,255,.05),0 10px 26px rgba(2,6,23,.36)}
+.sb{background:linear-gradient(135deg,rgba(16,185,129,.12),rgba(5,150,105,.05));border-left:3px solid var(--green);border-radius:8px;padding:16px;margin:8px 0}
+.sr{background:linear-gradient(135deg,rgba(239,68,68,.12),rgba(220,38,38,.05));border-left:3px solid var(--red);border-radius:8px;padding:16px;margin:8px 0}
+.sn{background:linear-gradient(135deg,rgba(245,158,11,.12),rgba(217,119,6,.05));border-left:3px solid var(--amber);border-radius:8px;padding:16px;margin:8px 0}
+.tip{background:var(--bg1);border:1px solid var(--bdr);border-radius:8px;padding:12px 16px;font-size:.85rem;color:var(--t2);margin:4px 0 12px 0}
 .mono{font-family:'JetBrains Mono',monospace!important}
-.ni{background:var(--bg2);border:1px solid var(--bdr);border-radius:8px;padding:12px 16px;margin:8px 0 12px 0;transition:background .15s}
+.ni{background:var(--bg2);border:1px solid var(--bdr);border-radius:8px;padding:12px 16px;margin:6px 0;transition:background .15s}
 .ni:hover{background:var(--bg3)}
-.ac{background:linear-gradient(135deg,rgba(6,182,212,.12),rgba(59,130,246,.08));border:1px solid rgba(6,182,212,.3);border-radius:10px;padding:14px 18px;margin:10px 0 16px 0}
+.ac{background:linear-gradient(135deg,rgba(6,182,212,.12),rgba(59,130,246,.08));border:1px solid rgba(6,182,212,.3);border-radius:10px;padding:14px 18px;margin:8px 0}
 .qe{background:linear-gradient(135deg,rgba(139,92,246,.15),rgba(59,130,246,.1));border:2px solid rgba(139,92,246,.4);border-radius:14px;padding:20px;margin:12px 0;text-align:center}
 .bluf{background:linear-gradient(135deg,rgba(16,185,129,.08),rgba(6,182,212,.08));border:2px solid rgba(16,185,129,.3);border-radius:16px;padding:24px 28px;margin:12px 0}
 .tl{display:inline-block;width:12px;height:12px;border-radius:50%;margin-right:8px}
@@ -666,12 +661,9 @@ div[data-testid="stMetricValue"], .mono, .glance-value, .ticker, .price-value{
 .earn-meta{margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.08);display:flex;gap:12px;flex-wrap:wrap}
 .earn-pill{padding:6px 10px;border-radius:999px;border:1px solid rgba(0,229,255,.35);background:rgba(2,6,23,.66);color:#cbd5e1;font-size:.82rem}
 @media(max-width:900px){.earnings-intel-grid{grid-template-columns:1fr}}
-/* Command bar + watchlist tape (main column HUD)
-   Gold gradient rule below the tape — single 3px line makes the layout feel
-   intentional and separates the tape from the HUD metrics beneath it. */
+/* Command bar + watchlist tape (main column HUD) */
 .cf-command-bar .stMarkdown p{margin:0!important}
 .cf-tape-title{font-size:.82rem!important;font-weight:700!important;color:#e2e8f0!important;margin:2px 0 6px 0!important}
-.cf-tape-separator{height:3px;background:linear-gradient(90deg,rgba(245,158,11,0),#f59e0b 30%,#fbbf24 70%,rgba(245,158,11,0));margin:8px 0 16px 0;border-radius:2px}
 .cf-tape-cell{text-align:center!important}
 /* Main-column segmented / radio pills (same intent as sidebar styling) */
 .main [data-baseweb="radio"]{
