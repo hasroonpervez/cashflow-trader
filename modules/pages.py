@@ -253,10 +253,16 @@ def build_context(
     # ── Parallel fetch ──
     with st.spinner(f"Loading {ticker}..."):
         with make_script_ctx_pool(5) as pool:
-            f_news = f_earn = None
+            # ── fetch_earnings_date is ALWAYS submitted, regardless of defer_headlines_earnings.
+            # It's a lightweight yfinance .calendar call that returns a single date — far cheaper
+            # than news scraping. Deferring it caused the Earnings Countdown to show a "deferred"
+            # placeholder even for imminent earnings, hiding a critical risk warning.
+            # fetch_news_headlines (multi-article scrape) remains deferred when the flag is set.
+            f_news = None
             if not defer_headlines_earnings:
                 f_news = submit_with_script_ctx(pool, fetch_news_headlines, ticker)
-                f_earn = submit_with_script_ctx(pool, fetch_earnings_date, ticker)
+            f_earn = submit_with_script_ctx(pool, fetch_earnings_date, ticker)
+
             f_df = f_wk = f_1mo = None
             if not use_panel_daily:
                 f_df = submit_with_script_ctx(pool, fetch_stock, ticker, "1y", "1d")
@@ -265,14 +271,15 @@ def build_context(
             elif not use_panel_wk:
                 f_wk = submit_with_script_ctx(pool, fetch_stock, ticker, "2y", "1wk")
 
+            # Earnings date: always resolved (see comment above)
+            ctx.earnings_date_raw = f_earn.result()
+            ctx.earnings_fetch_deferred = False
+
+            # News: deferred when defer_headlines_earnings=True (faster cold boot)
             if defer_headlines_earnings:
                 ctx.news = []
-                ctx.earnings_date_raw = None
-                ctx.earnings_fetch_deferred = True
             else:
-                ctx.news = f_news.result()
-                ctx.earnings_date_raw = f_earn.result()
-                ctx.earnings_fetch_deferred = False
+                ctx.news = f_news.result() if f_news is not None else []
 
             if use_panel_daily:
                 ctx.df = gs.active_daily_df
