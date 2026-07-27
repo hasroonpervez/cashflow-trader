@@ -89,17 +89,26 @@ _FORWARD_W, _TRAIL_W = 1.45, 0.82
 
 
 @st.cache_data(ttl=900, show_spinner=False)
-def _regime_detection_cached(close_tuple: tuple, n_regimes: int = 2) -> dict:
+def _regime_detection_cached(close_tuple: tuple, n_regimes: int = 3) -> dict:
     """HMM regime fit on a tuple-serialized close series (cacheable by st.cache_data).
 
     Called by QuantSentiment.regime_detection. Caching at 900 s avoids re-fitting a new
     HMM on every call inside detect_diamonds (which iterates over 320 bars) — previously
     that caused O(n_bars × HMM_fit) latency on every quant-mode scan.
+
+    3-STATE MODEL (default n_regimes=3):
+      State 0 → calm / low-vol (ideal for selling premium — theta decays cleanly)
+      State 1 → medium-vol / transitional (reduce size, remain selective)
+      State 2 → high-vol / stress (size down significantly; avoid new short premium)
+    States are sorted by mean vol ascending so state 0 is ALWAYS the calmest — this
+    gives deterministic labeling regardless of random initialization or ticker.
     """
     from .ta import TA
 
     if not HMM_AVAILABLE or not close_tuple:
-        return {0: 0.5, 1: 0.5}
+        # Equal-weight fallback for all n states
+        equal = round(1.0 / max(n_regimes, 1), 4)
+        return {i: equal for i in range(n_regimes)}
 
     close_s = pd.Series(close_tuple, dtype=float)
     if len(close_s) < 50:
@@ -128,6 +137,16 @@ def _regime_detection_cached(close_tuple: tuple, n_regimes: int = 2) -> dict:
     # random_state=42 seeds the K-means initializer; combined with the sort below
     # this gives deterministic state labeling across restarts and tickers.
     # "diag" covariance is faster than "full" and sufficient given the 2 features.
+    #
+    # WHY 3 STATES:
+    # A 2-state model (calm / high-vol) conflates "good uptrend + low vol" with
+    # "good uptrend + elevated vol" — two very different environments for options
+    # premium sellers. A 3-state model separates:
+    #   • State 0: calm trending — low vol, clear directional drift
+    #   • State 1: transitional — moderate vol, signal quality degrades
+    #   • State 2: stress — high vol, choppy, option sellers at elevated risk
+    # The separation allows regime-conditional Kelly to apply a graduated haircut
+    # rather than a binary switch.
     model = hmm.GaussianHMM(
         n_components=n_regimes,
         covariance_type="diag",
@@ -148,12 +167,12 @@ def _regime_detection_cached(close_tuple: tuple, n_regimes: int = 2) -> dict:
         # sorting, state 0 could be the high-vol regime on one ticker and the
         # calm regime on another. We fix this by sorting states ascending by
         # their mean volatility feature (column 1 in our [returns, vol] matrix).
-        # After sorting:
-        #   state 0 → calmest / low-vol (bullish-drift) regime
-        #   state 1 → elevated-vol / choppy regime
-        # All downstream consumers (options.py line 864, options.py line 370)
-        # rely on state 0 = calm and state 1 = high-vol, so this sort is
-        # REQUIRED for correct signal generation, not just cosmetic.
+        # After sorting (ascending vol):
+        #   state 0 → calmest / low-vol (ideal premium-selling environment)
+        #   state 1 → medium-vol / transitional (reduce size, stay selective)
+        #   state 2 → highest-vol / stress (size down significantly)
+        # All downstream consumers rely on state 0 = calmest, state N-1 = highest-vol,
+        # so this sort is REQUIRED for correct signal generation, not just cosmetic.
         if model.means_.shape[0] > 1:
             vol_col = 1  # column index of scaled volatility in the feature matrix
             state_order = np.argsort(model.means_[:, vol_col])  # ascending vol → state 0 = calm
@@ -164,19 +183,26 @@ def _regime_detection_cached(close_tuple: tuple, n_regimes: int = 2) -> dict:
         return {i: float(prob) for i, prob in enumerate(current_probs)}
     except Exception as e:
         log_warn("_regime_detection_cached HMM fit", e)
-        return {0: 0.5, 1: 0.5}
+        # Equal-weight fallback so downstream .get() calls receive sensible priors
+        equal = round(1.0 / max(n_regimes, 1), 4)
+        return {i: equal for i in range(n_regimes)}
     finally:
         hmm_log.setLevel(prev_lvl)
 
 
 class QuantSentiment:
     @staticmethod
-    def regime_detection(df, n_regimes=2):
+    def regime_detection(df, n_regimes=3):
         """HMM regime detection — delegates to the cached function to avoid re-fitting
         on every call (critical: was previously uncached and called inside a 320-bar loop).
-        Returns dict of state probabilities for the latest bar."""
+
+        Returns dict of state probabilities for the latest bar.
+        With 3 states (default): {0: calm_prob, 1: medium_vol_prob, 2: high_vol_prob}
+        States are sorted ascending by mean vol so state 0 is always the calmest.
+        """
         if df is None or len(df) < 50 or "Close" not in df.columns:
-            return {0: 0.5, 1: 0.5}
+            equal = round(1.0 / max(n_regimes, 1), 4)
+            return {i: equal for i in range(n_regimes)}
         # Serialize to tuple for st.cache_data hashability; tail 250 bars is sufficient
         close_tail = tuple(df["Close"].tail(250).dropna().tolist())
         return _regime_detection_cached(close_tail, n_regimes)
@@ -276,9 +302,17 @@ class Backtest:
             if exit_p >= strike:
                 profit = (strike - entry) + prem
                 out = "Called Away"
+                # ── MISSED UPSIDE (capped-gain cost) ──────────────────────────
+                # When the stock is called away, the seller misses ALL gains
+                # above the strike. This is the hidden cost of selling CCs on
+                # a strong runner. Displaying it helps the user decide whether
+                # the premium collected was worth the cap.
+                # missed_upside = 0 when stock ends below strike (good outcome).
+                missed_up = max(0.0, exit_p - strike)
             else:
                 profit = prem + (exit_p - entry)
                 out = "Expired OTM"
+                missed_up = 0.0  # no upside was capped; option expired worthless
             results.append(
                 {
                     "entry_date": df.index[i],
@@ -291,6 +325,8 @@ class Backtest:
                     "profit": profit,
                     "ret_pct": profit / entry * 100,
                     "outcome": out,
+                    # Missed upside: what you left on the table when called away
+                    "missed_upside": missed_up,
                 }
             )
             i += hold
