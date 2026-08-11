@@ -922,7 +922,10 @@ function cfFindMainDashTabButtons(){
     if(tabs.length<3)continue;
     var t0=(tabs[0].textContent||'').trim();
     var t1=(tabs[1].textContent||'').trim();
-    if(t0.indexOf('Setup')>=0&&t1.indexOf('Cashflow')>=0)return tabs;
+    /* Match current labels (Signals / Cash Flow) and legacy (Setup / Cashflow). */
+    var ok0=(t0.indexOf('Signals')>=0||t0.indexOf('Setup')>=0);
+    var ok1=(t1.indexOf('Cash')>=0||t1.indexOf('Cashflow')>=0);
+    if(ok0&&ok1)return tabs;
   }
   return null;
 }

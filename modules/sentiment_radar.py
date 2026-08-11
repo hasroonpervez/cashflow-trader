@@ -356,7 +356,7 @@ def render_sentiment_radar_tab(universe_csv: str) -> None:
     import pandas as pd
     from modules.data import fetch_stock
 
-    st.markdown('<div id="sentiment"></div>', unsafe_allow_html=True)
+    st.markdown('<div id="sentiment" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
     st.markdown("### 📡 Sentiment Radar")
     st.caption(
         "**One question, answered simply: who is retail waking up to — before the price moves?** "
