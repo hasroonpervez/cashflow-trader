@@ -10,6 +10,7 @@ import requests
 import pandas as pd
 import numpy as np
 import yfinance as yf
+import threading
 import time
 from curl_cffi import requests as curl_requests
 from datetime import datetime, timedelta
@@ -35,6 +36,81 @@ _RS_SPY_LOOKBACK_SESSIONS = 90
 _YAHOO_YF_TIMEOUT = 5.0
 _FETCH_INFO_RL_COOLDOWN_SEC = 120.0
 _FETCH_INFO_RL_UNTIL: dict[str, float] = {}
+# Audit (medium, rate-limits): ``fetch_info`` runs inside the global-bundle / scanner thread
+# pools, so the cooldown map is mutated concurrently. A bare dict read-modify-write across
+# threads can lose a cooldown stamp; one lock keeps set/clear/expiry atomic.
+_FETCH_INFO_RL_LOCK = threading.Lock()
+
+# --- Price-adjustment basis -------------------------------------------------
+# Yahoo ``history()`` / ``download(auto_adjust=True)`` return split- AND dividend-adjusted
+# prices. Alpha Vantage's free ``TIME_SERIES_DAILY`` returns raw as-traded prices. Mixing
+# the two silently injects a fake gap at any split — fatal on the small-cap / reverse-split
+# names this app scans. Every frame is tagged so consumers can check before comparing.
+PRICE_BASIS_ADJUSTED = "adjusted"
+PRICE_BASIS_UNADJUSTED = "unadjusted"
+
+
+def price_basis(df: Optional[pd.DataFrame]) -> Optional[str]:
+    """Adjustment basis of a price frame, or ``None`` when untagged/absent."""
+    if df is None or not hasattr(df, "attrs"):
+        return None
+    basis = df.attrs.get("price_basis")
+    return basis if basis in (PRICE_BASIS_ADJUSTED, PRICE_BASIS_UNADJUSTED) else None
+
+
+def bases_comparable(*frames: Optional[pd.DataFrame]) -> bool:
+    """True when every tagged frame shares one basis (relative-strength safety check).
+
+    Untagged frames are ignored rather than assumed — absence of a tag is not evidence.
+    Two frames with *different* known bases are never comparable.
+    """
+    seen = {b for b in (price_basis(f) for f in frames) if b is not None}
+    return len(seen) <= 1
+
+
+# --- Session completeness ---------------------------------------------------
+# Audit #16: every "last bar" statistic (volume Z-score, RS, pace) implicitly assumes the
+# final row is a *finished* session. Intraday, Yahoo hands back a partial bar for today, so at
+# 10:30 ET (~25% of the session elapsed) a stock trading at 2x normal pace has printed ~0.5x a
+# full day and scores strongly *negative*. Dropping the in-progress bar makes such a statistic
+# mean the same thing before and after 16:00 ET instead of silently changing definition.
+_ET_TZ = "America/New_York"
+_NYSE_CLOSE_HOUR_ET = 16  # 16:00 ET regular-session close
+
+
+def _now_et(now=None) -> pd.Timestamp:
+    """Current Eastern time. ``now`` naive is read as ET, tz-aware is converted (test seam)."""
+    t = pd.Timestamp.now(tz=_ET_TZ) if now is None else pd.Timestamp(now)
+    return t.tz_localize(_ET_TZ) if t.tzinfo is None else t.tz_convert(_ET_TZ)
+
+
+def last_bar_is_partial(index, now=None) -> bool:
+    """True when the final index entry is *today's* ET session and 16:00 ET has not passed.
+
+    Weekends and holidays need no special case: on those days the final bar carries an earlier
+    date, so the date comparison already reports the session as complete.
+    """
+    try:
+        if index is None or len(index) == 0:
+            return False
+        last = pd.Timestamp(index[-1])
+    except (TypeError, ValueError, IndexError, KeyError):
+        return False
+    if last is pd.NaT or pd.isna(last):
+        return False
+    if last.tzinfo is not None:
+        last = last.tz_convert(_ET_TZ).tz_localize(None)
+    now_et = _now_et(now)
+    if last.date() != now_et.date():
+        return False
+    return now_et.hour < _NYSE_CLOSE_HOUR_ET
+
+
+def drop_partial_last_bar(obj, now=None):
+    """``obj`` (Series or DataFrame) with the in-progress final session bar removed."""
+    if obj is None or len(obj) == 0:
+        return obj
+    return obj.iloc[:-1] if last_bar_is_partial(obj.index, now=now) else obj
 
 
 class _ForcedTimeoutSession(curl_requests.Session):
@@ -431,7 +507,18 @@ def _alphavantage_efficiency_yoy(sym: str) -> Optional[tuple]:
 
 
 def _fetch_stock_alphavantage(sym: str, period: str, interval: str) -> Optional[pd.DataFrame]:
-    """Fallback daily bars when Yahoo throttles; needs ``ALPHAVANTAGE_API_KEY`` (env or Streamlit secrets)."""
+    """Fallback daily bars when Yahoo throttles; needs ``ALPHAVANTAGE_API_KEY`` (env or Streamlit secrets).
+
+    Yahoo's ``history()`` returns **auto-adjusted** prices (splits *and* dividends applied
+    retroactively). To keep the two sources comparable this prefers Alpha Vantage's
+    ``TIME_SERIES_DAILY_ADJUSTED`` and back-adjusts OHLC by ``adj_close / close``.
+
+    ``TIME_SERIES_DAILY_ADJUSTED`` is a premium AV endpoint; on the free tier it errors.
+    We then fall back to raw ``TIME_SERIES_DAILY`` but tag the frame
+    ``attrs["price_basis"] = "unadjusted"`` so downstream consumers can refuse to mix it
+    with adjusted series (a reverse split otherwise injects a fake gap into EMA / momentum
+    / RS-vs-SPY math). See :func:`price_basis` and :func:`bases_comparable`.
+    """
     if interval != "1d":
         return None
     key = _alphavantage_api_key()
@@ -441,43 +528,75 @@ def _fetch_stock_alphavantage(sym: str, period: str, interval: str) -> Optional[
     if not av_sym:
         return None
     output = "compact" if period in ("1d", "5d", "1mo", "3mo", "6mo") else "full"
-    try:
-        r = requests.get(
-            "https://www.alphavantage.co/query",
-            params={
-                "function": "TIME_SERIES_DAILY",
-                "symbol": av_sym,
-                "outputsize": output,
-                "apikey": key,
-            },
-            timeout=15,
-        )
-        r.raise_for_status()
-        payload = r.json()
-    except Exception as _e:
-        log_warn("_fetch_stock_alphavantage", _e, ticker=str(sym))
+
+    def _query(function: str) -> Optional[dict]:
+        try:
+            r = requests.get(
+                "https://www.alphavantage.co/query",
+                params={
+                    "function": function,
+                    "symbol": av_sym,
+                    "outputsize": output,
+                    "apikey": key,
+                },
+                timeout=15,
+            )
+            r.raise_for_status()
+            payload = r.json()
+        except Exception as _e:
+            log_warn("_fetch_stock_alphavantage", _e, ticker=str(sym), function=function)
+            return None
+        if not isinstance(payload, dict) or "Time Series (Daily)" not in payload:
+            return None
+        ts = payload["Time Series (Daily)"]
+        return ts if isinstance(ts, dict) and ts else None
+
+    basis = PRICE_BASIS_ADJUSTED
+    ts = _query("TIME_SERIES_DAILY_ADJUSTED")
+    if ts is None:
+        # Premium-only on the free tier — fall back to raw bars, but never silently.
+        ts = _query("TIME_SERIES_DAILY")
+        basis = PRICE_BASIS_UNADJUSTED
+        if ts is not None:
+            log_warn(
+                "_fetch_stock_alphavantage adjusted unavailable; serving UNADJUSTED bars",
+                None,
+                ticker=str(sym),
+            )
+    if ts is None:
         return None
-    if not isinstance(payload, dict) or "Time Series (Daily)" not in payload:
-        return None
-    ts = payload["Time Series (Daily)"]
-    if not isinstance(ts, dict) or not ts:
-        return None
+
     idx_list: list = []
     rows: list = []
     for date_s in sorted(ts.keys()):
         bar = ts[date_s]
         try:
+            o = float(bar["1. open"])
+            h = float(bar["2. high"])
+            lo = float(bar["3. low"])
+            c = float(bar["4. close"])
+            # Back-adjust OHLC by the same factor AV applies to the close, so the whole
+            # bar stays internally consistent (high >= close >= low still holds).
+            if basis == PRICE_BASIS_ADJUSTED:
+                adj_c = float(bar["5. adjusted close"])
+                ratio = (adj_c / c) if c else 1.0
+                if not np.isfinite(ratio) or ratio <= 0:
+                    ratio = 1.0
+                o, h, lo, c = o * ratio, h * ratio, lo * ratio, adj_c
+                vol_key = "6. volume"
+            else:
+                vol_key = "5. volume"
             rows.append(
                 {
-                    "Open": float(bar["1. open"]),
-                    "High": float(bar["2. high"]),
-                    "Low": float(bar["3. low"]),
-                    "Close": float(bar["4. close"]),
-                    "Volume": float(bar.get("5. volume", 0) or 0),
+                    "Open": o,
+                    "High": h,
+                    "Low": lo,
+                    "Close": c,
+                    "Volume": float(bar.get(vol_key, 0) or 0),
                 }
             )
             idx_list.append(date_s)
-        except (KeyError, TypeError, ValueError):
+        except (KeyError, TypeError, ValueError, ZeroDivisionError):
             continue
     if not rows:
         return None
@@ -499,7 +618,12 @@ def _fetch_stock_alphavantage(sym: str, period: str, interval: str) -> Optional[
     }
     n = int(tail_map.get(period, 270))
     df = df.tail(max(60, min(n, len(df))))
-    return df if not df.empty else None
+    if df.empty:
+        return None
+    # Tag AFTER slicing — attrs must survive onto the frame the caller actually receives.
+    df.attrs["price_basis"] = basis
+    df.attrs["source"] = "alphavantage"
+    return df
 
 
 @st.cache_data(ttl=300)
@@ -534,6 +658,9 @@ def fetch_stock(ticker, period="1y", interval="1d"):
             except Exception as _e:
                 log_warn("fetch_stock datetime index normalize", _e, ticker=str(sym))
                 return None
+            # yfinance Ticker.history() defaults to auto_adjust=True.
+            df.attrs["price_basis"] = PRICE_BASIS_ADJUSTED
+            df.attrs["source"] = "yahoo"
             return df
 
         out = retry_fetch(_fetch)
@@ -556,10 +683,31 @@ _MACRO_TICKER_TO_LABEL = {
 }
 
 
+def _macro_unavailable(label: str) -> dict:
+    """Placeholder for a macro series we could not fetch.
+
+    ``price=None`` (never a plausible-looking number) so the UI renders "—" and every
+    VIX-conditional branch — all of which guard with ``if vix_val and ...`` — correctly
+    treats the value as absent. Previously this returned VIX 20.0 / 10Y 4.5%, which are
+    indistinguishable from live data and sat exactly on the VIX_ELEVATED boundary.
+    """
+    return {"price": None, "chg": None, "unavailable": True, "label": label}
+
+
+def macro_unavailable(macro: Optional[dict], label: str) -> bool:
+    """True when ``label`` is missing or explicitly flagged unavailable."""
+    if not isinstance(macro, dict):
+        return True
+    entry = macro.get(label)
+    if not isinstance(entry, dict):
+        return True
+    return bool(entry.get("unavailable")) or entry.get("price") is None
+
+
 def _macro_defaults_tuple() -> tuple[dict, Optional[pd.DataFrame]]:
     d = {
-        "10Y Yield": {"price": 4.5, "chg": 0.0},
-        "VIX": {"price": 20.0, "chg": 0.0},
+        "10Y Yield": _macro_unavailable("10Y Yield"),
+        "VIX": _macro_unavailable("VIX"),
     }
     return d, None
 
@@ -630,15 +778,64 @@ def rs_spy_ratio_map_from_close_matrix(
     return out
 
 
+def _close_matrix_with_spy(
+    close: Optional[pd.DataFrame], spy_closes: Optional[pd.Series]
+) -> Optional[pd.DataFrame]:
+    """``close`` guaranteed to carry a date-aligned ``SPY`` column, or ``None`` if unavailable.
+
+    Audit (medium, RS): the scanner's benchmark may arrive as a *separately fetched* SPY series
+    with its own TTL and its own index (tz-aware vs naive). Splicing it in on a normalized,
+    tz-naive date index is what lets ``rs_spy_ratio_map_from_close_matrix`` inner-join the two
+    instead of comparing raw positional tails from two different calendars.
+    """
+    if close is None or getattr(close, "empty", True):
+        return None
+    if "SPY" in close.columns:
+        return close
+    if spy_closes is None or len(spy_closes) == 0:
+        return None
+
+    def _naive_dates(idx):
+        di = pd.DatetimeIndex(pd.to_datetime(idx))
+        if di.tz is not None:
+            di = di.tz_convert("UTC").tz_localize(None)
+        return di.normalize()
+
+    try:
+        out = close.copy()
+        out.index = _naive_dates(out.index)
+        spy = pd.to_numeric(pd.Series(spy_closes), errors="coerce").dropna()
+        spy.index = _naive_dates(spy.index)
+        spy = spy[~spy.index.duplicated(keep="last")]
+        out = out[~out.index.duplicated(keep="last")]
+        out["SPY"] = spy.reindex(out.index)
+    except (TypeError, ValueError, KeyError):
+        return None
+    return out
+
+
 def _tape_pcts_from_close_matrix(close: pd.DataFrame, syms: tuple) -> dict:
+    """Last-session % change per symbol; ``None`` when the symbol has no bar on the panel's newest date.
+
+    Audit (medium, tape): the old ``.dropna()`` ran *before* the last-two-bar slice, so a symbol
+    missing from the newest date (halt, late print, delisting) silently reported the **prior**
+    session's move as today's. ``None`` is the established no-data signal in this layer.
+    """
     out = {s: None for s in syms}
+    if close is None or getattr(close, "empty", True):
+        return out
     for sym in syms:
         if sym not in close.columns:
             continue
-        c = pd.to_numeric(close[sym], errors="coerce").dropna()
+        col = pd.to_numeric(close[sym], errors="coerce")
+        if len(col) == 0 or pd.isna(col.iloc[-1]):
+            continue
+        c = col.dropna()
+        if len(c) < 2:
+            continue
         c_last = safe_float(safe_last(c), 0.0)
         c_prev = safe_float(safe_last(c.iloc[:-1]), 0.0)
-        if len(c) >= 2 and c_prev != 0:
+        if c_prev != 0:
             out[sym] = float((c_last / c_prev - 1.0) * 100.0)
     return out
 
@@ -664,9 +861,9 @@ def _macro_bundle_from_close_matrix(close: pd.DataFrame) -> tuple[dict, Optional
         if len(vx) >= 1:
             vix_hist = pd.DataFrame({"Close": vx.astype(float)})
     if "10Y Yield" not in data:
-        data["10Y Yield"] = {"price": 4.5, "chg": 0.0}
+        data["10Y Yield"] = _macro_unavailable("10Y Yield")
     if "VIX" not in data:
-        data["VIX"] = {"price": 20.0, "chg": 0.0}
+        data["VIX"] = _macro_unavailable("VIX")
     return data, vix_hist
 
 
@@ -868,11 +1065,14 @@ def radar_broad_filter(universe_csv: str, spy_closes: pd.Series = None) -> list[
         if close is None:
             return []
 
-        spy_s = None
-        if spy_closes is not None and len(spy_closes) >= 90:
-            spy_s = spy_closes
-        elif "SPY" in close.columns:
-            spy_s = pd.to_numeric(close["SPY"], errors="coerce").dropna()
+        # Audit (medium, RS): the old inline block took ``.tail(90)`` of the stock and of a
+        # separately-fetched SPY independently — two unaligned windows whose endpoints need not
+        # even be the same dates. Reuse the inner-joined implementation instead of duplicating it.
+        rs_map = rs_spy_ratio_map_from_close_matrix(
+            _close_matrix_with_spy(close, spy_closes),
+            tuple(syms),
+            sessions=_RS_SPY_LOOKBACK_SESSIONS,
+        )
 
         results = []
         for sym in syms:
@@ -898,19 +1098,7 @@ def radar_broad_filter(universe_csv: str, spy_closes: pd.Series = None) -> list[
             except Exception:
                 H = 0.5
 
-            rs_ratio = None
-            if spy_s is not None and len(spy_s) >= 90 and len(c) >= 90:
-                try:
-                    stk_f = safe_float(safe_last(c.tail(90)), 0) / max(
-                        1e-9, safe_float(c.tail(90).iloc[0], 0)
-                    )
-                    spy_f = safe_float(safe_last(spy_s.tail(90)), 0) / max(
-                        1e-9, safe_float(spy_s.tail(90).iloc[0], 0)
-                    )
-                    if spy_f > 0:
-                        rs_ratio = stk_f / spy_f
-                except Exception:
-                    pass
+            rs_ratio = rs_map.get(sym)
 
             vol_z = 0.0
             try:
@@ -925,6 +1113,10 @@ def radar_broad_filter(universe_csv: str, spy_closes: pd.Series = None) -> list[
                     vol_s = pd.to_numeric(
                         raw.get("Volume", pd.Series(dtype=float)), errors="coerce"
                     ).dropna()
+                # Audit #16: today's bar is still forming before 16:00 ET, so comparing it with
+                # 20 *completed* sessions understates a genuine accumulation day (and made the
+                # 15-point vol_score below unreachable intraday). Score the last closed session.
+                vol_s = drop_partial_last_bar(vol_s)
                 if len(vol_s) >= 21:
                     v_mean = vol_s.iloc[-21:-1].mean()
                     v_std = vol_s.iloc[-21:-1].std()
@@ -1050,25 +1242,64 @@ def fetch_intraday_series(symbol, period="5d", interval="1h"):
         log_warn("fetch_intraday_series", _e, ticker=str(symbol))
         return pd.Series(dtype=float)
 
-@st.cache_data(ttl=300)
-def fetch_info(ticker):
-    """Yahoo quote summary fields, with Alpha Vantage gap-fill for cash/EV/EBITDA; never raises."""
-    try:
-        sym = str(ticker).upper().strip()
-        if not sym:
-            return {}
-        now_ts = float(time.time())
-        cool_until = float(_FETCH_INFO_RL_UNTIL.get(sym, 0.0) or 0.0)
-        if now_ts < cool_until:
-            return {}
-        raw_info = _yfinance_ticker(sym).info
-        info = dict(raw_info) if isinstance(raw_info, dict) else {}
-        _merge_alphavantage_fundamentals_into_info(sym, info)
+class _TransientFetchError(Exception):
+    """A *transient* upstream failure raised from inside an ``st.cache_data`` body.
+
+    Streamlit caches return values but never exceptions, so raising is precisely what keeps a
+    momentary 429 out of the 300s / 3600s caches (audit, medium: "transient rate-limits cached
+    as durable answers"). Never let this escape a public function.
+    """
+
+
+def _fetch_info_cooling_down(sym: str, now_ts: Optional[float] = None) -> bool:
+    """True while ``sym`` is inside its post-429 cooldown (thread-safe; expired stamps dropped)."""
+    t = float(time.time()) if now_ts is None else float(now_ts)
+    with _FETCH_INFO_RL_LOCK:
+        until = float(_FETCH_INFO_RL_UNTIL.get(sym, 0.0) or 0.0)
+        if until <= t:
+            _FETCH_INFO_RL_UNTIL.pop(sym, None)
+            return False
+    return True
+
+
+def _mark_fetch_info_rate_limited(sym: str, now_ts: Optional[float] = None) -> None:
+    t = float(time.time()) if now_ts is None else float(now_ts)
+    with _FETCH_INFO_RL_LOCK:
+        _FETCH_INFO_RL_UNTIL[sym] = t + float(_FETCH_INFO_RL_COOLDOWN_SEC)
+
+
+def _clear_fetch_info_rate_limit(sym: str) -> None:
+    with _FETCH_INFO_RL_LOCK:
         _FETCH_INFO_RL_UNTIL.pop(sym, None)
-        return info
+
+
+@st.cache_data(ttl=300)
+def _fetch_info_cached(sym: str) -> dict:
+    """Cached Yahoo quote summary + Alpha Vantage gap-fill. Raises on failure **by design**."""
+    raw_info = _yfinance_ticker(sym).info
+    info = dict(raw_info) if isinstance(raw_info, dict) else {}
+    _merge_alphavantage_fundamentals_into_info(sym, info)
+    return info
+
+
+def fetch_info(ticker):
+    """Yahoo quote summary fields, with Alpha Vantage gap-fill for cash/EV/EBITDA; never raises.
+
+    Audit (medium, rate-limits): the cooldown check used to live *inside* the 300s-TTL cached
+    body, where it only ever ran on a cache miss — provably inert for the whole TTL. It now
+    runs outside the cache, and the fetch itself raises rather than returning ``{}`` so a
+    transient 429 is not stored as a durable answer for the next five minutes.
+    """
+    sym = str(ticker).upper().strip()
+    if not sym:
+        return {}
+    if _fetch_info_cooling_down(sym):
+        return {}
+    try:
+        info = _fetch_info_cached(sym)
     except Exception as _e:
         if _is_yahoo_rate_limit_error(_e):
-            _FETCH_INFO_RL_UNTIL[sym] = float(time.time()) + float(_FETCH_INFO_RL_COOLDOWN_SEC)
+            _mark_fetch_info_rate_limited(sym)
             log_warn(
                 f"fetch_info rate-limited; cooling down {int(_FETCH_INFO_RL_COOLDOWN_SEC)}s",
                 _e,
@@ -1077,49 +1308,96 @@ def fetch_info(ticker):
         else:
             log_warn("fetch_info", _e, ticker=str(ticker))
         return {}
+    _clear_fetch_info_rate_limit(sym)
+    return info
+
+
+# Preserve the ``fetch_info.clear()`` cache-reset API used by the refresh buttons.
+fetch_info.clear = _fetch_info_cached.clear
+
+
+def fundamental_sieve_from_inputs(fcf, ev, ebitda_yoy, asset_yoy) -> Optional[dict]:
+    """Pure sieve math: FCF yield vs EV plus EBITDA/asset efficiency. ``None`` when inputs are missing.
+
+    Audit #25 — the efficiency ratio divides two **signed** YoY terms, so EBITDA −50% over
+    assets −10% used to read **+5.0**, indistinguishable from genuine growth: "EBITDA collapsing
+    faster than the balance sheet shrinks" scored identically to "EBITDA growing faster than
+    assets", and a melting ice cube clears the >10% FCF-yield leg easily on a small EV. The
+    ratio only carries its documented growth meaning when *both* legs are positive; otherwise it
+    is undefined (``None``, never a fabricated number) and the 10x flag is off. Genuine
+    deleveraging with rising EBITDA is deliberately excluded rather than decided by a sign.
+    """
+    f = _coerce_finite_float(fcf)
+    e = _coerce_finite_float(ev)
+    if f is None or e is None or e <= 0:
+        return None
+    fcf_yield = float(f / e)
+    if not np.isfinite(fcf_yield):
+        return None
+
+    eb = _coerce_finite_float(ebitda_yoy)
+    ay = _coerce_finite_float(asset_yoy)
+    if eb is None or ay is None:
+        return None
+
+    efficiency_ratio: Optional[float] = None
+    if eb > 0 and ay > 0:
+        ratio = float(eb / ay)
+        if np.isfinite(ratio):
+            efficiency_ratio = ratio
+
+    ten_x = bool(
+        fcf_yield > 0.10 and efficiency_ratio is not None and efficiency_ratio > 1.0
+    )
+    return {
+        "fcf_yield": fcf_yield,
+        "fcf_yield_pct": round(fcf_yield * 100.0, 2),
+        "efficiency_ratio": efficiency_ratio,
+        "ebitda_yoy": float(eb),
+        "asset_yoy": float(ay),
+        "ten_x_candidate": ten_x,
+    }
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
+def _evaluate_fundamental_sieve_cached(sym: str) -> Optional[dict]:
+    """Cached sieve. Raises ``_TransientFetchError`` rather than caching a rate-limited blank."""
+    info = fetch_info(sym)
+    if not info:
+        # Audit (medium, rate-limits): one 429 used to blank this symbol's fundamentals for a
+        # full hour through the ttl=3600 cache. A rate-limited miss is transient, not an answer.
+        if _fetch_info_cooling_down(sym):
+            raise _TransientFetchError(f"{sym}: quote summary rate-limited")
+        return None
+    yoy = _alphavantage_efficiency_yoy(sym)
+    if yoy is None:
+        return None
+    ebitda_yoy, asset_yoy = yoy
+    return fundamental_sieve_from_inputs(
+        info.get("freeCashflow"), info.get("enterpriseValue"), ebitda_yoy, asset_yoy
+    )
+
+
 def evaluate_fundamental_sieve(ticker: str) -> Optional[dict]:
     """FCF yield vs EV and EBITDA/asset efficiency; ``None`` if inputs missing (no synthetic zeros).
 
-    **10x guard:** ``ten_x_candidate`` when FCF yield > 10% and efficiency ratio (EBITDA YoY / asset YoY) > 1.
+    **10x guard:** ``ten_x_candidate`` when FCF yield > 10% and efficiency ratio
+    (EBITDA YoY / asset YoY, both legs growing) > 1.
     """
     sym = str(ticker).upper().strip()
     if not sym:
         return None
     try:
-        info = fetch_info(sym)
-        if not info:
-            info = {}
-        fcf = _coerce_finite_float(info.get("freeCashflow"))
-        ev = _coerce_finite_float(info.get("enterpriseValue"))
-        if fcf is None or ev is None or ev <= 0:
-            return None
-        fcf_yield = float(fcf / ev)
-        if not np.isfinite(fcf_yield):
-            return None
-
-        yoy = _alphavantage_efficiency_yoy(sym)
-        if yoy is None:
-            return None
-        ebitda_yoy, asset_yoy = yoy
-        efficiency_ratio = float(ebitda_yoy / asset_yoy)
-        if not np.isfinite(efficiency_ratio):
-            return None
-
-        ten_x = bool(fcf_yield > 0.10 and efficiency_ratio > 1.0)
-        return {
-            "fcf_yield": fcf_yield,
-            "fcf_yield_pct": round(fcf_yield * 100.0, 2),
-            "efficiency_ratio": efficiency_ratio,
-            "ebitda_yoy": ebitda_yoy,
-            "asset_yoy": asset_yoy,
-            "ten_x_candidate": ten_x,
-        }
+        return _evaluate_fundamental_sieve_cached(sym)
+    except _TransientFetchError as _e:
+        log_warn("evaluate_fundamental_sieve transient (not cached)", _e, ticker=str(ticker))
+        return None
     except Exception as _e:
         log_warn("evaluate_fundamental_sieve", _e, ticker=str(ticker))
         return None
+
+
+evaluate_fundamental_sieve.clear = _evaluate_fundamental_sieve_cached.clear
 
 @st.cache_data(ttl=90)
 def list_option_expiration_dates(ticker: str) -> tuple:
@@ -1283,57 +1561,85 @@ def fetch_news_headlines(symbol: str):
         return []
 
 
+def post_earnings_vol_crush_pct_from_dates(
+    df: pd.DataFrame, earnings_dates, n_cycles: int = 4, now=None
+) -> Optional[float]:
+    """Pure: mean % change in short-window **realized** vol after vs before past earnings.
+
+    Audit #17 — yfinance builds ``earnings_dates`` with a **tz-aware** index in both of its
+    construction branches, while the old code compared it against a naive
+    ``pd.Timestamp.now().normalize()``. That raised ``TypeError: Cannot compare tz-naive and
+    tz-aware timestamps``, the caller's blanket ``except`` swallowed it, and the function
+    returned ``None`` on every symbol forever. Both sides now go through the module's own
+    ``_earnings_ts_normalize``, including the frame index used for ``searchsorted``.
+
+    Deliberately no blanket ``except`` here: a programming error must fail loudly in tests
+    rather than be indistinguishable from "Yahoo had no data".
+    """
+    if df is None or df.empty or "Close" not in df.columns or len(df) < 80:
+        return None
+    if earnings_dates is None or len(earnings_dates) == 0:
+        return None
+
+    now_ts = _earnings_ts_normalize(pd.Timestamp.now() if now is None else now)
+    past = sorted(
+        {t for t in (_earnings_ts_normalize(x) for x in earnings_dates) if t < now_ts},
+        reverse=True,
+    )
+    if not past:
+        return None
+
+    idx = pd.DatetimeIndex([_earnings_ts_normalize(x) for x in pd.to_datetime(df.index)])
+    crushes = []
+    for edate in past:
+        if len(crushes) >= n_cycles:
+            break
+        pos = int(idx.searchsorted(edate))
+        if pos >= len(df):
+            pos = len(df) - 1
+        while pos > 0 and idx[pos] > edate:
+            pos -= 1
+        if pos < 15 or pos + 12 >= len(df):
+            continue
+        pre = df["Close"].iloc[pos - 12 : pos - 1]
+        post = df["Close"].iloc[pos + 1 : pos + 12]
+        if len(pre) < 5 or len(post) < 5:
+            continue
+        r_pre = pre.astype(float).pct_change().dropna()
+        r_post = post.astype(float).pct_change().dropna()
+        if r_pre.empty or r_post.empty:
+            continue
+        v_pre = float(r_pre.std() * np.sqrt(252) * 100.0)
+        v_post = float(r_post.std() * np.sqrt(252) * 100.0)
+        if not np.isfinite(v_pre) or v_pre <= 1e-9:
+            continue
+        crushes.append((v_post - v_pre) / v_pre * 100.0)
+    if not crushes:
+        return None
+    return float(np.mean(crushes))
+
+
 def avg_post_earnings_vol_crush_proxy_pct(df: pd.DataFrame, symbol: str, n_cycles: int = 4):
     """
     Average % change in short-window realized vol after vs before past earnings (proxy for IV crush).
     Uses up to ``n_cycles`` prior earnings dates from Yahoo ``earnings_dates``.
     """
+    sym = str(symbol).upper().strip()
+    if not sym:
+        return None
     try:
-        if df is None or df.empty or "Close" not in df.columns or len(df) < 80:
-            return None
-        sym = str(symbol).upper().strip()
-        if not sym:
-            return None
         ed = getattr(_yfinance_ticker(sym), "earnings_dates", None)
-        if ed is None or getattr(ed, "empty", True):
-            return None
-        now = pd.Timestamp.now().normalize()
-        past = sorted(
-            [pd.Timestamp(x).normalize() for x in ed.index if pd.Timestamp(x).normalize() < now],
-            reverse=True,
-        )
-        if not past:
-            return None
-        idx = pd.DatetimeIndex(pd.to_datetime(df.index))
-        crushes = []
-        for edate in past:
-            if len(crushes) >= n_cycles:
-                break
-            pos = int(idx.searchsorted(edate))
-            if pos >= len(df):
-                pos = len(df) - 1
-            while pos > 0 and idx[pos] > edate:
-                pos -= 1
-            if pos < 15 or pos + 12 >= len(df):
-                continue
-            pre = df["Close"].iloc[pos - 12 : pos - 1]
-            post = df["Close"].iloc[pos + 1 : pos + 12]
-            if len(pre) < 5 or len(post) < 5:
-                continue
-            r_pre = pre.astype(float).pct_change().dropna()
-            r_post = post.astype(float).pct_change().dropna()
-            if r_pre.empty or r_post.empty:
-                continue
-            v_pre = float(r_pre.std() * np.sqrt(252) * 100.0)
-            v_post = float(r_post.std() * np.sqrt(252) * 100.0)
-            if not np.isfinite(v_pre) or v_pre <= 1e-9:
-                continue
-            crushes.append((v_post - v_pre) / v_pre * 100.0)
-        if not crushes:
-            return None
-        return float(np.mean(crushes))
     except Exception as _e:
-        log_warn("avg_post_earnings_vol_crush_proxy_pct", _e, ticker=str(symbol))
+        log_warn("avg_post_earnings_vol_crush_proxy_pct earnings_dates", _e, ticker=sym)
+        return None
+    if ed is None or getattr(ed, "empty", True):
+        return None
+    # Narrow catch (#17): shape/parse problems in Yahoo's payload are data errors; a TypeError
+    # from a bad comparison is a bug and must not be laundered into a silent ``None``.
+    try:
+        return post_earnings_vol_crush_pct_from_dates(df, list(ed.index), n_cycles=n_cycles)
+    except (ValueError, KeyError, IndexError, AttributeError) as _e:
+        log_warn("avg_post_earnings_vol_crush_proxy_pct", _e, ticker=sym)
         return None
 
 

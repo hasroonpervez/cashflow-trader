@@ -1,11 +1,24 @@
-# CashFlow Command Center · v23.0 (Free Edition)
+# CashFlow Command Center · v24.0 (Free Edition)
 
 **Predictive analytics options desk** — one screen for watchlist context, consensus, chains, scanner, and a Sentinel ledger. Built with **Streamlit**; data from **Yahoo Finance** (optional **Alpha Vantage** fallback and fundamentals).
 
 ---
 
+## ⚠️ Read this first — August 2026 audit
+
+A 13-agent adversarial audit of this codebase confirmed **88 defects**. The full report is in **[`AUDIT_2026-08.md`](AUDIT_2026-08.md)**; the UI findings are in **[`UI_SIMPLIFICATION.md`](UI_SIMPLIFICATION.md)**.
+
+**All confirmed Critical and High defects are now fixed**, each pinned by a regression test, and every fix was re-checked by an independent verifier that re-opened the source rather than trusting the report. The suite went from **127 to 852 tests**, all passing.
+
+The one thing that has *not* changed is the epistemics: **nothing in this app has been validated on live forward returns.** `score_10x_potential` was rebuilt (the double-counted diamond point is gone, the scale is honest) but it remains a heuristic, not a payoff model. Prefer the **🎯 Find 10x** tab, which ranks on payoff shape and labels every row `unvalidated` until an outcome ledger proves otherwise.
+
+The audit's summary was *"the '10x' branding is not currently honest."* It is closer now. It is not done — see **Roadmap Stage 2** in the report for the outcome ledger that would make a validation claim meaningful.
+
+---
+
 ## At a glance
 
+- **🎯 Find 10x** — **New.** Asymmetric-opportunity scanner: ranks on `convexity × confirmation`, fusing payoff shape (bounded downside vs ATR-expansion target) with retail attention and independent creator consensus. Plain-English verdict on every card; the math behind an expander.
 - **Options Yield** — Full income workflow: BLUF trade line, GEX / gamma flip, Monte Carlo PoP, spreads, Greeks, multi-ticker scanner.
 - **Vol Skew Card** — Cash Flow tab surfaces put IV vs call IV (10% OTM) with color-coded strategy guidance: elevated put skew → sell CSPs; elevated call skew → sell CCs.
 - **IV Term Structure** — Mini-table showing ATM IV across the next 3 expirations with contango / backwardation label, so you see event risk priced in at a glance.
@@ -14,14 +27,13 @@
 - **3-state Market Regime** — HMM now distinguishes Calm / Transitional / Stress regimes (previously binary). Regime-conditional Kelly haircut is graduated: Stress applies full 50% size reduction, Transitional applies 35% partial.
 - **Equity Radar** — Stock-focused scan: pre-diamond signals, actionable targets, Delta-One setup (same scan payload; options chrome hidden until you switch back).
 - **Sentinel Ledger** — Track legs; pin distance, edge realization, portfolio delta/theta/vega + 1d VaR, golden-zone maturity hints, and roll alerts.
-- **10x scanner + conviction** — `10x Potential` score, score>=5 screener, and `💎 CONVICTION` when Blue Diamond aligns with 10x.
+- **10x scanner + conviction** — `10x Potential` score, score>=5 screener, and `💎 CONVICTION` when Blue Diamond aligns with 10x. *(See the audit warning above — this score has no payoff term; prefer the 🎯 Find 10x tab.)*
 - **Market Explosion Radar** — `🌎 Market Explosion Radar` tab: Tier 1 broad batch filter + Tier 2 deep scan of survivors, ranked by `explosion_score`.
 - **Intraday confirmation gate** — IMMINENT pre-diamond calls are now checked against 1h RSI + OBV before final upgrade.
 - **Auto scanner refresh** — Scanner can auto-rerun on a timer (`auto_scan_interval`, default 300s) after first manual scan.
 - **Watchlist earnings heat map** — Intel tab shows 30-day earnings urgency buckets (`this_week`, `next_week`, `this_month`, `clear`, `reported`, `unknown`).
 - **Persistent trade journal** — `trade_journal.json` survives browser restarts with close workflow and realized P&L stats.
 - **Walk-forward replay backtest** — Setup tab can replay point-in-time Blue Diamond-style triggers and report forward returns.
-- **Discord conviction alerts** — Optional webhook notifications for `💎 CONVICTION` scanner events.
 - **Radar hit persistence** — Radar and scanner conviction hits are stored in `radar_hits.json` and viewable in-tab.
 - **PWA install metadata** — Manifest + mobile meta tags for add-to-home-screen behavior.
 - **In-app glossary** — **Intel → Quick Reference Guide**.
@@ -44,7 +56,65 @@ pip install -r requirements-dev.txt
 python3 -m pytest tests/ -q
 ```
 
-Coverage includes utils (`safe_last`, `safe_float`, `safe_html`, `log_warn`), `ConfigTransaction`, correlation / RS vs SPY, signal desk, BS Greeks (vanna/charm), quant edge (retail + blended institutional path), allocation, watchlist helpers, and smoke imports (no live Yahoo in most tests).
+**852 tests, all passing.** Coverage includes utils (`safe_last`, `safe_float`, `safe_html`, `log_warn`), `ConfigTransaction`, correlation / RS vs SPY, signal desk, BS Greeks (vanna/charm, now pinned by a finite-difference test), quant edge, allocation, watchlist helpers, smoke imports, and the v24.0 modules below (no live network in any test).
+
+> **Note on `requirements.txt`:** the pinned `numpy==2.0.2` does not build on Python 3.13+. On a newer interpreter, install unpinned (`pip install streamlit yfinance pandas numpy plotly requests hmmlearn scipy pytrends pytest`).
+
+---
+
+## New in v24.0 — the asymmetry stack
+
+Five new modules, each independently unit-tested and importable **without Streamlit** (pure logic is separated from rendering, so the math runs headless):
+
+| Module | Tests | What it does |
+|---|---|---|
+| [`modules/asymmetry.py`](modules/asymmetry.py) | 73 | The convexity engine. Expected value over a discrete outcome distribution (`Σ pᵢ·payoffᵢ`), convexity ratio, IV rank/percentile, coiled-spring score, catalyst windows, and **Kelly for skewed payoffs** — the exact two-point solution `f* = (p·b − q·a)/(a·b)`, not the symmetric `(pb−q)/b` shortcut that is only valid at `a=1`. `base_rate_report` computes precision/recall/lift at 2x/5x/10x and routes through `promotion_gate`. |
+| [`modules/creator_signals.py`](modules/creator_signals.py) | 75 | Free-source creator tracking: YouTube channel RSS, Substack/blog RSS, Reddit DD authors. **No paid APIs.** Requires ≥2 *independent* creators for full marks; a lone voice is capped and flagged `single-source`. |
+| [`modules/dossier.py`](modules/dossier.py) | 74 | Ticker deep-dive. Deterministic fundamentals floor (56 sourced facts) + optional narrative from the local `claude` CLI. **Every number comes from the data layer** — `facts` and `narrative` are different types, and any figure the model emits is stripped. |
+| [`modules/explain.py`](modules/explain.py) | 45 | Progressive disclosure: **66 jargon terms** registered with a plain sentence, a real explanation, and the formula *this codebase actually uses*. `metric()` is the one canonical way to put a number on screen. |
+| [`modules/find10x.py`](modules/find10x.py) | 24 | The 🎯 Find 10x tab. Fuses the four streams above into one ranked list. |
+
+### How Find 10x ranks
+
+```
+opportunity = 0.60 × convexity  +  0.40 × confirmation
+```
+
+- **convexity** — `(target − entry) / (entry − support)`. Support is the trailing 20-day swing low; target is ATR-expansion based. A pure payoff-shape number with **no attention in it at all**. Saturates at 5:1.
+- **confirmation** — retail chatter (Reddit / StockTwits / Google Trends) blended with creator consensus. A **tie-breaker between good payoff shapes; it can never create one.**
+
+Missing evidence lowers `confidence` and is named on the card. It never scores zero silently. A row built on one pillar still ranks, but announces it is half-blind.
+
+### Using the AI dossier
+
+The narrative layer shells out to your local `claude` CLI (no API key, no cost beyond your existing subscription). If the CLI is absent — or you deploy to Streamlit Cloud — it degrades to the deterministic fundamentals dossier automatically. If narratives are missing, authenticate:
+
+```bash
+claude
+```
+
+---
+
+## Fixed in v24.0
+
+| Fix | File |
+|---|---|
+| **Vanna sign was inverted** — told a call writer an IV spike *reduces* their delta when it increases it. Now pinned by a finite-difference test and a put-call-parity test | [`options.py:108`](modules/options.py) |
+| **Tape pillar operator precedence** — `tape + 6.0 if obv_up else -4.0` binds as `(tape + 6.0) if obv_up else (-4.0)`, so a flat OBV discarded the MACD base and clamped the pillar to 0. Found at **two** sites | [`signal_desk.py:587`](modules/signal_desk.py) |
+| **Alpha Vantage served split-unadjusted bars** into an `auto_adjust=True` pipeline — a fake gap at every reverse split. Now prefers `TIME_SERIES_DAILY_ADJUSTED`, back-adjusts the whole OHLC bar, and tags `attrs["price_basis"]`. New `price_basis()` / `bases_comparable()` guards | [`data.py:433`](modules/data.py) |
+| **Fabricated macro defaults** — VIX `20.0` and 10Y `4.5%` were displayed as live data and fed the Black-Scholes rate. Now `price=None, unavailable=True`; every consumer already guards with `if vix_val and …`, so absent macro *disables* VIX-conditional scoring instead of inventing calm | [`data.py:634`](modules/data.py) |
+| **Corrupt journal was silently wiped** — an unreadable `trade_journal.json` became `[]` and the next append atomically destroyed the history. Now quarantined to `.corrupt-<timestamp>` (bytes preserved), and writes are *refused* if quarantine fails | [`config.py:128`](modules/config.py) |
+| **Radar zeroed 35% of its score in silence** — a failed price fetch left volume + earliness unscored with no flag, contradicting the module's own documented rule. Now flags `no-price-data` + `partial-data` | [`sentiment_radar.py:431`](modules/sentiment_radar.py) |
+| Test fixture bugs: a 3-arg `np.maximum` (silently dropped its third term) and a read-only `.values` array | [`tests/test_pre_diamond.py`](tests/test_pre_diamond.py) |
+| **Kelly could size a position at >100% of bankroll** — the clip landed *before* the haircut and PoP multiplier, and above `f*≥2` the half-Kelly safety margin silently vanished. Now scales first, clips last, hard-capped at 25%. Verified over 1,600 random parameter sweeps | [`options.py:237`](modules/options.py) |
+| **Lookahead bias in `detect_diamonds`** — the weekly-trend gate was computed once from the *complete* frame then applied per-bar, contaminating every historical diamond and both win-rate stats. Now sliced causally, label-convention aware (yfinance stamps Monday, `resample("W-FRI")` stamps Friday) | [`options.py:831`](modules/options.py) |
+| **Journal realized P&L** assumed expiry intrinsic while the input was labelled "Close price" — a CSP closed for \$1.20 recorded −\$2,530 instead of +\$230 | [`config.py`](modules/config.py) |
+| **Conviction alerts re-fired on every rerun**, and ~67 duplicate rows silently evicted the entire genuine hit history through the `[-200:]` truncation. Now deduped per ticker per day; `pre_diamond` is derived instead of hardcoded `True` | [`renderers.py`](modules/renderers.py) |
+| `find_gamma_flip` searched for the wrong crossing direction; the Pre-Diamond squeeze gate was dead and failed *open*; `compute_explosion_score` triple-counted one diamond and paid +5 for *missing* options data; "PoP" blended long and short win rates into one number | [`options.py`](modules/options.py) |
+| Sentiment Radar scored a **crash identically to a rally** (`abs(roc_5d)`); the VIX "macro gate" was a banner that gated nothing; mention velocity was an unstabilised ratio where 1→10 mentions outranked 200→600 | [`sentiment_radar.py`](modules/sentiment_radar.py) |
+| Charts: phantom diamond markers drawn when none existed, Fibonacci labels transposed on down-swings, green "S" rails drawn *above* spot, an "IV Crush" annotation plotting *realized* vol | [`chart.py`](modules/chart.py) |
+| `st.secrets` scalars were merged into config and persisted into git-tracked `config.json` | [`config.py`](modules/config.py) |
+| **Discord webhook alerting removed entirely** at the owner's request — `send_discord_webhook`, the settings UI, and both config keys are gone | — |
 
 ---
 
@@ -96,8 +166,6 @@ Writes are **atomic** (temp file + replace). **Mission Control** fields are batc
 | `scanner_sort_mode`, `strat_focus`, `strat_horizon` | Desk controls |
 | `mini_mode` | Turbo / compact layout |
 | `use_quant_models` | Institutional quant path (default on) |
-| `discord_webhook_url` | Optional Discord webhook endpoint for conviction alerts |
-| `alert_on_conviction` | Toggles webhook dispatch for `💎 CONVICTION` hits |
 | `radar_universe` | Comma-separated universe used by the Market Explosion Radar broad filter |
 | `defer_headlines_earnings` | Skip upfront news + earnings in `build_context` |
 | `defer_options_first_pass` | Skip options-chain hydration on the first session render (faster Cloud cold boot) |
@@ -198,14 +266,14 @@ cashflow-trader/
 | Options | Vanna & charm on BS row; IV rank proxy; skew chart |
 | Scanner upgrades | `score_10x_potential` integrated into scanner rows (`10x Potential`, flags), Intel **10x Screener**, and Blue+10x **CONVICTION** banner |
 | Market Explosion Radar | New radar tab: Tier 1 batch squeeze/Hurst/RS/volume pre-filter -> Tier 2 deep `scan_single_ticker` pass; scores with `compute_explosion_score` |
-| Alert destination | Scanner conviction now logs to radar history first (`radar_hits.json`); Discord webhook remains optional |
+| Alert destination | Scanner conviction logs to radar history (`radar_hits.json`), deduped per ticker per day |
 | Intraday gate | Pre-diamond `🔥 IMMINENT BREAKOUT` is conditionally downgraded when 1h RSI is overbought or OBV is declining |
 | Auto-monitoring | Intel scanner supports timer-driven reruns via `auto_scan_interval`; cache bundle stores last trigger/time |
 | Sentinel risk | Portfolio aggregates now include **total vega** and a simple **1-day 95% VaR** (delta-correlation approximation) |
 | Intel earnings | Watchlist earnings heat map expander with urgency buckets and risk callouts for this week / next week |
 | Journal persistence | Track Trade now mirrors to disk (`trade_journal.json`), with close-trade workflow + realized P&L and win-rate stats |
 | Walk-forward replay | Setup tab includes a point-in-time Blue Diamond replay with configurable lookback/hold/confluence |
-| Alerting | Discord webhook utility + Intel alert settings for async conviction notifications |
+| Alerting | In-app only — the Discord webhook path was removed in v24.0 |
 | Mobile install | Manifest + theme metadata injection for home-screen install behavior |
 | Hardening sweep | Removed remaining bare `except Exception:` and unguarded `.iloc[-1]` tail indexing across core modules |
 

@@ -220,12 +220,31 @@ def mechanical_exit(
     atr14 = tr.rolling(14).mean()
     stop = entry_price - atr_mult * float(atr14.iloc[entry_index])
     last = len(d) - 1
-    held = last - entry_index
-    if float(d["low"].iloc[entry_index : last + 1].min()) <= stop:
-        return {"directive": "exit_stop", "stop": round(stop, 4)}
-    if held >= max_hold_sessions:
-        return {"directive": "exit_time", "held_sessions": held}
-    return {"directive": "hold", "stop": round(stop, 4), "held_sessions": held}
+    # Audit finding: the old scan was `d["low"].iloc[entry_index : last + 1].min() <= stop`.
+    # Two defects. (1) It started at `entry_index` INCLUSIVE, so the entry bar's own low —
+    # printed before the position existed — could stop the trade out on day zero.
+    # (2) It never bounded the scan by the time exit, so once any later bar breached it
+    # latched to "exit_stop" forever and reported a stop-out that happened *after* the
+    # 15-session time exit had already closed the position. Walk forward instead and
+    # return whichever exit comes first.
+    time_exit_index = entry_index + max_hold_sessions
+    scan_end = min(last, time_exit_index)
+    for i in range(entry_index + 1, scan_end + 1):
+        if float(d["low"].iloc[i]) <= stop:
+            return {
+                "directive": "exit_stop",
+                "stop": round(stop, 4),
+                "exit_index": i,
+                "held_sessions": i - entry_index,
+            }
+    if last >= time_exit_index:
+        return {
+            "directive": "exit_time",
+            "stop": round(stop, 4),
+            "exit_index": time_exit_index,
+            "held_sessions": max_hold_sessions,
+        }
+    return {"directive": "hold", "stop": round(stop, 4), "held_sessions": last - entry_index}
 
 
 # ---------------------------------------------------------------------------

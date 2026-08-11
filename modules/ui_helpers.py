@@ -5,6 +5,7 @@ DataFrame presentation, and the Technical Zone st.fragment.
 import hashlib
 import inspect
 import re
+import time
 from typing import Optional
 import streamlit as st
 import html as _html_mod
@@ -638,10 +639,21 @@ def earnings_runway_spark_series(days_to_earnings):
 
 
 def _glance_sparkline_svg(series, color="#00E5FF", w=112, h=44, title=None):
-    """Single SVG path sparkline for glance cards (sidebar-safe; no Plotly iframe)."""
-    s = pd.Series(series).dropna().astype(float)
+    """Single SVG path sparkline for glance cards (sidebar-safe; no Plotly iframe).
+
+    Returns ``""`` when there is nothing to draw. Audit finding: an empty series used to
+    be replaced with ``[0.0, 1.0]``, which renders a confident **rising** line — it fired
+    on the VIX card every time the VIX feed was unavailable (now common, since macro
+    absence is reported honestly rather than defaulted to 20.0).
+    """
+    s = pd.Series(series, dtype="float64") if series is None else pd.Series(series)
+    s = pd.to_numeric(s, errors="coerce").dropna().astype(float)
+    s = s[np.isfinite(s)]
+    if s.empty:
+        return ""
     if len(s) < 2:
-        s = pd.Series([0.0, 1.0] if s.empty else [float(s.iloc[0]), float(s.iloc[0]) + 1e-6])
+        # One real observation is a flat line, not a slope.
+        s = pd.Series([float(s.iloc[0]), float(s.iloc[0])])
     vals = s.tolist()
     n = len(vals)
     vmin, vmax = min(vals), max(vals)
@@ -674,6 +686,12 @@ def _glance_sparkline_svg(series, color="#00E5FF", w=112, h=44, title=None):
 def _glance_metric_card(label, value_html, caption_html, series, line_color, spark_title=None):
     """One self-contained glass card: text left, SVG sparkline right (works with sidebar open)."""
     spark = _glance_sparkline_svg(series, line_color, title=spark_title)
+    if not spark:
+        # No series to draw — say so rather than leaving a shape the eye reads as a trend.
+        spark = (
+            "<div style='font-size:.62rem;color:#64748b;letter-spacing:.08em;"
+            "text-align:right;padding-top:14px'>NO SERIES</div>"
+        )
     return (
         "<div class='tc glass-card glance-card glance-card-whole'>"
         "<div class='glance-row-flex'>"
@@ -712,6 +730,28 @@ def _parse_watchlist_string(s):
     return items
 
 
+_EDGE_SCAN_INTERVAL_S = 90.0
+
+
+def edge_scan_due(last_scan_ts, now_ts, scan_key, last_key, interval_s: float = _EDGE_SCAN_INTERVAL_S) -> bool:
+    """Should the full-watchlist edge scan re-run right now? (pure; no Streamlit)
+
+    Audit finding: this scan had no timer at all. It sat in an always-executing expander
+    body and re-scanned the entire watchlist on **every** rerun — every checkbox, every
+    tab click — while the caption promised "about every 90 seconds". It re-runs when the
+    inputs changed, or when the interval has genuinely elapsed. Never otherwise.
+    """
+    if scan_key != last_key:
+        return True
+    if last_scan_ts is None:
+        return True
+    try:
+        return (float(now_ts) - float(last_scan_ts)) >= float(interval_s)
+    except (TypeError, ValueError):
+        return True
+
+
+@st.fragment(run_every=_EDGE_SCAN_INTERVAL_S)
 def _fragment_rolling_edge_capture():
     """Full-watchlist quant vs retail edge log + matrix; reruns on a timer without blocking the rest of the app."""
     _scan_mode = st.session_state.get(
@@ -752,13 +792,27 @@ def _fragment_rolling_edge_capture():
 
     _gb = st.session_state.get("_cf_global_market_bundle")
     _panel = _gb.raw_panel if _gb is not None else None
-    with st.spinner("Scanning watchlist for edge scores…"):
-        rows, failed_syms = scan_watchlist_edge_rows(wl, vix_arg, use_q, panel_raw=_panel)
-    if rows:
-        st.session_state.edge_log = pd.DataFrame(rows)
-        st.session_state["_edge_matrix_updated"] = datetime.now().strftime("%H:%M:%S")
-    else:
-        st.warning("Could not load daily prices for any watchlist symbol. Check symbols or try again shortly.")
+    # Only re-scan when the inputs changed or the 90s the caption promises has elapsed —
+    # not on every rerun of an always-executing expander body.
+    _scan_key = (tuple(wl), bool(use_q), vix_arg, _scan_mode)
+    _due = edge_scan_due(
+        st.session_state.get("_cf_edge_scan_ts"),
+        time.monotonic(),
+        _scan_key,
+        st.session_state.get("_cf_edge_scan_key"),
+    )
+    failed_syms = st.session_state.get("_cf_edge_scan_failed") or []
+    if _due:
+        with st.spinner("Scanning watchlist for edge scores…"):
+            rows, failed_syms = scan_watchlist_edge_rows(wl, vix_arg, use_q, panel_raw=_panel)
+        st.session_state["_cf_edge_scan_ts"] = time.monotonic()
+        st.session_state["_cf_edge_scan_key"] = _scan_key
+        st.session_state["_cf_edge_scan_failed"] = list(failed_syms or [])
+        if rows:
+            st.session_state.edge_log = pd.DataFrame(rows)
+            st.session_state["_edge_matrix_updated"] = datetime.now().strftime("%H:%M:%S")
+        else:
+            st.warning("Could not load daily prices for any watchlist symbol. Check symbols or try again shortly.")
 
     df_log = st.session_state.edge_log
     if df_log is None or df_log.empty:
@@ -1147,7 +1201,9 @@ def _fragment_technical_zone(
     _sh_mv = st.session_state.get("_cf_shadow_move") or {}
     _sl = _sh_mv.get("low") if isinstance(_sh_mv, dict) else None
     _su = _sh_mv.get("high") if isinstance(_sh_mv, dict) else None
-    _pin_px = st.session_state.get("_cf_opex_pin")
+    # Audit finding #7: read the ticker-keyed map, not the shared scalar — the scalar
+    # could still be holding the pin computed for a *different* symbol.
+    _pin_px = (st.session_state.get("_cf_opex_pin_map") or {}).get(str(ticker).strip().upper())
     try:
         if _pin_px is not None:
             _pin_px = float(_pin_px)
@@ -1343,17 +1399,20 @@ def _fragment_technical_zone(
                 "neutral",
             )
 
+    # Escape the symbol before it enters `unsafe_allow_html` — the same value is already
+    # escaped at the Turbo card above, and these two were the file's only exceptions.
+    _tk_alert = _html_mod.escape(str(ticker))
     if latest_d and latest_d["type"] == "blue" and (df.index[-1] - latest_d["date"]).days <= 3:
         next_gz = gold_zone_price
         st.markdown(
             f"<div class='ac'>🔔 <strong>Alert Suggestion:</strong> Set an alert for next Blue Diamond at <strong>${next_gz:.2f}</strong> (Gold Zone). "
-            f"If {ticker} pulls back to the Gold Zone and confluence rebuilds above 7/9, that is your next high probability entry.</div>",
+            f"If {_tk_alert} pulls back to the Gold Zone and confluence rebuilds above 7/9, that is your next high probability entry.</div>",
             unsafe_allow_html=True,
         )
     elif latest_d and latest_d["type"] == "pink" and (df.index[-1] - latest_d["date"]).days <= 3:
         st.markdown(
             f"<div class='ac'>🔔 <strong>Alert Suggestion:</strong> Pink Diamond fired at ${latest_d['price']:.2f}. "
-            f"Consider taking partial profits. Set alert if {ticker} drops below Gold Zone ${gold_zone_price:.2f} for a full exit.</div>",
+            f"Consider taking partial profits. Set alert if {_tk_alert} drops below Gold Zone ${gold_zone_price:.2f} for a full exit.</div>",
             unsafe_allow_html=True,
         )
 

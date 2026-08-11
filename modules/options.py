@@ -105,7 +105,10 @@ def bs_greeks(S, K, T, r, sigma, option_type="call"):
     phi_d1 = _pdf(d1)
     gamma = phi_d1 / (S * sigma * sqrtT)
     vega = S * phi_d1 * sqrtT / 100  # per 1% move
-    vanna = phi_d1 * d2 / sigma * 0.01  # ∂Δ/∂(σ+1%) scale
+    # vanna = ∂Δ/∂σ = -φ(d1)·d2/σ. The minus is required: ∂d1/∂σ = -d2/σ.
+    # Was previously positive, which told a short-call writer that an IV spike
+    # *reduces* their delta when it increases it. Pinned by a finite-difference test.
+    vanna = -phi_d1 * d2 / sigma * 0.01  # ∂Δ/∂(σ+1%) scale
     if T < 1e-4:
         charm_day = 0.0
     else:
@@ -183,7 +186,9 @@ def kelly_criterion(
     R = win_amount / loss_amount
     if R < 1e-12:
         return 0.0, 0.0
-    full_frac = max(0.0, W - (1 - W) / R) * pop_mult
+    # Audit #1: `pop_mult` (up to ~1.085) multiplied an already-full fraction, so the
+    # discrete branch could also report more than the whole bankroll. Cap at 1.0.
+    full_frac = min(1.0, max(0.0, W - (1 - W) / R) * pop_mult)
     half_frac = full_frac / 2
     return round(full_frac * 100, 1), round(half_frac * 100, 1)
 
@@ -215,6 +220,12 @@ def bs_corrado_su(S, K, T, r, sigma, skew=0.0, kurt=3.0, option_type="call"):
     return max(0.0, float(bs_px + (skew * q3) + ((kurt - 3.0) * q4)))
 
 
+# Audit #1: hard ceiling on any single-name Kelly allocation. `Opt.calc_kelly_haircut`
+# can return 1.20 (a "true hedge" boost) and `pop_mult` reaches ~1.085 at PoP 100, so the
+# cap has to be applied to the *fully adjusted* number — never to the raw Merton fraction.
+CONTINUOUS_KELLY_MAX_ALLOCATION = 0.25
+
+
 def continuous_kelly(
     expected_return,
     risk_free_rate,
@@ -222,20 +233,42 @@ def continuous_kelly(
     half_kelly=True,
     correlation_haircut=1.0,
     pop_mult=1.0,
+    max_allocation=CONTINUOUS_KELLY_MAX_ALLOCATION,
 ):
     """
     Calculates optimal continuous-time allocation (Merton's Portfolio Problem).
     Applies a mathematical haircut if the asset is highly correlated to the portfolio.
+
+    Returns a **percentage of bankroll**, clipped to ``[0, max_allocation * 100]``.
     """
     if variance <= 0:
         return 0.0
     f_star = (expected_return - risk_free_rate) / variance
-    allocation = f_star / 2.0 if half_kelly else f_star
+    if not np.isfinite(f_star):
+        return 0.0
     pm = float(pop_mult) if pop_mult is not None else 1.0
     if not np.isfinite(pm) or pm < 0:
         pm = 1.0
-    final_allocation = max(0.0, min(1.0, allocation)) * 100 * correlation_haircut * pm
-    return final_allocation
+    try:
+        hc = float(correlation_haircut)
+    except (TypeError, ValueError):
+        hc = 1.0
+    if not np.isfinite(hc) or hc < 0:
+        hc = 1.0
+    # Audit #1: the old code was `max(0.0, min(1.0, allocation)) * 100 * haircut * pm`.
+    # Clipping BEFORE the haircut and pop multiplier meant (a) any f* >= 2 pinned both the
+    # full- and half-Kelly branches to the identical 1.0, silently deleting the half-Kelly
+    # safety margin on exactly the high-drift names being hunted, and (b) the product could
+    # exceed 100% of bankroll (108.5% at PoP 100, more with a 1.20 hedge haircut).
+    # Scale first, clip last, and cap hard.
+    alloc = f_star * (0.5 if half_kelly else 1.0) * hc * pm
+    try:
+        cap = float(max_allocation)
+    except (TypeError, ValueError):
+        cap = CONTINUOUS_KELLY_MAX_ALLOCATION
+    if not np.isfinite(cap) or cap <= 0:
+        cap = CONTINUOUS_KELLY_MAX_ALLOCATION
+    return 100.0 * min(max(alloc, 0.0), cap)
 
 
 # ═════════════════════════════════════════════════════════════════════════
@@ -789,6 +822,55 @@ def _hurst_adaptive_signal_periods(close: pd.Series):
     return rsi_p, macd_fast, macd_slow, macd_sig, H
 
 
+# Audit #4: the Hurst-adaptive period *selection* must only see bars at or before the bar
+# being evaluated. Re-running Hurst on every bar is O(n²); refreshing every N bars keeps the
+# choice strictly causal (it is always derived from ``close[:i+1]``) at ~1/N the cost.
+_HURST_REFRESH_BARS = 21
+
+
+def _causal_weekly_slice(df_wk, ts):
+    """Weekly bars that had **fully closed** on or before daily timestamp ``ts``.
+
+    Audit #4: ``detect_diamonds`` computed ``weekly_trend_label`` once from the complete
+    weekly frame and then applied it as a per-bar gate, and passed the unsliced weekly frame
+    into the per-bar confluence call. Slicing with a plain ``.loc[:ts]`` is not enough — the
+    weekly bar that *contains* ``ts`` still carries that week's later sessions — so any label
+    inside the trailing 6 days of ``ts`` is dropped too.
+
+    This repo produces weekly frames two ways, with OPPOSITE label conventions:
+
+      * ``fetch_stock(..., "1wk")``      -> yfinance, LEFT-labelled  (Monday stamp;
+                                           the bar closes that week's Friday)
+      * ``_weekly_ohlcv_from_daily``    -> ``resample("W-FRI")``, RIGHT-labelled
+                                           (Friday stamp; the bar closed ON that date)
+
+    A flat ``ts - 6 days`` is exact for the first and over-truncates the second by a
+    full week — on a Monday-to-Wednesday ``ts`` it discards the most recent *already
+    closed* week, leaving the gate's weekly bias up to ~12 days stale and able to
+    disagree with the "Weekly Trend" label the dashboard renders. So derive each bar's
+    actual close date from the label convention instead of assuming one.
+    """
+    if df_wk is None or not isinstance(df_wk, pd.DataFrame) or df_wk.empty:
+        return df_wk
+    try:
+        idx = pd.DatetimeIndex(df_wk.index)
+        ts = pd.Timestamp(ts)
+        # Weekday of the labels tells us the convention: 4 == Friday == period-END.
+        weekdays = idx.weekday
+        right_labelled = bool((weekdays == 4).mean() >= 0.8)
+        if right_labelled:
+            bar_end = idx                       # the label IS the close date
+        else:
+            # Monday-stamped (or anything else): the market week ends 4 days later.
+            bar_end = idx + pd.Timedelta(days=4)
+        return df_wk.loc[bar_end <= ts]
+    except (TypeError, ValueError):
+        try:
+            return df_wk.loc[:ts]
+        except (TypeError, ValueError, KeyError):
+            return df_wk
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def detect_diamonds(
     df,
@@ -822,27 +904,79 @@ def detect_diamonds(
     if n < 55:
         return diamonds
 
-    rsi_p, mf, ms, mg, H = _hurst_adaptive_signal_periods(df["Close"])
-    rsi_series = TA.rsi(df["Close"], rsi_p)
-    ml_macd, sl_macd, _ = TA.macd(df["Close"], mf, ms, mg)
+    # ── Audit #4: everything below is derived point-in-time ────────────────────
+    # Previously `_hurst_adaptive_signal_periods(df["Close"])` and `weekly_trend_label(df_wk)`
+    # were evaluated ONCE over the complete frames and then used as per-bar gates, so a ticker's
+    # state *today* decided whether bars from months ago emitted a signal. Both are now derived
+    # from data at or before the bar being evaluated.
+    #
+    # Note RSI/MACD *series* may still be computed over the whole frame: they are causal rolling
+    # transforms, so `.iloc[i]` depends only on `close[:i+1]`. Only the *choice of period* leaked,
+    # and that choice is now made causally (refreshed every `_HURST_REFRESH_BARS` bars).
+    _period_series_cache: dict = {}
 
-    wk_bias = "UNKNOWN"
-    if df_wk is not None and len(df_wk) >= 26:
-        wk_bias, _ = weekly_trend_label(df_wk)
+    def _series_for(periods):
+        cached = _period_series_cache.get(periods)
+        if cached is None:
+            _rp, _mf, _ms, _mg = periods
+            _ml, _sl, _ = TA.macd(df["Close"], _mf, _ms, _mg)
+            cached = (TA.rsi(df["Close"], _rp), _ml, _sl)
+            _period_series_cache[periods] = cached
+        return cached
+
+    _hurst_cache: dict = {}
+
+    def _causal_periods(i):
+        """Hurst-adaptive periods chosen from ``df['Close'].iloc[:i+1]`` only."""
+        anchor = (i // _HURST_REFRESH_BARS) * _HURST_REFRESH_BARS
+        cached = _hurst_cache.get(anchor)
+        if cached is None:
+            try:
+                _rp, _mf, _ms, _mg, _H = _hurst_adaptive_signal_periods(
+                    df["Close"].iloc[: anchor + 1]
+                )
+            except Exception as _e:
+                log_warn("detect_diamonds causal hurst periods", _e, ticker=str(ticker_symbol or ""))
+                _rp, _mf, _ms, _mg, _H = 14, 12, 26, 9, 0.5
+            cached = ((_rp, _mf, _ms, _mg), float(_H))
+            _hurst_cache[anchor] = cached
+        return cached
+
+    _wk_bias_cache: dict = {}
+
+    def _causal_wk_bias(ts):
+        """Weekly bias from weekly bars fully closed at or before ``ts``."""
+        wk_sub = _causal_weekly_slice(df_wk, ts)
+        if wk_sub is None or len(wk_sub) < 26:
+            return "UNKNOWN", wk_sub
+        key = len(wk_sub)
+        cached = _wk_bias_cache.get(key)
+        if cached is None:
+            cached = weekly_trend_label(wk_sub)[0]
+            _wk_bias_cache[key] = cached
+        return cached, wk_sub
 
     # First index where slice has 55 rows (need stable Ichimoku / gold / structure).
     start = 54
     scan_start = max(start, n - _DIAMOND_SCAN_TAIL_BARS)
     prev_score = 0
     if scan_start > start:
+        _p0, _ = _causal_periods(scan_start - 1)
+        _, _wk0 = _causal_wk_bias(df.index[scan_start - 1])
         _psc, _, _, _ = _calc_confluence_points_core(
-            df.iloc[:scan_start], df_wk, None, None, rsi_period=rsi_p
+            df.iloc[:scan_start], _wk0, None, None, rsi_period=_p0[0]
         )
         prev_score = int(_psc)
 
     for i in range(scan_start, n):
         sub = df.iloc[: i + 1]
-        sc, _, bd, _ = _calc_confluence_points_core(sub, df_wk, None, None, rsi_period=rsi_p)
+        ts_i = df.index[i]
+        periods_i, H = _causal_periods(i)
+        rsi_p = periods_i[0]
+        rsi_series, ml_macd, sl_macd = _series_for(periods_i)
+        wk_bias, wk_sub = _causal_wk_bias(ts_i)
+
+        sc, _, bd, _ = _calc_confluence_points_core(sub, wk_sub, None, None, rsi_period=rsi_p)
         struct_i = (bd.get("Structure") or {}).get("detail", "RANGING")
 
         rsi_i = float(rsi_series.iloc[i]) if not pd.isna(rsi_series.iloc[i]) else 50.0
@@ -978,26 +1112,42 @@ def detect_diamonds(
                 "liquidity_magnet": magnet,
             })
 
-        # Pink: collapse or RSI exhaustion — allow BULLISH weeks too (fade / de-risk in extended runs)
+        # Pink: collapse or RSI exhaustion. Audit (medium): the weekly guard here read
+        # `if wk_bias in ("BEARISH", "MIXED", "UNKNOWN", "BULLISH")` — all four values
+        # `weekly_trend_label` can return, i.e. a tautology dressed as a filter. Removed
+        # rather than tightened: pink is a de-risk flag and is deliberately weekly-agnostic
+        # (it must fire inside extended BULLISH runs, which is the whole point of a fade).
         if (sc <= 3 and prev_score >= 5) or (rsi_i > 75 and sc <= 4 and prev_score > 4):
-            if wk_bias in ("BEARISH", "MIXED", "UNKNOWN", "BULLISH"):
-                diamonds.append({"date": df.index[i], "price": pi, "type": "pink",
-                                 "score": sc, "rsi": rsi_i, "weekly": wk_bias})
+            diamonds.append({"date": df.index[i], "price": pi, "type": "pink",
+                             "score": sc, "rsi": rsi_i, "weekly": wk_bias})
 
         prev_score = sc
 
     return diamonds
 
 
-def _diamond_win_rate_core(df, diamonds, forward_bars):
-    """Forward ``forward_bars`` outcome stats for a pre-filtered diamond list."""
+def _diamond_win_rate_core(df, diamonds, forward_bars, side="blue"):
+    """Forward ``forward_bars`` outcome stats for a pre-filtered diamond list.
+
+    Audit #23: ``side`` selects which instrument is measured — ``"blue"`` (long entries),
+    ``"pink"`` (short / de-risk flags) or ``"all"`` (legacy blended read). Blue outcomes are
+    scored long (win if price rose) and pink short (win if price fell); pooling them produced
+    a single "win rate" that a trader necessarily misreads, e.g. 3 blue / 0 wins plus
+    7 pink / 7 wins reported **70%** under the label "win rate for Diamond signals".
+    """
     if not diamonds:
         return 0.0, 0.0, 0
+
+    want = str(side).lower()
+    if want not in ("blue", "pink", "all"):
+        want = "blue"
 
     wins, total = 0, 0
     returns = []
 
     for d in diamonds:
+        if want != "all" and str(d.get("type", "")).lower() != want:
+            continue
         try:
             loc = df.index.get_loc(d["date"])
             idx = _index_pos(loc)
@@ -1031,11 +1181,18 @@ def diamond_win_rate(
     diamonds,
     forward_bars=10,
     *,
+    side="blue",
     holdout_frac=0.25,
     holdout_min_bars=80,
     holdout_min_n=3,
 ):
-    """Forward outcomes after each diamond signal (same ``df`` path).
+    """Forward outcomes after each **entry-side** diamond signal (same ``df`` path).
+
+    Audit #23: ``side`` now defaults to ``"blue"``. The previous default pooled blue longs
+    and pink shorts into one ``wins/total``, so the number displayed under "Historical win
+    rate for Diamond signals" was not the probability that a diamond *entry* worked. Pass
+    ``side="pink"`` for the de-risk flag's own hit rate or ``side="all"`` for the legacy
+    blended read.
 
     Still not a full walk-forward backtest (diamond rules were fit on this path). When
     ``holdout_frac`` is set (default 0.25), we **prefer** stats using only diamonds in the
@@ -1055,10 +1212,22 @@ def diamond_win_rate(
                         filt.append(d)
                 except KeyError:
                     continue
-            h_wr, h_avg, h_n = _diamond_win_rate_core(df, filt, forward_bars)
+            h_wr, h_avg, h_n = _diamond_win_rate_core(df, filt, forward_bars, side=side)
             if h_n >= holdout_min_n:
                 return h_wr, h_avg, h_n
-    return _diamond_win_rate_core(df, diamonds, forward_bars)
+    return _diamond_win_rate_core(df, diamonds, forward_bars, side=side)
+
+
+def diamond_win_rate_by_side(df, diamonds, forward_bars=10, **kw):
+    """Audit #23: entry-side and fade-side outcomes reported **separately**.
+
+    Returns ``{"blue": (wr, avg_ret, n), "pink": (wr, avg_ret, n)}``. A caller that wants to
+    show one headline number should show ``blue`` (the entry side) together with its ``n``.
+    """
+    return {
+        "blue": diamond_win_rate(df, diamonds, forward_bars, side="blue", **kw),
+        "pink": diamond_win_rate(df, diamonds, forward_bars, side="pink", **kw),
+    }
 
 
 def latest_diamond_status(diamonds):
@@ -1066,6 +1235,12 @@ def latest_diamond_status(diamonds):
     if not diamonds:
         return None
     return diamonds[-1]
+
+
+# Audit (medium): shared BBW ranking window so "squeeze" means the same thing in
+# `score_10x_potential` and `evaluate_asymmetric_convexity_sieve` regardless of how much
+# history the caller fetched.
+_BBW_RANK_LOOKBACK = 252
 
 
 def _bbw_series(close: pd.Series, p: int = 20, sd: float = 2.0) -> pd.Series:
@@ -1110,7 +1285,7 @@ def evaluate_asymmetric_convexity_sieve(
     max_bbw_percentile: float = 0.05,
     min_volume_z: float = 4.0,
     min_skew_ratio: float = 1.1,
-    bbw_lookback: int = 252,
+    bbw_lookback: int = _BBW_RANK_LOOKBACK,
     volume_lookback: int = 90,
 ) -> dict:
     """
@@ -1165,8 +1340,13 @@ def evaluate_asymmetric_convexity_sieve(
     return {"hit": hit, "gates": gates, "bbw_pctile": bbw_pctile, "vol_z": vol_z}
 
 
+# Audit #13: nine independent factors. Was ten — the tenth was a diamond/pre-diamond point
+# that re-entered `compute_explosion_score` through its own 30% and 15% terms.
+TEN_X_MAX_SCORE = 9
+
+
 def score_10x_potential(df: pd.DataFrame, info: dict, *, spy_df: pd.DataFrame = None, pre_diamond: dict = None, latest_d: dict = None):
-    """Heuristic 10x potential score (0-10) plus matched factor flags."""
+    """Heuristic 10x potential score (0-``TEN_X_MAX_SCORE``) plus matched factor flags."""
     score = 0
     flags: dict = {}
     if df is None or getattr(df, "empty", True) or "Close" not in df.columns:
@@ -1191,8 +1371,17 @@ def score_10x_potential(df: pd.DataFrame, info: dict, *, spy_df: pd.DataFrame = 
         flags["short_pct_float"] = round(si * 100.0, 1)
 
     try:
-        bw = _bbw_series(pd.to_numeric(df["Close"], errors="coerce"))
-        bw_pctile = safe_float(safe_last(bw.rank(pct=True)), np.nan)
+        # Audit (medium): this ranked today's BBW against the **entire passed frame**, while the
+        # sibling `evaluate_asymmetric_convexity_sieve` ranks against `tail(252)`. The same
+        # "squeeze" threshold therefore meant different things depending on how much history the
+        # caller happened to fetch. Pin both to a 252-bar (≈1y) window.
+        bw = _bbw_series(pd.to_numeric(df["Close"], errors="coerce")).dropna()
+        bw_tail = bw.tail(min(_BBW_RANK_LOOKBACK, len(bw)))
+        bw_pctile = (
+            safe_float(safe_last(bw_tail.rank(pct=True)), np.nan)
+            if len(bw_tail) >= 30
+            else np.nan
+        )
         if np.isfinite(bw_pctile):
             flags["bbw_pctile"] = round(float(bw_pctile), 3)
             if float(bw_pctile) <= 0.10:
@@ -1239,58 +1428,79 @@ def score_10x_potential(df: pd.DataFrame, info: dict, *, spy_df: pd.DataFrame = 
         score += 1
         flags["fcf_positive"] = True
 
+    # Audit #13: these used to add +1 to the score. The same confluence event already enters
+    # `compute_explosion_score` directly (Pre-Diamond 30% / Diamond presence 15%) *and* again
+    # through the 10x term, so one event was counted two or three times. The flags stay — they
+    # are useful context on the row — but they no longer earn a 10x point.
     if isinstance(latest_d, dict) and str(latest_d.get("type", "")).lower() == "blue":
-        score += 1
         flags["blue_diamond"] = True
     elif isinstance(pre_diamond, dict) and bool(pre_diamond.get("is_pre_diamond")):
-        score += 1
         flags["pre_diamond"] = str(pre_diamond.get("signal_strength") or "active")
 
+    # NOT placed in `flags` — renderers.py:2750 renders the Flags column as
+    # ", ".join(sorted(flags.keys())), so a meta key there is displayed to the user
+    # as though it were a matched factor. Import TEN_X_MAX_SCORE directly instead.
     return int(score), flags
+
+
+def explosion_score_detail(scan_row: dict) -> dict:
+    """Per-component breakdown behind ``compute_explosion_score``.
+
+    Returns ``{"score": float, "components": {...}, "gex_available": bool}`` so a caller can
+    show *why* a name ranks where it does and, per audit #13, distinguish "no options data"
+    from "measured and scored zero".
+    """
+    components = {"pre_diamond": 0.0, "tenx": 0.0, "qe": 0.0, "diamond": 0.0, "gex": 0.0}
+    gex_available = False
+    try:
+        pre = scan_row.get("pre_diamond_status") or {}
+        if pre.get("is_pre_diamond"):
+            strength = str(pre.get("signal_strength", ""))
+            components["pre_diamond"] = 30.0 if ("IMMINENT" in strength or "🔥" in strength) else 20.0
+
+        # Audit #13: `score_10x_potential` no longer awards a diamond point (it re-entered here
+        # through the 30% pre-diamond and 15% diamond terms), so the 10x term is rescaled to
+        # keep the documented 25% budget over the nine remaining independent factors.
+        tenx = int(scan_row.get("10x Potential", 0) or 0)
+        components["tenx"] = min(25.0, max(0, tenx) * (25.0 / TEN_X_MAX_SCORE))
+
+        qs = safe_float(scan_row.get("qs"), 0)
+        components["qe"] = min(20.0, max(0.0, qs) * 0.2)
+
+        d_status = str(scan_row.get("d_status", ""))
+        if "BLUE" in d_status:
+            components["diamond"] = 15.0
+        # (audit #13: the old `elif "PINK" not in d_status: score += 0` was dead code — removed.)
+
+        # Audit #13: two bugs here. (a) The unknown branch paid +5, so a ticker whose chain fetch
+        # failed — `gex_regime` defaults to "—" — collected half the GEX budget and outranked a
+        # measured name, biasing the radar toward illiquid tickers with no listed options.
+        # Unknown now scores 0 and is reported via `gex_available`. (b) The sign was backwards for
+        # an *explosion* score: STABLE means spot above the flip, dealers long gamma, hedging that
+        # DAMPENS moves. The points now go to the TURBULENT (short-gamma, move-amplifying) regime.
+        gex = str(scan_row.get("GEX Regime", ""))
+        if "TURBULENT" in gex:
+            gex_available = True
+            components["gex"] = 10.0
+        elif "STABLE" in gex:
+            gex_available = True
+            components["gex"] = 0.0
+
+        score = round(min(100.0, sum(components.values())), 1)
+        return {"score": score, "components": components, "gex_available": gex_available}
+    except Exception as _e:
+        log_warn("explosion_score_detail", _e)
+        return {"score": 0.0, "components": components, "gex_available": False}
 
 
 def compute_explosion_score(scan_row: dict) -> float:
     """Composite explosion score from scan_single_ticker output.
 
     Weighted: Pre-Diamond signal 30%, 10x Potential 25%, QE 20%,
-              Diamond presence 15%, GEX stability 10%.
-    Range: 0-100.
+              Diamond presence 15%, GEX short-gamma (TURBULENT) 10%.
+    Range: 0-100. See ``explosion_score_detail`` for the breakdown.
     """
-    try:
-        score = 0.0
-
-        pre = scan_row.get("pre_diamond_status") or {}
-        if pre.get("is_pre_diamond"):
-            strength = str(pre.get("signal_strength", ""))
-            if "IMMINENT" in strength or "🔥" in strength:
-                score += 30
-            else:
-                score += 20
-
-        tenx = int(scan_row.get("10x Potential", 0) or 0)
-        score += min(25, tenx * 2.5)
-
-        qs = safe_float(scan_row.get("qs"), 0)
-        score += min(20, qs * 0.2)
-
-        d_status = str(scan_row.get("d_status", ""))
-        if "BLUE" in d_status:
-            score += 15
-        elif "PINK" not in d_status:
-            score += 0
-
-        gex = str(scan_row.get("GEX Regime", ""))
-        if "STABLE" in gex:
-            score += 10
-        elif "TURBULENT" in gex:
-            score += 0
-        else:
-            score += 5
-
-        return round(min(100, score), 1)
-    except Exception as _e:
-        log_warn("compute_explosion_score", _e)
-        return 0.0
+    return float(explosion_score_detail(scan_row)["score"])
 
 
 def _intraday_confirmation_check(ticker: str, *, rsi_cap: float = 70.0) -> dict:
@@ -1501,7 +1711,7 @@ def scan_single_ticker(
         assign_gap_pct = max(0.5, (price - float(K_scan)) / max(price, 1e-9) * 100.0)
         win_amt_disc = credit_pct
         loss_amt_disc = max(credit_pct * 1.15, assign_gap_pct * 0.75)
-        k_full, k_half = kelly_criterion(
+        k_cont_full, k_cont_half = kelly_criterion(
             win_p_disc,
             win_amt_disc,
             loss_amt_disc,
@@ -1511,6 +1721,31 @@ def scan_single_ticker(
             correlation_haircut=correlation_haircut,
             avg_mc_pop=scanner_avg_mc,
         )
+        # Audit (medium): these four discrete-Kelly inputs were built and then thrown away —
+        # `use_quant=True` with `variance > 0` always took the continuous branch, so changing
+        # `win_p_disc` from 5.0 to 94.0 left "Adj. Kelly %" bit-identical. The short put is a
+        # binary, defined-credit payoff, so the discrete solve is the one that matches it;
+        # the continuous Merton fraction is kept only as an upper bound. Report the smaller.
+        k_disc_full, k_disc_half = kelly_criterion(
+            win_p_disc,
+            win_amt_disc,
+            loss_amt_disc,
+            use_quant=False,
+            correlation_haircut=correlation_haircut,
+            avg_mc_pop=scanner_avg_mc,
+        )
+        try:
+            _hc = float(correlation_haircut)
+        except (TypeError, ValueError):
+            _hc = 1.0
+        if not np.isfinite(_hc) or _hc < 0:
+            _hc = 1.0
+        # `kelly_criterion`'s discrete branch ignores the haircut; apply it here so both
+        # candidates are on the same correlation-adjusted footing before taking the min.
+        k_disc_full = round(min(100.0, k_disc_full * _hc), 1)
+        k_disc_half = round(min(100.0, k_disc_half * _hc), 1)
+        k_full = round(min(k_cont_full, k_disc_full), 1)
+        k_half = round(min(k_cont_half, k_disc_half), 1)
 
         d_status = "None"
         d_class = "badge-none"
@@ -1554,7 +1789,12 @@ def scan_single_ticker(
         else:
             summary = f"Bearish pressure ({cp_score}/{cp_max} pillars). Defensive posture: avoid new longs, widen put strikes."
 
-        d_wr, _d_avg, d_n = diamond_win_rate(df, diamonds, forward_bars=10)
+        # Audit #23: entry side only. This value is displayed as "Historical win rate for
+        # Diamond signals"; pooling pink short outcomes into it made the headline number
+        # something no trader can act on (3 blue / 0 wins + 7 pink / 7 wins read as "70%").
+        _wr_sides = diamond_win_rate_by_side(df, diamonds, forward_bars=10)
+        d_wr, _d_avg, d_n = _wr_sides["blue"]
+        pink_wr, _pink_avg, pink_n = _wr_sides["pink"]
 
         em_safety = "—"
         try:
@@ -1651,8 +1891,15 @@ def scan_single_ticker(
             "kelly_full": k_full,
             "kelly_half": k_half,
             "Adj. Kelly %": k_half,
+            "kelly_continuous_half": k_cont_half,
+            "kelly_discrete_half": k_disc_half,
+            # Audit #23: `diamond_pop` is the BLUE (entry-side) win rate. Pink is reported
+            # separately so the two instruments are never averaged into one number.
             "diamond_pop": float(d_wr),
             "diamond_n": int(d_n),
+            "diamond_pop_side": "blue",
+            "pink_fade_wr": float(pink_wr),
+            "pink_fade_n": int(pink_n),
             "hvn_floor": float(hvn_floor) if hvn_floor is not None else None,
             "scanner_mc_pop": round(scanner_avg_mc, 1),
             "gz_hvn": gz_comp.get("HVN"),
@@ -1662,11 +1909,9 @@ def scan_single_ticker(
             "news_bias_score": news_bias_score,
             "reference_prem_100": float(prem_scan),
             "pre_diamond_status": pre_diamond,
-            "stock_stop_price": (
-                round(price - (1.5 * safe_float(safe_last(df["ATR"]), 0.0)), 2)
-                if "ATR" in df.columns and not df.empty
-                else round(price * 0.95, 2)
-            ),
+            # Audit #11: this read df["ATR"], a column nothing in the repo creates, so the
+            # advertised "1.5× ATR stop" always degraded to a flat −5%. Compute the ATR.
+            "stock_stop_price": _stock_stop_price(df, price),
             "10x Convexity": convexity_label,
             "10x Potential": int(_ten_x_score),
             "10x Flags": _ten_x_flags,
@@ -1677,6 +1922,68 @@ def scan_single_ticker(
     except Exception as _e:
         log_warn("scan_single_ticker", _e, ticker=str(tkr))
         return None
+
+
+# Audit #11: the squeeze / stop-loss code read a df["ATR"] column that nothing in the repo
+# ever creates. Compute it here instead. A caller may still supply a precomputed "ATR" or
+# "BBW" column (tests and any future pre-enriched pipeline) and it is honoured.
+_SQUEEZE_LOOKBACK_BARS = 60
+_SQUEEZE_MAX_PCTILE = 0.25
+
+
+def atr_series(df, period: int = 14):
+    """ATR(``period``) for ``df``, preferring a caller-supplied ``ATR`` column. ``None`` if
+    it cannot be computed (audit #11: missing data must be visible, not silently defaulted)."""
+    if df is None or getattr(df, "empty", True):
+        return None
+    try:
+        if "ATR" in df.columns:
+            s = pd.to_numeric(df["ATR"], errors="coerce").dropna()
+            return s if not s.empty else None
+        if not {"High", "Low", "Close"}.issubset(set(df.columns)):
+            return None
+        s = pd.to_numeric(TA.atr(df, period), errors="coerce").dropna()
+        return s if not s.empty else None
+    except Exception as _e:
+        log_warn("atr_series", _e)
+        return None
+
+
+def _stock_stop_price(df, price, atr_mult: float = 1.5):
+    """1.5× ATR stop below ``price``; flat −5% only when ATR is genuinely unavailable."""
+    try:
+        px = float(price)
+        s = atr_series(df)
+        if s is not None:
+            a = safe_float(safe_last(s), 0.0)
+            if np.isfinite(a) and a > 0:
+                return round(max(0.01, px - (atr_mult * a)), 2)
+        return round(px * 0.95, 2)
+    except (TypeError, ValueError):
+        return None
+
+
+def _volatility_squeeze_gate(df, lookback: int = _SQUEEZE_LOOKBACK_BARS,
+                             max_pctile: float = _SQUEEZE_MAX_PCTILE):
+    """``(is_squeezed, pctile)`` — latest ATR (or BBW) rank within the trailing ``lookback``.
+
+    Audit #11: **fails closed**. When volatility cannot be measured the gate returns
+    ``(False, None)`` rather than the old unconditional ``True``.
+    """
+    try:
+        s = atr_series(df)
+        if s is None and df is not None and "BBW" in getattr(df, "columns", []):
+            s = pd.to_numeric(df["BBW"], errors="coerce").dropna()
+        if s is None or len(s) < 20:
+            return False, None
+        tail = s.tail(min(lookback, len(s)))
+        pctile = safe_float(safe_last(tail.rank(pct=True)), None)
+        if pctile is None or not np.isfinite(pctile):
+            return False, None
+        return bool(pctile <= max_pctile), round(float(pctile), 3)
+    except Exception as _e:
+        log_warn("_volatility_squeeze_gate", _e)
+        return False, None
 
 
 # ═════════════════════════════════════════════════════════════════════════
@@ -1699,18 +2006,23 @@ class Opt:
         """
         try:
             if confluence_series is None or len(confluence_series) < 3 or df is None or df.empty or 'Close' not in df.columns:
-                return {"is_pre_diamond": False, "signal_strength": "—"}
+                # "gates" on every return path — the success paths always carry it,
+                # so omitting it here made the contract shape-dependent.
+                return {"is_pre_diamond": False, "signal_strength": "—", "gates": {}}
 
             current_score = safe_float(safe_last(confluence_series), 0.0)
             prev_score = confluence_series.iloc[-2]
             close = safe_float(safe_last(df['Close']), 0.0)
 
-            # Volatility Squeeze (coil)
-            squeeze = True
-            if 'ATR' in df.columns and len(df) >= 60:
-                squeeze = (safe_float(safe_last(df['ATR'].tail(60).rank(pct=True)), 1.0) <= 0.25)
-            elif 'BBW' in df.columns and len(df) >= 60:
-                squeeze = (safe_float(safe_last(df['BBW'].tail(60).rank(pct=True)), 1.0) <= 0.25)
+            # Volatility Squeeze (coil).
+            # Audit #11: this used to be `squeeze = True` followed by
+            # `if 'ATR' in df.columns … elif 'BBW' in df.columns …`. Neither column is ever
+            # created in the production path (`fetch_stock` / `_ticker_daily_ohlcv_from_raw`
+            # return raw OHLCV), so the gate was unconditionally True inside `all(conditions)`
+            # — a name at the 95th BBW percentile (maximum expansion) passed identically to one
+            # at the 2nd, while the UI claimed "bottom 25% of 60-day ATR range". The gate now
+            # computes ATR itself, and it **fails closed**: no measurable ATR ⇒ no pre-diamond.
+            squeeze, squeeze_pctile = _volatility_squeeze_gate(df)
 
             # Relative Strength vs SPY (3-day return)
             rs_strong = True
@@ -1733,16 +2045,18 @@ class Opt:
             elif shadow_low and abs(close - shadow_low) / close < 0.015:
                 near_support = True
 
-            conditions = [
-                5 <= current_score <= 6,
-                current_score > prev_score,
-                squeeze,
-                vol_ramping,
-                near_support,
-                weekly_bias != "BEARISH"
-            ]
+            # Audit #11: every gate reports (ok, observed value) so "missing data" is visibly
+            # distinct from "measured and failed" instead of collapsing into a silent pass.
+            gates = {
+                "confluence_band": (bool(5 <= current_score <= 6), float(current_score)),
+                "confluence_rising": (bool(current_score > prev_score), float(prev_score)),
+                "squeeze": (bool(squeeze), squeeze_pctile),
+                "volume_ramp": (bool(vol_ramping), None),
+                "near_support": (bool(near_support), None),
+                "weekly_not_bearish": (weekly_bias != "BEARISH", str(weekly_bias)),
+            }
 
-            if all(conditions):
+            if all(ok for ok, _ in gates.values()):
                 support_dist = min(
                     abs(close - (gold_zone_price or close)),
                     abs(close - (shadow_low or close))
@@ -1751,12 +2065,14 @@ class Opt:
                     "is_pre_diamond": True,
                     "signal_strength": "🔥 IMMINENT BREAKOUT" if rs_strong else "🟡 ACCUMULATING",
                     "volatility_state": "SQUEEZED",
-                    "support_proximity": round(support_dist, 1)
+                    "atr_pctile_60d": squeeze_pctile,
+                    "support_proximity": round(support_dist, 1),
+                    "gates": gates,
                 }
-            return {"is_pre_diamond": False, "signal_strength": "—"}
+            return {"is_pre_diamond": False, "signal_strength": "—", "gates": gates}
         except Exception as _e:
             log_warn("Opt.detect_pre_diamond", _e)
-            return {"is_pre_diamond": False, "signal_strength": "—"}
+            return {"is_pre_diamond": False, "signal_strength": "—", "gates": {}}
 
     @staticmethod
     def calc_gamma_exposure(opts_df, spot_price, rfr=0.045, T_years=None, hvn_prices=None):
@@ -1831,7 +2147,16 @@ class Opt:
 
     @staticmethod
     def find_gamma_flip(gex_by_strike):
-        """Strike where cumulative GEX (sorted by strike) crosses from positive to negative."""
+        """Strike where cumulative GEX (sorted by strike) crosses from **negative to positive**.
+
+        Audit #10: ``calc_gamma_exposure`` signs calls +1 and puts −1, so cumulating from the
+        lowest strike upward starts negative (deep-OTM put OI) and turns positive above spot.
+        That negative→positive crossing is the flip. The finder previously accepted only the
+        positive→negative direction, so on any normal put-skewed chain it returned ``None`` —
+        killing the GEX regime label, the gold-zone fusion, the ±2/−3 diamond nudge and the
+        chart line — and on the rarer call-heavy chain it labelled STABLE/TURBULENT backwards.
+        Downstream semantics confirm this direction: ``price > gamma_flip`` ⇒ STABLE.
+        """
         try:
             if gex_by_strike is None or len(gex_by_strike) < 2:
                 return None
@@ -1854,7 +2179,7 @@ class Opt:
             for j in cross_idx:
                 c0, c1 = float(cum[j]), float(cum[j + 1])
                 k0, k1 = float(strikes[j]), float(strikes[j + 1])
-                if c0 > 0 and c1 < 0:
+                if c0 < 0 and c1 > 0:
                     if abs(c1 - c0) < 1e-18:
                         return k1
                     t = -c0 / (c1 - c0)

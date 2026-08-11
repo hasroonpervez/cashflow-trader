@@ -340,6 +340,12 @@ def build_context(
     if not defer_options_fetch:
         _fetch_options_context(ctx)
     ctx.gamma_flip = None
+    # Audit finding #7: `_cf_opex_pin` was only ever *assigned* inside the chain branch
+    # below, so when the chain was absent (first-pass deferral, empty Yahoo chain) the
+    # key silently kept the PREVIOUS ticker's pin — charted as "Pin $178" on a $12 stock
+    # and persisted into the ledger as `dist_pin_pct_at_entry`. Clear it up front, on the
+    # same line as `gamma_flip`, so "no chain" reads as "no pin" rather than "last pin".
+    st.session_state["_cf_opex_pin"] = None
     try:
         if ctx.bluf_calls is not None and ctx.bluf_puts is not None:
             _c = ctx.bluf_calls.copy() if not ctx.bluf_calls.empty else pd.DataFrame()

@@ -239,6 +239,17 @@ def main():
         defer_options_fetch=_defer_options_fetch,
     )
     st.session_state["_cf_first_pass_done"] = True
+    if _defer_options_fetch:
+        # Audit finding: the deferred first pass computes Quant Edge, Gold Zone,
+        # confluence and diamonds WITHOUT the options chain, flips `_cf_first_pass_done`
+        # and stops — so the numbers silently changed on the next unrelated click and the
+        # user had no way to know the first set was partial. Say so, and (below, at the
+        # end of main) hydrate immediately instead of waiting for a stray interaction.
+        st.info(
+            "⏳ **Fast first render** — the options chain has not loaded yet. Quant Edge, Gold Zone, "
+            "confluence and diamonds on this pass are computed **without** options data and will "
+            "refresh in a moment."
+        )
     if ctx is None:
         _sym_e = safe_html(hud.ticker)
         st.error(
@@ -325,8 +336,17 @@ def main():
         ctx.mobile_chart_layout,
     )
 
-    dash_tab_setup, dash_tab_cashflow, dash_tab_intel, dash_tab_ledger, dash_tab_radar, dash_tab_sentiment = st.tabs(
+    (
+        dash_tab_find10x,
+        dash_tab_setup,
+        dash_tab_cashflow,
+        dash_tab_intel,
+        dash_tab_ledger,
+        dash_tab_radar,
+        dash_tab_sentiment,
+    ) = st.tabs(
         [
+            "🎯 Find 10x",
             "📍 Signals",
             "💰 Cash Flow",
             "🔍 Scanner & Intel",
@@ -335,6 +355,12 @@ def main():
             "📡 Sentiment",
         ]
     )
+
+    with dash_tab_find10x:
+        from modules.find10x import render_find10x_tab
+        render_find10x_tab(
+            cfg.get("radar_universe", cfg.get("watchlist", ""))
+        )
 
     with dash_tab_setup:
         render_setup_tab(ctx.chart_mood, desk)
@@ -351,6 +377,12 @@ def main():
         render_sentiment_radar_tab(
             cfg.get("sentiment_universe", cfg.get("quantum_watchlist", ""))
         )
+
+    # The fast first pass has now painted. Re-run once to hydrate the options chain so
+    # the chain-dependent numbers correct themselves immediately rather than on the next
+    # unrelated click. `_cf_first_pass_done` is already True, so this cannot loop.
+    if _defer_options_fetch:
+        st.rerun()
 
 
 if __name__ == "__main__":

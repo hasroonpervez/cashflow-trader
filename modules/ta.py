@@ -62,26 +62,52 @@ class TA:
 
     @staticmethod
     def ffd_returns_from_closes(closes_wide, d=0.4, max_lags=50):
-        """Inner-joined first differences of FFD levels per column (Pearson / sizing inputs)."""
+        """Inner-joined first differences of FFD levels per column (Pearson / sizing inputs).
+
+        Tickers with fewer than ``max_lags + 15`` valid closes cannot be fractionally
+        differenced and are excluded. AUDIT (medium, ta.py:74): that exclusion used to be
+        silent, so a short-history name simply vanished from the correlation matrix and
+        every downstream overlap/haircut lookup returned "no correlation" — i.e. **full
+        size** — for exactly the names we know least about. The dropped names are now
+        logged and published on ``.attrs['ffd_dropped_insufficient']`` so callers can tell
+        "measured as uncorrelated" apart from "never measured".
+        """
+        min_closes = int(max_lags) + 15
         if closes_wide is None or getattr(closes_wide, "empty", True):
-            return pd.DataFrame()
+            return TA._tag_ffd_attrs(pd.DataFrame(), [], min_closes)
         work = closes_wide.copy()
         work.columns = [str(c).strip().upper() for c in work.columns]
         work = work.apply(pd.to_numeric, errors="coerce")
         parts = {}
+        dropped = []
         for c in work.columns:
             col = work[c].dropna()
-            if len(col) < max_lags + 15:
+            if len(col) < min_closes:
+                dropped.append(str(c))
                 continue
             fd = TA.apply_ffd(col, d=d, max_lags=max_lags)
             if fd is not None and len(fd) >= 4:
                 parts[c] = fd
+            else:
+                dropped.append(str(c))
+        if dropped:
+            log_warn(
+                "TA.ffd_returns_from_closes dropped tickers with insufficient history",
+                ValueError(f"need >= {min_closes} closes; dropped {sorted(dropped)}"),
+            )
         if len(parts) < 2:
-            return pd.DataFrame()
+            return TA._tag_ffd_attrs(pd.DataFrame(), dropped, min_closes)
         merged = pd.concat(parts, axis=1, join="inner")
         if merged.shape[0] < 3:
-            return pd.DataFrame()
-        return merged.diff().dropna(how="any")
+            return TA._tag_ffd_attrs(pd.DataFrame(), dropped, min_closes)
+        return TA._tag_ffd_attrs(merged.diff().dropna(how="any"), dropped, min_closes)
+
+    @staticmethod
+    def _tag_ffd_attrs(frame, dropped, min_closes):
+        """Stamp the FFD exclusion list onto the result (see ffd_returns_from_closes)."""
+        frame.attrs["ffd_dropped_insufficient"] = sorted(str(x) for x in dropped)
+        frame.attrs["ffd_min_closes_required"] = int(min_closes)
+        return frame
 
     @staticmethod
     def _whale_zscore_window(df):
@@ -142,11 +168,28 @@ class TA:
         return m + st * sd, m, m - st * sd
 
     @staticmethod
-    def atr(df, p=14):
+    def true_range(df):
+        """Wilder's True Range: max(H-L, |H-C_prev|, |L-C_prev|). First bar falls back to H-L."""
         hl = df["High"] - df["Low"]
-        hc = abs(df["High"] - df["Close"].shift())
-        lc = abs(df["Low"] - df["Close"].shift())
-        return pd.concat([hl, hc, lc], axis=1).max(axis=1).rolling(p).mean()
+        hc = (df["High"] - df["Close"].shift()).abs()
+        lc = (df["Low"] - df["Close"].shift()).abs()
+        return pd.concat([hl, hc, lc], axis=1).max(axis=1)
+
+    @staticmethod
+    def atr(df, p=14):
+        """Wilder's ATR — RMA (EWM with α=1/p) of True Range, matching TradingView/Bloomberg.
+
+        AUDIT (medium, ta.py:145): the previous implementation was ``TR.rolling(p).mean()``,
+        a *simple* moving average. That diverges from every charting platform by +2.33% on
+        average and up to 40.79%, and it was inconsistent with ``TA.rsi`` directly below,
+        which was deliberately Wilder-ised with a docstring calling simple means incorrect.
+        The difference is not cosmetic: an SMA drops a spike bar completely once it leaves
+        the window, while Wilder's RMA decays it, which is why RMA-based stops stay wide
+        after a gap. Warm-up NaNs are preserved (``min_periods=p``) so callers that guard on
+        ``len(df) >= 15`` behave exactly as before.
+        """
+        p = max(1, int(p))
+        return TA.true_range(df).ewm(alpha=1.0 / float(p), adjust=False, min_periods=p).mean()
 
     @staticmethod
     def stoch(df, k=14, d=3):
@@ -206,16 +249,25 @@ class TA:
 
     @staticmethod
     def adx(df, p=14):
-        """ADX with zero-division guards on ATR and DI sum."""
+        """Wilder's ADX/DI with zero-division guards on ATR and DI sum.
+
+        AUDIT (medium, ta.py:218): ADX inherited the SMA ATR from ``TA.atr`` and then added
+        *two more* simple means (``dm.rolling(p).mean()`` and ``dx.rolling(p).mean()``) where
+        Wilder specifies RMA smoothing at all three stages. Both the level and the lag were
+        wrong versus any charting platform, against a hard ``adx_val > 25`` gate in
+        ``options.py:640``. All three stages are now RMA (α = 1/p).
+        """
+        p = max(1, int(p))
+        alpha = 1.0 / float(p)
         atr_v = TA.atr(df, p).replace(0, np.nan)
         dm_p = df["High"].diff(); dm_n = -df["Low"].diff()
-        dm_p = dm_p.where((dm_p > dm_n) & (dm_p > 0), 0)
-        dm_n = dm_n.where((dm_n > dm_p) & (dm_n > 0), 0)
-        di_p = 100 * dm_p.rolling(p).mean() / atr_v
-        di_n = 100 * dm_n.rolling(p).mean() / atr_v
+        dm_p = dm_p.where((dm_p > dm_n) & (dm_p > 0), 0.0)
+        dm_n = dm_n.where((dm_n > dm_p) & (dm_n > 0), 0.0)
+        di_p = 100 * dm_p.ewm(alpha=alpha, adjust=False, min_periods=p).mean() / atr_v
+        di_n = 100 * dm_n.ewm(alpha=alpha, adjust=False, min_periods=p).mean() / atr_v
         di_sum = (di_p + di_n).replace(0, np.nan)
         dx = 100 * (di_p - di_n).abs() / di_sum
-        return dx.rolling(p).mean(), di_p, di_n
+        return dx.ewm(alpha=alpha, adjust=False, min_periods=p).mean(), di_p, di_n
 
     @staticmethod
     def cci(df, p=20):
@@ -368,15 +420,27 @@ class TA:
 
     @staticmethod
     def get_dark_pool_proxy(df):
-        """Adaptive rolling volume Z-score: window **10 / 30 / 40** from vol regime (RVI + ER); whale when Z > 2.0."""
+        """Adaptive volume Z-score against the **prior** w bars (w = 10/30/40 from RVI + ER).
+
+        AUDIT #26: the baseline used to include the bar being scored
+        (``vol.rolling(w)`` with ``ddof=0``), which algebraically caps z at exactly
+        √(w−1) — 3.0000 at w=10, 5.3852 at w=30, 6.2450 at w=40. ``detect_diamonds``
+        grades ``zlv > 3.0`` for its 2-point whale tier (``options.py:909``), so that tier
+        was provably unreachable in the choppy regime that selects w=10 — the exact regime
+        where an institutional print matters most. Scoring the current bar against a
+        baseline that excludes it (``vol.shift(1)``) is the correct anomaly-z construction
+        and removes the ceiling entirely: a 20× print now reads ~19σ at any window.
+        """
         if df is None or df.empty or "Volume" not in df.columns:
             return pd.DataFrame()
         vol = pd.to_numeric(df["Volume"], errors="coerce")
         w = int(TA._whale_zscore_window(df))
         nobs = int(vol.notna().sum())
+        # shift(1) consumes one observation, so the window must leave a prior bar behind.
         w = max(5, min(w, max(5, nobs - 1)))
-        mu = vol.rolling(w, min_periods=w).mean()
-        sd = vol.rolling(w, min_periods=w).std(ddof=0)
+        prior = vol.shift(1)
+        mu = prior.rolling(w, min_periods=w).mean()
+        sd = prior.rolling(w, min_periods=w).std(ddof=0)
         denom = sd.where((sd.notna()) & (sd > 0), np.nan)
         z = (vol - mu) / denom
         z = z.fillna(0.0).replace([np.inf, -np.inf], 0.0)
@@ -451,92 +515,185 @@ class TA:
             "n_whale_bars": int(len(whale)),
         }
 
+    # AUDIT #27 — measured null distribution of the Anis-Lloyd-corrected R/S estimator.
+    # 4,000 pure Gaussian random walks per n ∈ {60, 100, 150, 251, 500, 1000}: the corrected
+    # estimate is centred on 0.500 (raw was 0.524 — that bias is what made 26% of pure noise
+    # read as "trending") and its dispersion is well described by SE(H) ≈ 0.23 / ln(n)
+    # (measured sd·ln(n) = 0.225, 0.229, 0.229, 0.222, 0.221, 0.214).
+    _HURST_RS_SE_COEF = 0.23
+    # The consumers of this number cut at 0.45 / 0.55 (signal_desk.py:595/604,
+    # options.py:1217, renderers.py:422). A verdict is only emitted when the estimate clears
+    # BOTH ±2·SE of the null AND those published cutoffs, so a caller branching on 0.55 can
+    # never be branching on noise. Measured false-classification rate on the null: 4.0%.
+    _HURST_MIN_EDGE = 0.05
+
     @staticmethod
-    def calculate_hurst_exponent(close_prices, window: int = 252) -> Optional[float]:
-        """Rescaled-range (R/S) Hurst estimate on the last ``window`` closes (log returns).
+    def _anis_lloyd_expected_rs(n: int) -> Optional[float]:
+        """E[R/S] for i.i.d. noise (Anis & Lloyd 1976, Peters' small-sample form)."""
+        n = int(n)
+        if n < 4:
+            return None
+        i = np.arange(1, n, dtype=float)
+        tail = float(np.sum(np.sqrt((n - i) / i)))
+        if n > 340:
+            front = (n - 0.5) / n * (n * math.pi / 2.0) ** -0.5
+        else:
+            front = (n - 0.5) / n * math.exp(
+                math.lgamma((n - 1) / 2.0) - 0.5 * math.log(math.pi) - math.lgamma(n / 2.0)
+            )
+        out = front * tail
+        return float(out) if math.isfinite(out) and out > 0 else None
 
-        Single-window **log(R/S) / log(n)** on *n* returns; fast O(n). Returns ``None`` if data
-        are insufficient. **H > 0.55** ≈ trending, **H < 0.45** ≈ mean-reverting.
+    @staticmethod
+    def hurst_rs_stderr(n: int) -> Optional[float]:
+        """Standard error of the R/S Hurst estimate on ``n`` returns (see ``_HURST_RS_SE_COEF``)."""
+        n = int(n)
+        if n < 20:
+            return None
+        return float(TA._HURST_RS_SE_COEF / math.log(float(n)))
 
-        Window bumped from 100 to 252 (1 trading year) — at 100 bars the R/S estimator has
-        a standard error of ~0.15 on a pure random walk, which washes out the signal. At 252
-        bars the SE drops to ~0.09, producing results that are meaningfully different from 0.5.
-        Below 60 usable returns we still fall back to None rather than guess.
+    @staticmethod
+    def hurst_rs_estimate(close_prices, window: int = 252) -> Optional[dict]:
+        """Bias-corrected R/S Hurst with its uncertainty. ``None`` when data are insufficient.
+
+        Returns ``{'h', 'stderr', 'n', 'edge', 'significant', 'regime'}`` where ``regime`` is
+        ``'TRENDING'`` / ``'MEAN_REVERTING'`` / ``'RANDOM_WALK'`` and ``significant`` is False
+        whenever the ±2·SE interval spans a decision threshold. Read ``h`` for display only —
+        branch on ``regime``/``significant``, never on ``h`` alone (AUDIT #27).
         """
         try:
             s = np.asarray(
                 pd.Series(close_prices, dtype=float).dropna().values[-int(window) :], dtype=float
             )
-            w = int(window)
-            if s.size < max(40, min(w, 60)) or s.size < 40:
+            if s.size < 40 or np.any(s <= 0):
                 return None
             lr = np.diff(np.log(s))
             lr = lr[np.isfinite(lr)]
             n = int(lr.size)
             if n < 30:
                 return None
-            mu = float(np.mean(lr))
-            y = np.cumsum(lr - mu)
+            y = np.cumsum(lr - float(np.mean(lr)))
             r_rng = float(np.max(y) - np.min(y))
-            sig = float(np.std(lr, ddof=1))
-            if sig < 1e-12 or r_rng <= 0 or n < 2:
+            # ddof=0: the Anis-Lloyd expectation is derived for the ML standard deviation.
+            sig = float(np.std(lr, ddof=0))
+            if sig < 1e-12 or r_rng <= 0:
                 return None
-            h = float(np.log(r_rng / sig) / np.log(float(n)))
+            e_rs = TA._anis_lloyd_expected_rs(n)
+            if e_rs is None:
+                return None
+            # H = 0.5 + [log(R/S) - log(E[R/S] under i.i.d.)] / log(n). Subtracting the
+            # small-sample expectation is what re-centres the null on 0.5 (AUDIT #27).
+            h = 0.5 + (math.log(r_rng / sig) - math.log(e_rs)) / math.log(float(n))
             if not math.isfinite(h):
                 return None
-            return float(np.clip(h, 0.0, 1.0))
+            h = float(np.clip(h, 0.0, 1.0))
+            se = TA.hurst_rs_stderr(n)
+            if se is None:
+                return None
+            edge = max(2.0 * se, TA._HURST_MIN_EDGE)
+            if h - 0.5 > edge:
+                regime, significant = "TRENDING", True
+            elif 0.5 - h > edge:
+                regime, significant = "MEAN_REVERTING", True
+            else:
+                regime, significant = "RANDOM_WALK", False
+            return {
+                "h": h,
+                "stderr": float(se),
+                "n": n,
+                "edge": float(edge),
+                "significant": bool(significant),
+                "regime": regime,
+            }
         except Exception as _e:
-            log_warn("TA.calculate_hurst_exponent", _e)
+            log_warn("TA.hurst_rs_estimate", _e)
             return None
 
     @staticmethod
-    def hurst(series):
-        """Hurst exponent via variance ratio (aggregated variance method).
-        Uses log returns. Var(q-period returns) scales as q^(2H).
-        H > 0.55 = trending, H < 0.45 = mean-reverting, ~0.5 = random walk.
-
-        Minimum data bumped from 100 → 252 bars (1 full trading year).
-        At <252 bars the highest lag we use is 64 periods; needing len(rets)//4 ≥ 64
-        means we need at least 256 returns anyway, so 252 price bars (= 251 returns)
-        is the natural floor. Below that we return the random-walk prior of 0.5 rather
-        than a noisy estimate. The 80-return secondary guard is raised to 200 for
-        consistency — you need at least log2(200/4) ≈ 5.6 lags to get a stable slope.
-        """
-        ts = series.dropna().values
-        if len(ts) < 252:
-            # Insufficient history for a reliable Hurst estimate — return random-walk prior
-            return 0.5
-        rets = np.diff(np.log(ts))
-        rets = rets[np.isfinite(rets)]
-        if len(rets) < 200:
-            # Guard against edge case where log-return NaN stripping reduces count too far
-            return 0.5
-        lags = [2, 4, 8, 16, 32, 64]
-        lags = [q for q in lags if q < len(rets) // 4]
-        if len(lags) < 3:
-            return 0.5
-        log_lags, log_vars = [], []
-        for q in lags:
-            agg = np.array([rets[i:i + q].sum() for i in range(0, len(rets) - q + 1, q)])
-            if len(agg) < 5:
-                continue
-            v = np.var(agg, ddof=1)
-            if v > 0:
-                log_lags.append(np.log(q))
-                log_vars.append(np.log(v))
-        if len(log_lags) < 3:
-            return 0.5
-        slope = np.polyfit(log_lags, log_vars, 1)[0]
-        H = slope / 2.0
-        return round(float(np.clip(H, 0, 1)), 3)
+    def hurst_regime(close_prices, window: int = 252) -> Optional[str]:
+        """``'TRENDING'`` / ``'MEAN_REVERTING'``, or ``None`` when the estimate is not
+        distinguishable from a random walk (or there is not enough data). Prefer this over
+        thresholding the raw exponent."""
+        est = TA.hurst_rs_estimate(close_prices, window=window)
+        if est is None or not est["significant"]:
+            return None
+        return str(est["regime"])
 
     @staticmethod
-    def get_correlation_matrix(price_history_dict, lookback_days=90, ffd_d=0.4):
+    def calculate_hurst_exponent(
+        close_prices, window: int = 252, require_significance: bool = True
+    ) -> Optional[float]:
+        """Anis-Lloyd-corrected R/S Hurst on the last ``window`` closes. ``Optional[float]``.
+
+        AUDIT #27: the previous version was raw ``log(R/S)/log(n)``, which carries the
+        Anis-Lloyd small-sample bias — measured mean 0.524 (sd 0.042) on 400 *pure random
+        walks* of 251 returns, so **26.2% of pure noise was labelled trending** by the
+        ``> 0.55`` cutoff its own docstring published. The docstring's "SE ≈ 0.09 at 252
+        bars" was wrong in both directions.
+
+        Two changes: the estimate is bias-corrected (null now centred on 0.500), and with
+        ``require_significance`` (the default) a number is returned **only** when it clears
+        ±2·SE of the measured null *and* the 0.45/0.55 cutoffs its callers use. Otherwise
+        ``None`` — never a confident regime label built on noise. Every caller already
+        handles ``None`` as "no regime read" (``signal_desk.py:594``, ``options.py:1216``,
+        ``data.py:995``), so a ``None`` here degrades to the random-walk prior rather than
+        to a fabricated verdict. Pass ``require_significance=False`` to display the raw
+        corrected estimate alongside ``hurst_rs_stderr``.
+        """
+        est = TA.hurst_rs_estimate(close_prices, window=window)
+        if est is None:
+            return None
+        if require_significance and not est["significant"]:
+            return None
+        return float(est["h"])
+
+    @staticmethod
+    def hurst(series):
+        """Hurst exponent, float-returning, with the random-walk prior of 0.5 as the default.
+
+        AUDIT #27: this used to be a *second, different* estimator — aggregated-variance
+        slope/2 — with only 5 usable lags at n=251. Measured on pure Gaussian random walks
+        it returned mean 0.472 with sd 0.105, labelling **64% of pure noise** as either
+        trending or mean-reverting, and it disagreed with ``calculate_hurst_exponent`` by
+        ~0.05 in mean on identical data while sharing the same 0.55/0.45 cutoffs. Keeping
+        two estimators that contradict each other at the decision boundary is worse than
+        keeping one, so this now delegates to the bias-corrected R/S estimator; the
+        variance-ratio method is simply too noisy to use at n=252.
+
+        Stays float-returning (rather than Optional) because ``options.py:781`` does
+        ``float(TA.hurst(close))`` and ``renderers.py:421`` formats it unconditionally —
+        0.5 is the honest "no measurable regime" answer for both.
+        """
+        try:
+            est = TA.calculate_hurst_exponent(series, window=252, require_significance=True)
+        except Exception as _e:
+            log_warn("TA.hurst", _e)
+            return 0.5
+        if est is None:
+            return 0.5
+        return round(float(est), 3)
+
+    @staticmethod
+    def get_correlation_matrix(
+        price_history_dict, lookback_days=90, ffd_d=0.4, max_lags=50, min_obs=60
+    ):
         """Pearson correlation of **FFD return** innovations across tickers (``lookback_days`` daily bars).
 
         ``price_history_dict`` maps ticker → ``pd.Series`` of closes (DatetimeIndex) or
         a DataFrame with a ``Close`` column. Series are aligned with ``join='inner'`` on
         dates so mismatched lengths do not skew pairwise samples.
+
+        AUDIT (medium, ta.py:566): the "90-day" matrix was built from **39 observations** —
+        ``tail(90)`` was taken *before* the FFD convolution burned 50 lags, and the final
+        ``diff()`` cost one more. Pearson SE at n=39 is ≈0.167 against knife-edge cutoffs at
+        0.75 (``options.py:963``), 0.80 (``options.py:2079``) and 0.6/0.8
+        (``options.py:2387``) — a true ρ of 0.55 crosses 0.75 roughly one time in eight.
+        Two fixes: retain ``lookback_days + max_lags + 1`` closes so ``lookback_days``
+        innovations actually survive the transform, and return an **empty** frame when
+        fewer than ``min_obs`` survive anyway. Empty is the existing "unknown" signal —
+        every caller already treats an empty/None matrix as "apply no correlation penalty"
+        — so a matrix too thin to trust can no longer trigger a penalty. The realised
+        observation count is published on ``.attrs['n_obs']``.
         """
         if not price_history_dict:
             return pd.DataFrame()
@@ -562,9 +719,28 @@ class TA:
         if wide.empty or len(wide) < 5:
             return pd.DataFrame()
         lb = max(5, int(lookback_days))
-        wide = wide.tail(lb).dropna(how="all")
-        ffd_ret = TA.ffd_returns_from_closes(wide, d=ffd_d)
-        if ffd_ret.empty or len(ffd_ret) < 3:
-            return pd.DataFrame()
-        return ffd_ret.corr(method="pearson")
+        ml = max(1, int(max_lags))
+        # Keep the FFD warm-up on top of the requested window: the convolution consumes
+        # ``max_lags`` bars and the trailing diff() one more before the first usable row.
+        wide = wide.tail(lb + ml + 1).dropna(how="all")
+        ffd_ret = TA.ffd_returns_from_closes(wide, d=ffd_d, max_lags=ml)
+        n_obs = 0 if ffd_ret is None or ffd_ret.empty else int(len(ffd_ret))
+        floor = max(3, int(min_obs))
+        if n_obs < floor:
+            out = pd.DataFrame()
+            out.attrs["n_obs"] = n_obs
+            out.attrs["insufficient_observations"] = True
+            out.attrs["min_obs_required"] = floor
+            out.attrs["ffd_dropped_insufficient"] = list(
+                getattr(ffd_ret, "attrs", {}).get("ffd_dropped_insufficient", [])
+            )
+            return out
+        out = ffd_ret.corr(method="pearson")
+        out.attrs["n_obs"] = n_obs
+        out.attrs["insufficient_observations"] = False
+        out.attrs["min_obs_required"] = floor
+        out.attrs["ffd_dropped_insufficient"] = list(
+            getattr(ffd_ret, "attrs", {}).get("ffd_dropped_insufficient", [])
+        )
+        return out
 

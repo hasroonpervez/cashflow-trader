@@ -12,8 +12,12 @@ Free data sources (no API keys, no subscriptions):
 
 Signal math (every formula unit-tested in tests/test_sentiment_radar.py):
 
-  1. Mention velocity  v = mentions_now / max(1, mentions_24h_ago)
+  1. Mention velocity  v = (mentions_now + K) / (mentions_24h_ago + K), K=10
      vel_component = clip(log10(v), 0, 1)         # v=1 -> 0, v>=10 -> 1
+     K is a shrinkage prior, not a floor. An unstabilised ratio let 1 -> 10
+     mentions read as a 10x spike (maxing the single largest weight) while
+     200 -> 600 -- a far bigger real event -- earned 0.48. K=10 says "about
+     ten mentions of evidence are needed before the ratio is believed".
 
   2. Sentiment conviction — Wilson score LOWER bound (95%, z=1.96) of the
      bullish proportion from StockTwits labeled messages. This is the
@@ -23,11 +27,20 @@ Signal math (every formula unit-tested in tests/test_sentiment_radar.py):
   3. Volume anomaly  z = (vol_today - mean(prev 30)) / std(prev 30, ddof=1)
      volz_component = clip(z / 4, 0, 1)           # z>=4 -> saturated
 
-  4. Earliness (are we late?)  r = close/close_5d_ago - 1
-     early_component = clip(1 - |r| / 0.30, 0, 1) # +/-30% in 5d -> 0 (late)
+  4. Earliness (has the up-move already happened?)
+     r = close/close_5d_ago - 1
+     early_component = clip(1 - max(0, r) / 0.30, 0, 1)   # +30% in 5d -> 0
+     DIRECTION MATTERS: only up-moves consume earliness. A -25% collapse is
+     not a missed rally, so it stays "early" on this axis and is surfaced
+     separately as a selloff by attention_stage() and verdict_for_row().
 
-  Composite Asymmetric Score (0-100):
-     score = 100 * (0.35*vel + 0.25*wilson + 0.25*volz + 0.15*early)
+  Composite Asymmetric Score (0-100) — these are exactly WEIGHTS below:
+     score = 100 * (0.30*vel + 0.20*wilson + 0.20*volz
+                    + 0.15*early + 0.15*trends)            # sums to 1.00
+
+  Macro gate (a real gate, not a banner): VIX >= 20 caps every score at 65,
+  VIX >= 25 caps it at 50 — buzz spikes in fear regimes are usually
+  bear-market rallies. Capped rows are flagged "macro-capped".
 
   Cross-source integrity rules (anti-hallucination):
      * ApeWisdom hot (v >= 2) but StockTwits < MIN_CONFIRM_MSGS messages
@@ -55,7 +68,8 @@ WILSON_Z = 1.96          # 95% confidence
 VOL_LOOKBACK = 30        # sessions for volume baseline
 VOLZ_SATURATION = 4.0    # z-score that earns full volume marks
 EARLY_ROC_DAYS = 5
-EARLY_ROC_LIMIT = 0.30   # +/-30% in 5 sessions == fully "late"
+EARLY_ROC_LIMIT = 0.30   # +30% in 5 sessions == fully "late" (UP-moves only; a
+                         # selloff does not consume earliness — see earliness_component)
 MIN_CONFIRM_MSGS = 3     # StockTwits msgs needed to confirm a Reddit spike
 THIN_CONFIRM_CAP = 60.0
 DISAGREE_RATIO = 5.0
@@ -78,11 +92,44 @@ def clip01(x: float) -> float:
     return 0.0 if x < 0.0 else (1.0 if x > 1.0 else float(x))
 
 
+VELOCITY_PRIOR = 10.0    # shrinkage constant K — see mention_velocity()
+
+# "Buzz is doubling" expressed in SHRUNK units.
+#
+# With the K=10 prior, a true doubling gives (2p+K)/(p+K), which approaches 2.0 from
+# below and never reaches it — so the old literal 2.0 thresholds became unreachable by
+# any doubling, silently disabling the attention node, the 🔥 gate, AND the
+# thin-confirmation integrity cap. Solving (2p+10)/(p+10) >= 1.7 gives p >= ~23, so
+# this threshold reads exactly as: "a doubling, from a base of at least ~23 mentions".
+# Small-count doublings not clearing it is the intended behaviour, not a side effect.
+VELOCITY_DOUBLING = 1.7
+
+
 def mention_velocity(mentions_now: float, mentions_prev: float) -> float:
-    """Ratio of current to prior-period mentions. Prior floored at 1."""
+    """Shrunk ratio of current to prior-period mentions: (now+K)/(prev+K).
+
+    AUDIT FIX — the old form was `now / max(1, prev)`, an unstabilised ratio
+    with the denominator merely floored. That made 1 -> 10 mentions score
+    10.0 (component 1.0, maxing the largest weight in the composite) while
+    200 -> 600 mentions — vastly stronger evidence of a real crowd arriving —
+    scored 3.0 (component 0.48). Small absolute counts dominated the board.
+
+    K = VELOCITY_PRIOR = 10 is a Bayesian-style prior added to BOTH sides:
+    it pulls low-count ratios toward 1.0 (no signal) and leaves high-count
+    ratios almost untouched. With K=10 the same two cases become 1.82
+    (component 0.26) and 2.90 (component 0.46) — the big move now
+    outranks the tiny one, which is the whole point.
+
+    Zero CURRENT mentions returns 0.0 regardless of history — the board renders
+    that as "none", and the shrunk ratio would otherwise print a misleading "0.1x"
+    for a ticker literally nobody is mentioning (100 -> 0 gives 10/110). Nobody
+    talking about it now IS no buzz; the collapse is visible in the mention counts.
+    """
     m_now = max(0.0, float(mentions_now or 0))
-    m_prev = max(1.0, float(mentions_prev or 0))
-    return m_now / m_prev
+    m_prev = max(0.0, float(mentions_prev or 0))
+    if m_now <= 0.0:
+        return 0.0
+    return (m_now + VELOCITY_PRIOR) / (m_prev + VELOCITY_PRIOR)
 
 
 RANK_JUMP_SPOTS = 20     # climbing this many ApeWisdom rank spots in 24h...
@@ -148,10 +195,22 @@ def volume_component(z: Optional[float]) -> float:
 
 
 def earliness_component(roc_5d: Optional[float]) -> float:
-    """1 == price hasn't moved yet (early); 0 == already ran +/-30% in 5d."""
+    """1 == the up-move hasn't happened yet (early); 0 == already ran +30%/5d.
+
+    AUDIT FIX — this used `abs(roc_5d)`, which scored a crash identically to
+    a rally: a -25% capitulation was rendered "already ran, you'd be late".
+    A collapse is not a missed rally, so only UP moves consume earliness.
+
+    Downside is NOT free money either — it is simply a different risk, and
+    it is surfaced honestly on its own axis by attention_stage() (the
+    "selling off" stage) and verdict_for_row() ("falling knife"), rather
+    than being smuggled into a component that means "how much upside is
+    already priced in".
+    """
     if roc_5d is None:
         return 0.0
-    return clip01(1.0 - abs(float(roc_5d)) / EARLY_ROC_LIMIT)
+    up_move = max(0.0, float(roc_5d))
+    return clip01(1.0 - up_move / EARLY_ROC_LIMIT)
 
 
 def trends_ratio(recent_mean: Optional[float], baseline_mean: Optional[float]) -> Optional[float]:
@@ -389,6 +448,7 @@ def build_row(
     close_5d_ago: Optional[float],
     ape_available: bool = True,
     trends: Optional[float] = None,
+    macro_risk: str = "unknown",
 ) -> RadarRow:
     """Combine all sources into one scored row. Pure given its inputs.
 
@@ -396,6 +456,10 @@ def build_row(
     ApeWisdom fetch SUCCEEDED but this ticker isn't in Reddit's top ranks —
     that is real information (low buzz -> velocity 0, mentions 0, NO flag).
     Only `ape_available=False` (the source itself failed) flags the row.
+
+    `macro_risk` is the VIX regime from macro_risk_level(); it imposes a real
+    ceiling on the score (see macro_score_cap). Default "unknown" = no cap,
+    so callers that have no VIX reading are unaffected.
     """
     row = RadarRow(ticker=ticker.upper())
     _rank = _rank_prev = None
@@ -428,13 +492,25 @@ def build_row(
         except (TypeError, ZeroDivisionError, ValueError):
             row.roc_5d = None
 
-    thin = row.velocity >= 2.0 and (st_sent is None or st_sent.get("messages", 0) < MIN_CONFIRM_MSGS)
+    # The price frame drives BOTH the volume (0.20) and earliness (0.15) components.
+    # When it is missing, volume_component(None) and earliness_component(None) each
+    # return 0.0 — so 35% of the composite silently scores zero. Per the integrity rule
+    # in this module's docstring that must flag the row, never pass as a real reading.
+    price_missing = (vol_today is None or not prior_vols) and (
+        close_today is None or close_5d_ago is None
+    )
+    if price_missing:
+        row.flags.append("no-price-data")
+
+    # Integrity cap trigger — must track the shrunk metric, or a real spike with one
+    # StockTwits message stops being flagged thin-confirmation and keeps a full score.
+    thin = row.velocity >= VELOCITY_DOUBLING and (st_sent is None or st_sent.get("messages", 0) < MIN_CONFIRM_MSGS)
     disagree = sources_disagree(row.mentions, reddit_count)
     if thin:
         row.flags.append("thin-confirmation")
     if disagree:
         row.flags.append("source-disagreement")
-    if (not ape_available) or st_sent is None:
+    if (not ape_available) or st_sent is None or price_missing:
         if "partial-data" not in row.flags:
             row.flags.append("partial-data")
 
@@ -448,6 +524,15 @@ def build_row(
         thin_confirmation=thin,
         source_disagreement=disagree,
     )
+
+    # AUDIT FIX — the VIX macro gate previously rendered a banner and changed
+    # no number, so it gated nothing. It is now a real ceiling, applied after
+    # the cross-source caps, and the row says so via the "macro-capped" flag
+    # (which the verdict and the on-screen copy both read).
+    _cap = macro_score_cap(macro_risk)
+    if _cap is not None and row.score > _cap:
+        row.score = round(float(_cap), 1)
+        row.flags.append("macro-capped")
     return row
 
 
@@ -455,7 +540,7 @@ def build_row(
 # Streamlit tab — imports kept inside so the math above stays test-importable
 # ---------------------------------------------------------------------------
 
-FIRE_MIN_VELOCITY = 2.0   # 🔥 needs buzz at least doubling...
+FIRE_MIN_VELOCITY = VELOCITY_DOUBLING   # 🔥 needs buzz at least doubling (shrunk units)...
 FIRE_MIN_WILSON = 0.45    # ...AND real bullish conviction, not just one loud component
 
 # --- Attention cascade (the "graph" logic) -------------------------------
@@ -463,12 +548,20 @@ FIRE_MIN_WILSON = 0.45    # ...AND real bullish conviction, not just one loud co
 #   social buzz (Reddit/X) --> search interest (Google) --> volume --> price.
 # The STAGE of that cascade is itself a signal: being early in the chain is
 # where asymmetric returns live; the last node (price moved) means it's over.
-STAGE_ATTENTION_VEL = 2.0    # buzz doubling counts as "attention lit"
+STAGE_ATTENTION_VEL = VELOCITY_DOUBLING  # buzz doubling counts as "attention lit"
 STAGE_ATTENTION_TRENDS = 1.5 # or searches 1.5x baseline
 STAGE_VOLUME_Z = 2.0         # volume node fires at z >= 2
-STAGE_LATE_ROC = 0.15        # price node fires at +/-15% in 5d (half the cap)
+STAGE_LATE_ROC = 0.15        # price node fires at +15% in 5d (half the cap)
+
+# AUDIT FIX — the price node used |roc|, so a -15% slide was labelled
+# "🌋 Erupted — price already moved (you're late)", i.e. a capitulation was
+# rendered as a missed rally. A downward break is its own state: it is OFF
+# the upward attention cascade, not a later rung of it, so it gets a
+# non-positive code rather than a 4 that would imply "even later than 3".
+STAGE_SELLOFF = -1
 
 STAGE_LABELS = {
+    STAGE_SELLOFF: "📉 Selling off — the crowd is watching a drop, not a breakout",
     0: "💤 Dormant — no attention anywhere",
     1: "🌱 Smoldering — talk started, money hasn't moved (earliest edge)",
     2: "🚀 Igniting — talk AND volume, price still flat (confirmation)",
@@ -478,6 +571,28 @@ STAGE_LABELS = {
 
 VIX_ELEVATED = 20.0
 VIX_STRESS = 25.0
+
+# AUDIT FIX — the macro "gate" used to render a banner and change no number,
+# so it gated nothing. These are the ceilings it now actually imposes.
+# They are chosen against the verdict ladder in verdict_for_row() so the
+# on-screen copy is literally true:
+#   65 < 70  -> in an elevated regime no row can reach 🔥/💪 ("70+").
+#   50       -> in a stress regime nothing reads stronger than 👀 (">= 50").
+MACRO_ELEVATED_CAP = 65.0
+MACRO_STRESS_CAP = 50.0
+
+
+def macro_score_cap(risk: str) -> Optional[float]:
+    """Hard ceiling the macro regime places on any buzz score, or None.
+
+    'calm' and 'unknown' impose no cap — an unknown VIX must not silently
+    punish every row, the banner says so instead.
+    """
+    if risk == "stress":
+        return MACRO_STRESS_CAP
+    if risk == "elevated":
+        return MACRO_ELEVATED_CAP
+    return None
 
 
 def macro_risk_level(vix_last: Optional[float]) -> str:
@@ -501,13 +616,18 @@ def attention_stage(velocity: float, trends: Optional[float],
                     vol_z: Optional[float], roc_5d: Optional[float]) -> int:
     """Locate the ticker on the attention cascade. Pure + unit-tested.
 
-    3: price node fired (|5d ROC| >= 15%) — regardless of the rest, it's late.
-    2: attention lit AND volume confirming, price still early.
-    1: attention lit, volume/price still quiet — the asymmetric sweet spot.
-    0: nothing lit.
+     3: price node fired UP (5d ROC >= +15%) — regardless of the rest, late.
+    -1: price broke DOWN (5d ROC <= -15%) — off the up-cascade entirely; the
+        buzz is about a selloff. Not "late", not "early": a different trade.
+     2: attention lit AND volume confirming, price still early.
+     1: attention lit, volume/price still quiet — the asymmetric sweet spot.
+     0: nothing lit.
     """
-    price_fired = roc_5d is not None and abs(roc_5d) >= STAGE_LATE_ROC
-    if price_fired:
+    # AUDIT FIX: was `abs(roc_5d) >= STAGE_LATE_ROC`, which collapsed a crash
+    # and a rally into the same "🌋 Erupted / you're late" bucket.
+    if roc_5d is not None and roc_5d <= -STAGE_LATE_ROC:
+        return STAGE_SELLOFF
+    if roc_5d is not None and roc_5d >= STAGE_LATE_ROC:
         return 3
     attention = (velocity >= STAGE_ATTENTION_VEL) or (
         trends is not None and trends >= STAGE_ATTENTION_TRENDS)
@@ -519,6 +639,17 @@ def attention_stage(velocity: float, trends: Optional[float],
     return 0
 
 
+def is_weak_data(r: RadarRow) -> bool:
+    """True when the row's own sources are missing or contradict each other.
+
+    AUDIT FIX — this predicate used to be inlined in verdict_for_row() only,
+    so the "🏆 Today's top signals" card picker had no way to ask the
+    question and could promote a row whose verdict literally reads
+    "ignore for now". Now both call the same function.
+    """
+    return "partial-data" in r.flags or "source-disagreement" in r.flags
+
+
 def verdict_for_row(r: RadarRow) -> str:
     """One plain-English line per ticker — no jargon.
 
@@ -527,12 +658,18 @@ def verdict_for_row(r: RadarRow) -> str:
     asymmetric setup needs buzz acceleration AND bullish conviction AND
     an early price. This is deliberate double-checking, not redundancy.
     """
-    if "partial-data" in r.flags or "source-disagreement" in r.flags:
+    if is_weak_data(r):
         return "⚠️ Weak data — ignore for now"
-    if r.roc_5d is not None and abs(r.roc_5d) >= EARLY_ROC_LIMIT:
+    # AUDIT FIX: the single `abs(r.roc_5d)` test below used to tell a holder
+    # of a -25% capitulation that they had "already run" and were "late".
+    if r.roc_5d is not None and r.roc_5d <= -EARLY_ROC_LIMIT:
+        return "📉 Falling knife — buzz around a selloff, not a breakout"
+    if r.roc_5d is not None and r.roc_5d >= EARLY_ROC_LIMIT:
         return "🏃 Already ran — you'd be late"
     if "thin-confirmation" in r.flags:
         return "🤔 One loud corner of Reddit — wait for confirmation"
+    if "macro-capped" in r.flags:
+        return "🌪️ Scary market — score capped, research-only this scan"
     if r.score >= 70 and r.velocity >= FIRE_MIN_VELOCITY and r.wilson >= FIRE_MIN_WILSON:
         return "🔥 Hot & still early — research this NOW"
     if r.score >= 70:
@@ -578,8 +715,9 @@ def _render_sentiment_radar_tab(universe_csv: str) -> None:
 | **Score 50–70** 👀 | Warming up. Add to watch, check again tomorrow. |
 | **Below 50** | Noise. Do nothing. |
 | **"Already ran"** 🏃 | Buzz is high but the stock already jumped — the easy part is over. Chasing = being exit liquidity. |
+| **"Falling knife"** 📉 | The stock DROPPED hard. The crowd is watching a selloff, not a breakout — a completely different (and harder) trade. |
 | **"Weak data"** ⚠️ | Sources disagree or are missing — the score can't be trusted this scan. |
-| **Stage 🌱→🚀→🌋** | Attention travels: talk → searches → volume → price. 🌱 = earliest edge, 🚀 = confirmed and still early, 🌋 = too late. |
+| **Stage 🌱→🚀→🌋** | Attention travels: talk → searches → volume → price. 🌱 = earliest edge, 🚀 = confirmed and still early, 🌋 = too late. 📉 = price broke down instead, so the chain doesn't apply. |
 
 **Workflow:** scan here → cross-check hot names in 🌎 Market Radar (technical coil) →
 if BOTH agree and price is still flat, that's your candidate. Then usual rules: small size, confirm every order.
@@ -598,7 +736,8 @@ if BOTH agree and price is still flat, that's your candidate. Then usual rules: 
         cached = st.session_state.get("sr_results")
         if cached is not None:
             _render_results(st, cached["rows"], cached["when"],
-                            cached.get("vix"), cached.get("health"))
+                            cached.get("vix"), cached.get("health"),
+                            cached.get("social_when"))
         else:
             st.caption("Press **Scan Now** — takes ~30–60s (free sources are rate-limited).")
         return
@@ -607,20 +746,32 @@ if BOTH agree and price is still flat, that's your candidate. Then usual rules: 
     # re-scan is near-instant, and the free APIs aren't hammered. Threads
     # live INSIDE the cached function (safe); cached calls from worker
     # threads would trip Streamlit's script context, so we don't do that.
+    #
+    # AUDIT FIX (two parts):
+    #  (a) the cache replayed FAILURES for 5 minutes while the banner advised
+    #      "re-scan in a few minutes" — advice the cache itself defeated. The
+    #      `retry_nonce` is part of the cache key; a scan whose core sources
+    #      failed bumps it, so the very next scan really does refetch.
+    #  (b) a replayed bundle used to be re-stamped with a fresh "Last scan"
+    #      clock. It now carries its OWN fetch time, which the banner shows.
     @st.cache_data(ttl=300, show_spinner=False)
-    def _fetch_social_bundle(symbols_key: tuple):
+    def _fetch_social_bundle(symbols_key: tuple, retry_nonce: int):
         from concurrent.futures import ThreadPoolExecutor
+        from datetime import datetime as _dtf
         syms = list(symbols_key)
         with ThreadPoolExecutor(max_workers=4) as ex:
             f_ape = ex.submit(fetch_apewisdom, "all-stocks", 5)
             f_st = ex.submit(fetch_stocktwits_many, syms)
             f_rc = ex.submit(reddit_recount, syms)
             f_tr = ex.submit(fetch_google_trends, syms)
-            return f_ape.result(), f_st.result(), f_rc.result(), f_tr.result()
+            return (f_ape.result(), f_st.result(), f_rc.result(),
+                    f_tr.result(), _dtf.now())
 
     rows: list[RadarRow] = []
+    _nonce = int(st.session_state.get("sr_retry_nonce", 0))
     with st.spinner("Scanning — Reddit, StockTwits, and prices fetched in parallel (~5s)..."):
-        ape_all, st_all, recount, trends_all = _fetch_social_bundle(tuple(symbols))
+        ape_all, st_all, recount, trends_all, social_at = _fetch_social_bundle(
+            tuple(symbols), _nonce)
 
         # One batch Yahoo download for every symbol + ^VIX macro overlay
         # (same pattern as radar tier-1; VIX rides along for free).
@@ -668,11 +819,15 @@ if BOTH agree and price is still flat, that's your candidate. Then usual rules: 
             vol_today, prior_vols, close_today, close_5d,
             ape_available=ape_all is not None,
             trends=(trends_all or {}).get(sym),
+            # The macro regime is a real ceiling on the score, not just a banner.
+            macro_risk=macro_risk_level(vix_last),
         ))
 
     rows.sort(key=lambda r: r.score, reverse=True)
     from datetime import datetime as _dt
-    when = _dt.now().strftime("%b %d, %I:%M %p")
+    _fmt = "%b %d, %I:%M %p"
+    when = _dt.now().strftime(_fmt)
+    social_when = social_at.strftime(_fmt) if social_at is not None else None
     health = {
         "Reddit ranks (ApeWisdom)": ape_all is not None,
         "StockTwits": any(v is not None for v in (st_all or {}).values()),
@@ -680,17 +835,32 @@ if BOTH agree and price is still flat, that's your candidate. Then usual rules: 
         "Reddit cross-check (optional)": recount is not None,
         "Google Trends (optional)": trends_all is not None,
     }
+    # AUDIT FIX: a bundle containing a core-source failure must not be replayed
+    # for the rest of its 5-minute TTL — that is exactly what made "re-scan in
+    # a few minutes" useless. Bumping the nonce invalidates the cache key, so
+    # the next press of Scan Now genuinely refetches.
+    if not all(ok for name, ok in health.items() if "(optional)" not in name):
+        st.session_state["sr_retry_nonce"] = _nonce + 1
+
     st.session_state["sr_results"] = {
         "rows": rows, "when": when, "vix": vix_last, "health": health,
+        "social_when": social_when,
     }
-    _render_results(st, rows, when, vix_last, health)
+    _render_results(st, rows, when, vix_last, health, social_when)
 
 
 def _render_results(st, rows: list[RadarRow], when: str,
-                    vix_last=None, health: Optional[dict] = None) -> None:
+                    vix_last=None, health: Optional[dict] = None,
+                    social_when: Optional[str] = None) -> None:
     import pandas as pd
 
     st.caption(f"Last scan: **{when}** — results stay until you scan again.")
+    # AUDIT FIX: a 5-min-cached social bundle used to be re-stamped with a
+    # fresh "Last scan" clock, hiding the fact that Reddit/StockTwits/Trends
+    # data (including their failures) was minutes old. Show the true age.
+    if social_when and social_when != when:
+        st.caption(f"↻ Reddit / StockTwits / Google data is from **{social_when}** "
+                   "(re-used from the 5-minute cache); prices are from this scan.")
 
     # ---- No-fail layer 1: show exactly which sources answered this scan
     if health:
@@ -700,28 +870,36 @@ def _render_results(st, rows: list[RadarRow], when: str,
         opt_down = [n for n, ok in health.items() if not ok and "(optional)" in n]
         if core_down:
             st.info("A core source didn't answer — affected rows are flagged and their "
-                    "scores capped, never guessed. Re-scan in a few minutes.")
+                    "scores capped, never guessed. The failed bundle has been dropped "
+                    "from the cache, so pressing **Scan Now** again really does refetch.")
         elif opt_down:
             st.caption("ℹ️ Optional cross-checks didn't answer (Reddit and Google often "
                        "block cloud servers — normal). Core signals are unaffected; "
                        "scores stand on Reddit ranks + StockTwits + prices.")
 
-    # ---- Macro overlay: the market-wide weather report
+    # ---- Macro overlay: a real gate on the scores, and it says what it did.
     risk = macro_risk_level(vix_last)
     if risk == "stress":
         st.error(f"🌪️ **Macro: STRESS** (VIX {vix_last:.0f}). In fear regimes, buzz "
-                 "spikes are usually bear-market rallies — treat every signal below "
-                 "as research-only and cut size expectations in half.")
+                 "spikes are usually bear-market rallies, so **every score below is "
+                 f"capped at {MACRO_STRESS_CAP:.0f}** — nothing this scan can read "
+                 "stronger than 👀 Warming up. Capped rows are flagged `macro-capped`.")
     elif risk == "elevated":
-        st.warning(f"🌥️ **Macro: elevated risk** (VIX {vix_last:.0f}). Market is "
-                   "jumpy — demand 🚀-stage confirmation before acting on anything.")
+        st.warning(f"🌥️ **Macro: elevated risk** (VIX {vix_last:.0f}). Market is jumpy, "
+                   f"so **every score below is capped at {MACRO_ELEVATED_CAP:.0f}** — "
+                   "no row can reach the 70+ 🔥 tier this scan. Capped rows are "
+                   "flagged `macro-capped`.")
     elif risk == "calm":
-        st.caption(f"☀️ Macro: calm (VIX {vix_last:.0f}) — normal conditions for buzz signals.")
+        st.caption(f"☀️ Macro: calm (VIX {vix_last:.0f}) — no cap applied; scores stand as computed.")
     else:
-        st.caption("Macro: VIX unavailable this scan — no market-weather adjustment shown.")
+        st.caption("Macro: VIX unavailable this scan — no cap applied (an unknown VIX "
+                   "must not silently punish every row).")
 
     # ---- Top-3 spotlight cards: the only thing a beginner needs to look at
-    top = [r for r in rows if r.score > 0][:3]
+    # AUDIT FIX: this used to be `[r for r in rows if r.score > 0][:3]`, so a row
+    # whose own verdict reads "⚠️ Weak data — ignore for now" could be promoted
+    # into a "🏆 Today's top signals" card. A row we cannot trust is not a signal.
+    top = [r for r in rows if r.score > 0 and not is_weak_data(r)][:3]
     if top:
         st.markdown("#### 🏆 Today's top signals")
         cols = st.columns(len(top))
@@ -734,6 +912,10 @@ def _render_results(st, rows: list[RadarRow], when: str,
                     delta_color="normal" if r.velocity > 1 else "off",
                 )
                 st.caption(verdict_for_row(r))
+    elif any(r.score > 0 for r in rows):
+        st.caption("🏆 No top-signal cards this scan — every scoring row is flagged "
+                   "weak data (sources missing or disagreeing). The full board below "
+                   "still shows them, marked.")
 
     # ---- Full board, verdict first, numbers for those who want them.
     # Every column header has a hover tooltip in plain language (the ⓘ).
@@ -768,7 +950,9 @@ def _render_results(st, rows: list[RadarRow], when: str,
                      "volume → price. 💤 Dormant: nothing yet. 🌱 Smoldering: people are "
                      "talking but money hasn't moved — the earliest (riskiest) edge. "
                      "🚀 Igniting: talk AND real volume, price still flat — the "
-                     "confirmation sweet spot. 🌋 Erupted: price already jumped — late."),
+                     "confirmation sweet spot. 🌋 Erupted: price already jumped — late. "
+                     "📉 Selling off: price broke DOWN instead — the chain doesn't "
+                     "apply, the buzz is about a drop, not a breakout."),
             "Score": st.column_config.ProgressColumn(
                 "Score", min_value=0, max_value=100, format="%.0f",
                 help="0–100 asymmetric-setup score: Reddit buzz speeding up + bullish "
@@ -776,9 +960,12 @@ def _render_results(st, rows: list[RadarRow], when: str,
                      "70+ = worth researching today. Below 50 = noise."),
             "Buzz": st.column_config.TextColumn(
                 "Buzz",
-                help="Reddit chatter now vs 24 hours ago. '3.0x' = three times more "
-                     "mentions than yesterday — the crowd is arriving. 'none' = Reddit "
-                     "isn't talking about this stock (that's fine, just no signal)."),
+                help="How much faster Reddit is talking about this than 24 hours ago. "
+                     "Higher = the crowd is arriving. It is deliberately NOT the raw "
+                     "mention ratio: ten mentions of evidence are needed before a jump "
+                     "is believed, so 1 -> 10 mentions cannot outrank 200 -> 600. "
+                     "Roughly 1.7x and up means the buzz genuinely doubled off a real "
+                     "base. 'none' = nobody is mentioning it (fine, just no signal)."),
             "Bullish %": st.column_config.TextColumn(
                 "Bullish %",
                 help="On StockTwits, of the posts that took a side: how many say UP? "
@@ -798,8 +985,11 @@ def _render_results(st, rows: list[RadarRow], when: str,
             "5d move": st.column_config.TextColumn(
                 "5d move",
                 help="Price change over the last 5 sessions. Near 0% = you'd still be "
-                     "early (that's what you want). A big move = the easy gain may be "
-                     "gone — chasing late is how buzz stocks burn people."),
+                     "early (that's what you want). A big move UP = the easy gain may "
+                     "be gone — chasing late is how buzz stocks burn people. A big "
+                     "move DOWN is not 'late', it's a different situation entirely: "
+                     "the score keeps its earliness credit and the Verdict/Stage "
+                     "columns call it a selloff instead."),
         },
     )
     with st.expander("🔬 Nerd numbers (raw components & flags)"):
@@ -816,9 +1006,21 @@ def _render_results(st, rows: list[RadarRow], when: str,
             "Stage": attention_stage(r.velocity, r.trends, r.vol_z, r.roc_5d),
             "Flags": ", ".join(r.flags) if r.flags else "clean",
         } for r in rows]), use_container_width=True, hide_index=True)
+        # AUDIT FIX: this caption listed only four of the five weights and summed
+        # to 85%, silently omitting the 15% Google Trends term the code actually
+        # scores. It is now generated FROM the WEIGHTS dict, so it cannot drift
+        # again, and it prints the total so any future mismatch is visible.
+        _labels = {
+            "velocity": "velocity (Reddit buzz)",
+            "wilson": "sentiment (Wilson 95% LB)",
+            "volume_z": "volume-z",
+            "earliness": "earliness (upside not yet priced)",
+            "trends": "searches (Google Trends)",
+        }
         st.caption(
-            f"Weights: velocity {WEIGHTS['velocity']:.0%} · sentiment (Wilson 95% LB) "
-            f"{WEIGHTS['wilson']:.0%} · volume-z {WEIGHTS['volume_z']:.0%} · earliness "
-            f"{WEIGHTS['earliness']:.0%}. Flagged rows are capped "
-            f"(thin ≤ {THIN_CONFIRM_CAP:.0f}, disagreement ≤ {DISAGREE_CAP:.0f})."
+            "Weights: "
+            + " · ".join(f"{_labels.get(k, k)} {v:.0%}" for k, v in WEIGHTS.items())
+            + f" — total {sum(WEIGHTS.values()):.0%}. Flagged rows are capped "
+            f"(thin ≤ {THIN_CONFIRM_CAP:.0f}, disagreement ≤ {DISAGREE_CAP:.0f}, "
+            f"elevated VIX ≤ {MACRO_ELEVATED_CAP:.0f}, VIX stress ≤ {MACRO_STRESS_CAP:.0f})."
         )

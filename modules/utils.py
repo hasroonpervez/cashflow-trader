@@ -2,10 +2,8 @@
 from __future__ import annotations
 
 import html as _html_mod
-import json as _json_mod
 import math
 import sys
-import urllib.request
 import numpy as np
 import pandas as pd
 
@@ -75,20 +73,6 @@ def log_warn(context: str, error: Exception, *, ticker: str = "") -> None:
     print(f"{prefix}{context}: {type(error).__name__}: {error}", file=sys.stderr, flush=True)
 
 
-def send_discord_webhook(url: str, message: str, *, username: str = "CashFlow Alert") -> bool:
-    """Fire-and-forget Discord webhook. Returns True on success."""
-    if not url or not str(url).startswith("https://discord.com/api/webhooks/"):
-        return False
-    try:
-        payload = _json_mod.dumps({"content": str(message), "username": str(username)}).encode("utf-8")
-        req = urllib.request.Request(
-            str(url),
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            return int(getattr(resp, "status", 0) or 0) in (200, 204)
-    except Exception as _e:
-        log_warn("discord webhook", _e)
-        return False
+# send_discord_webhook was removed in v24.0. Conviction hits are logged to
+# radar_hits.json and surfaced in the Radar History expander instead — the
+# webhook path re-fired on every Streamlit rerun with no idempotency key.

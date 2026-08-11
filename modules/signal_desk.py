@@ -509,26 +509,75 @@ def _bbw_last_pctile(df: pd.DataFrame, lookback: int = 60) -> Optional[float]:
         return None
 
 
+# Structure / weekly pillars emit four discrete values each, inside a narrow band —
+# see `scale_consensus_score` for why that matters to the displayed 0-100 number.
+_STRUCT_SCORES = (72.0, 28.0, 50.0, 48.0)   # BULL, BEAR, RANGE/MIXED, UNKNOWN
+_WK_SCORES = (70.0, 32.0, 52.0, 50.0)       # BULL, BEAR, MIXED, UNKNOWN
+
+
 def _struct_score(label: str) -> float:
     u = (label or "").upper()
+    bull, bear, rng, unknown = _STRUCT_SCORES
     if "BULL" in u:
-        return 72.0
+        return bull
     if "BEAR" in u:
-        return 28.0
+        return bear
     if "RANG" in u or "MIX" in u:
-        return 50.0
-    return 48.0
+        return rng
+    return unknown
 
 
 def _wk_score(label: str) -> float:
     u = (label or "").upper()
+    bull, bear, mixed, unknown = _WK_SCORES
     if "BULL" in u:
-        return 70.0
+        return bull
     if "BEAR" in u:
-        return 32.0
+        return bear
     if "MIX" in u:
-        return 52.0
-    return 50.0
+        return mixed
+    return unknown
+
+
+# --- Audit finding: the consensus score is drawn as a 0-100 conic ring and a 0-100%
+# progress bar, but the weighted sum can only reach ~7.1 to ~95.6 because the structure
+# and weekly pillars never leave their narrow bands. The gauge could never empty or fill,
+# and the 40 / 62 band cutoffs were chosen against a scale that does not exist. Map the
+# raw sum onto the range it can actually occupy, and map the cutoffs through the *same*
+# transform so every verdict is bit-for-bit unchanged — only the number is now honest.
+_CONSENSUS_PILLAR_RANGES = (
+    (_CONSENSUS_W_QS, 0.0, 100.0),
+    (_CONSENSUS_W_CONFLUENCE, 0.0, 100.0),
+    (_CONSENSUS_W_FG, 0.0, 100.0),
+    (_CONSENSUS_W_STRUCTURE, min(_STRUCT_SCORES), max(_STRUCT_SCORES)),
+    (_CONSENSUS_W_WEEKLY, min(_WK_SCORES), max(_WK_SCORES)),
+    (_CONSENSUS_W_TAPE, 0.0, 100.0),
+    (_CONSENSUS_W_VOL, 0.0, 100.0),
+)
+_CONSENSUS_RAW_MIN = sum(w * lo for w, lo, _hi in _CONSENSUS_PILLAR_RANGES)
+_CONSENSUS_RAW_MAX = min(
+    100.0,
+    sum(w * hi for w, _lo, hi in _CONSENSUS_PILLAR_RANGES) + _CONSENSUS_ABSORPTION_BONUS,
+)
+
+# Band cutoffs, stated on the raw weighted-sum scale they were originally tuned against.
+_CONSENSUS_RAW_CUT_HIGH_RISK = 40.0
+_CONSENSUS_RAW_CUT_CONVICTION = 62.0
+
+
+def scale_consensus_score(raw: float) -> float:
+    """Map the raw weighted consensus sum onto a genuine 0-100 display scale."""
+    span = _CONSENSUS_RAW_MAX - _CONSENSUS_RAW_MIN
+    if span <= 0:
+        return float(max(0.0, min(100.0, raw)))
+    return float(max(0.0, min(100.0, 100.0 * (float(raw) - _CONSENSUS_RAW_MIN) / span)))
+
+
+CONSENSUS_RAW_BOUNDS = (_CONSENSUS_RAW_MIN, _CONSENSUS_RAW_MAX)
+CONSENSUS_BAND_CUTOFFS = (
+    scale_consensus_score(_CONSENSUS_RAW_CUT_HIGH_RISK),
+    scale_consensus_score(_CONSENSUS_RAW_CUT_CONVICTION),
+)
 
 
 def compute_desk_consensus(
@@ -584,7 +633,10 @@ def compute_desk_consensus(
     hurst_regime_label = "Neutral / random-walk"
     trading_mode = "Balanced"
     tape = 58.0 if macd_bull else 44.0
-    tape = tape + 6.0 if obv_up else -4.0
+    # Parenthesised: `tape + 6.0 if obv_up else -4.0` binds as
+    # `(tape + 6.0) if obv_up else (-4.0)`, so a flat OBV discarded the MACD base
+    # entirely and clamped the pillar to 0.0 instead of nudging it down 4 points.
+    tape = tape + (6.0 if obv_up else -4.0)
     tape = max(0.0, min(100.0, tape))
     vol_w_rsi = 0.05
     vol_w_flow = 1.0 - vol_w_rsi
@@ -603,7 +655,9 @@ def compute_desk_consensus(
             hurst_regime_label = "Trending"
             trading_mode = "Equity Radar"
             tape = 58.0 if macd_bull else 44.0
-            tape = tape + 6.0 if obv_up else -4.0
+            # Same precedence fix as above: parenthesise the conditional so a flat
+            # OBV subtracts 4 points instead of discarding the MACD base entirely.
+            tape = tape + (6.0 if obv_up else -4.0)
             if rs_outperf:
                 tape = float(min(100.0, tape + 12.0))
             tape = max(0.0, min(100.0, tape))
@@ -636,13 +690,16 @@ def compute_desk_consensus(
     )
     if absorb.get("active"):
         score = float(min(100.0, score + _CONSENSUS_ABSORPTION_BONUS))
-    score = float(max(0.0, min(100.0, score)))
-    if score < 40.0:
+    # `score_raw` is the historical weighted sum the band cutoffs were tuned on; `score`
+    # is that value rescaled onto the 0-100 the UI actually draws. Banding stays on raw.
+    score_raw = float(max(0.0, min(100.0, score)))
+    score = scale_consensus_score(score_raw)
+    if score_raw < _CONSENSUS_RAW_CUT_HIGH_RISK:
         band = "high_risk"
         label = "Elevated risk / weak alignment"
         color = "#f87171"
         ring_bg = "rgba(248,113,113,0.15)"
-    elif score < 62.0:
+    elif score_raw < _CONSENSUS_RAW_CUT_CONVICTION:
         band = "neutral"
         label = "Neutral — wait for catalyst"
         color = "#fbbf24"
@@ -767,6 +824,11 @@ def compute_desk_consensus(
         "score": score,
         "band": band,
         "label": label,
+        # Auditability: the pre-scaling sum and the range it can occupy, so the displayed
+        # 0-100 can always be traced back to the weighted pillars that produced it.
+        "score_raw": score_raw,
+        "score_raw_bounds": CONSENSUS_RAW_BOUNDS,
+        "band_cutoffs": CONSENSUS_BAND_CUTOFFS,
         "color": color,
         "ring_bg": ring_bg,
         "volume_z": vz,

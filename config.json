@@ -1,7 +1,7 @@
 {
   "watchlist": "PLTR,BMNR,HIMS,TSLA,RIVN,LCID,NIO,QS,SOFI,CIFR,GPUS,SRFM,OPEN,RXRX,ABSI,ABCL,IBRX,DNA,SIDU,SATL,ZETA,SPY,QQQ,BTC-USD,ETH-USD",
   "scanner_sort_mode": "Custom watchlist order",
-  "scanner_mode": "📈 Options Yield",
+  "scanner_mode": "\ud83d\udcc8 Options Yield",
   "equity_capital": 10000,
   "intraday_confirmation": true,
   "auto_scan_interval": 300,
@@ -17,8 +17,6 @@
   "overlay_diamonds": true,
   "overlay_gold": true,
   "use_quant_models": true,
-  "discord_webhook_url": "",
-  "alert_on_conviction": true,
   "defer_headlines_earnings": false,
   "defer_options_first_pass": true
 }

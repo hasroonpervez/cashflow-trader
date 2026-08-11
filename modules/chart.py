@@ -27,11 +27,85 @@ from .data import (
     compute_iv_earnings_chart_overlay,
 )
 
-def _levels_nearest(levels, price, n):
-    """Pick the n prices closest to `price` (clearest S/R vs far-away clusters)."""
+def _levels_nearest(levels, price, n, side=None):
+    """Pick the n prices closest to `price` (clearest S/R vs far-away clusters).
+
+    ``side`` filters by which side of spot the level sits on before ranking:
+    ``"below"`` keeps levels at or under `price`, ``"above"`` keeps levels at or over it.
+    Audit finding (Charts/labels, chart.py:236-249): ranking purely by ``abs(x - price)``
+    let a green "S" rail be drawn ABOVE spot and a red "R" rail BELOW it, which inverts the
+    meaning of every support/resistance line on the chart. Returning fewer (or zero) rails is
+    correct here — a fabricated rail on the wrong side is worse than an absent one.
+    """
     if not levels:
         return []
-    return sorted(set(levels), key=lambda x: abs(float(x) - price))[:n]
+    try:
+        px = float(price)
+    except (TypeError, ValueError):
+        return []
+    vals = []
+    for x in set(levels):
+        try:
+            v = float(x)
+        except (TypeError, ValueError):
+            continue
+        if not np.isfinite(v):
+            continue
+        if side == "below" and v > px:
+            continue
+        if side == "above" and v < px:
+            continue
+        vals.append(v)
+    return sorted(vals, key=lambda x: abs(x - px))[:n]
+
+
+_FIB_RATIOS = (0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0)
+
+
+def _fib_swing_is_down(rec):
+    """True when the swing low postdates the swing high over the plotted window."""
+    try:
+        hi_pos = int(np.asarray(rec["High"], dtype=float).argmax())
+        lo_pos = int(np.asarray(rec["Low"], dtype=float).argmin())
+    except (KeyError, TypeError, ValueError):
+        return False
+    return lo_pos > hi_pos
+
+
+def _fib_levels_directional(high, low, swing_is_down):
+    """Fib retracement anchored on the *most recent* swing extreme.
+
+    Audit finding (Charts/labels, chart.py:189-191 / ta.py:293-296): ``TA.fib_retracement``
+    always puts 0% at the high, which is only right for an up-swing. When the swing low
+    postdates the swing high, 0% belongs at the low and the retracement counts back up toward
+    the high — otherwise the 38.2% and 61.8% labels are printed on each other's prices.
+    The root fix belongs in ``ta.py`` (not owned by this module), so the correction is applied
+    chart-side; keys match ``TA.fib_retracement`` exactly so the drawing code is unchanged.
+    """
+    hi, lo = float(high), float(low)
+    if not swing_is_down:
+        return TA.fib_retracement(hi, lo)
+    d = hi - lo
+    return {f"{r:.1%}": lo + d * r for r in _FIB_RATIOS}
+
+
+def _realized_vol_delta_label(cr_pct):
+    """Caption for the post-earnings vol overlay.
+
+    Audit finding #18 (chart.py:596): the box was labelled "Avg. Post-Earnings IV Crush" but the
+    number is ``(realized_vol_post - realized_vol_pre) / realized_vol_pre`` over ±11 close-to-close
+    bars (data.py) — no implied vol is read anywhere in that path. Because the sign can be
+    positive, the old caption could read "IV Crush: +42.1%", which a premium seller reads as
+    "IV collapses 42% after the print." Name what is actually plotted, and only use crush framing
+    when the delta is negative. A true reading needs ATM IV diffed across the print from the chain.
+    """
+    cr = float(cr_pct)
+    tail = (
+        "realized vol fell after past prints (crush-like)"
+        if cr < 0
+        else "realized vol ROSE after past prints — no crush"
+    )
+    return f"Post-earnings realized-vol Δ (proxy): {cr:+.1f}% — {tail}"
 
 
 def _chart_hoverlabel():
@@ -188,7 +262,10 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
         )
     if show_fib and len(df) >= 50:
         rec = df.iloc[-60:]
-        fl = TA.fib_retracement(rec["High"].max(), rec["Low"].min())
+        # Anchor 0% at whichever swing extreme is more recent (see _fib_levels_directional).
+        fl = _fib_levels_directional(
+            rec["High"].max(), rec["Low"].min(), _fib_swing_is_down(rec)
+        )
         fib_draw_order = ["0.0%", "38.2%", "50.0%", "61.8%", "100.0%"]
         fib_labeled = {"38.2%", "50.0%", "61.8%"}
         fib_short = {"0.0%": "0%", "100.0%": "100%"}
@@ -235,13 +312,14 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
             fig_p.add_hline(**g_kw)
     if show_sr:
         sups, ress = TA.find_sr(df)
-        for s in _levels_nearest(sups, last_px, 2):
+        # Support must sit at/below spot and resistance at/above it, else the S/R colours lie.
+        for s in _levels_nearest(sups, last_px, 2, side="below"):
             fig_p.add_hline(
                 y=s, line_dash="solid", line_color="rgba(34,197,94,0.45)", line_width=1.2,
                 opacity=0.55, annotation_text=f"S ${s:.0f}", annotation_position=_level_label_side,
                 annotation_font=dict(size=9, color="rgba(134,239,172,0.95)"),
             )
-        for r in _levels_nearest(ress, last_px, 2):
+        for r in _levels_nearest(ress, last_px, 2, side="above"):
             fig_p.add_hline(
                 y=r, line_dash="solid", line_color="rgba(248,113,113,0.45)", line_width=1.2,
                 opacity=0.55, annotation_text=f"R ${r:.0f}", annotation_position=_level_label_side,
@@ -299,6 +377,18 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
                         fillcolor="rgba(255, 0, 0, 0.05)",
                         line_width=0,
                         layer="below",
+                    )
+                    # Audit finding (Charts/labels): the full-canvas red wash had no entry in
+                    # the overlay key, so a reader saw the whole chart turn red with nothing
+                    # explaining it. Only announce it when the rect actually got drawn.
+                    _overlay_rows.append(
+                        (
+                            "rgba(255,0,0,0.35)",
+                            "Negative-gamma tint",
+                            f"Whole-panel red wash: spot ${float(last_px):,.0f} is below the "
+                            f"gamma flip (${_gf:,.0f}), i.e. dealers are short gamma and hedging "
+                            "amplifies moves. Background shading only — not a price level.",
+                        )
                     )
             except Exception as _e:
                 log_warn("build_chart gamma turbulence band", _e, ticker=str(ticker))
@@ -520,13 +610,20 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
         pink_d = [d for d in diamonds if d["type"] == "pink"]
         # Slightly smaller markers: legend row height matches line swatches better than size 17.
         _dm = dict(symbol="diamond", size=13, line=dict(color="rgba(248,250,252,0.95)", width=1.5))
+        # Audit finding (Charts/labels, chart.py:527/556): the markers used to be plotted at
+        # price * 0.985 / 1.015, i.e. a 1.5% PRICE-space lie — on a $600 name the diamond sat
+        # $9 away from the bar it describes and read off the y-axis as a different level.
+        # Plot at the true signal price and clear the candle with a screen-space (pixel)
+        # standoff instead, which is scale-invariant and cannot misstate a price.
+        _blue_off = dict(standoff=14, angle=180, angleref="up")
+        _pink_off = dict(standoff=14, angle=0, angleref="up")
         if blue_d:
             fig_p.add_trace(
                 go.Scatter(
                     x=[d["date"] for d in blue_d],
-                    y=[d["price"] * 0.985 for d in blue_d],
+                    y=[d["price"] for d in blue_d],
                     mode="markers",
-                    marker={**_dm, "color": "#2563eb"},
+                    marker={**_dm, **_blue_off, "color": "#2563eb"},
                     name="Blue diamond",
                     legendgroup="diamond_blue",
                     hovertemplate="<b>Blue diamond</b><br>%{x|%Y-%m-%d}<br><b>$%{customdata:,.2f}</b><br>7+ confluence cross up (buy / add zone)<extra></extra>",
@@ -534,11 +631,14 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
                 )
             )
         else:
-            # Legend key only when no blue in history: tiny marker off last close so the chart matches the key.
+            # Audit finding (Charts/labels, chart.py:540): this legend-only entry used to plot a
+            # REAL marker at last_px * 1.004, so a chart with no blue diamond still showed one at
+            # the last bar and the "none yet" disclaimer lived only in the hover. An empty trace
+            # keeps the legend row (so the key still explains the symbol) and draws nothing.
             fig_p.add_trace(
                 go.Scatter(
-                    x=[df.index[-1]],
-                    y=[last_px * 1.004],
+                    x=[],
+                    y=[],
                     mode="markers",
                     marker={**_dm, "color": "#2563eb", "size": 8, "opacity": 0.35},
                     name="Blue diamond",
@@ -553,9 +653,9 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
             fig_p.add_trace(
                 go.Scatter(
                     x=[d["date"] for d in pink_d],
-                    y=[d["price"] * 1.015 for d in pink_d],
+                    y=[d["price"] for d in pink_d],
                     mode="markers",
-                    marker={**_dm, "color": "#e11d48"},
+                    marker={**_dm, **_pink_off, "color": "#e11d48"},
                     name="Pink diamond",
                     legendgroup="diamond_pink",
                     hovertemplate="<b>Pink diamond</b><br>%{x|%Y-%m-%d}<br><b>$%{customdata:,.2f}</b><br>Exit / de-risk (confluence fade or RSI exhaustion)<extra></extra>",
@@ -563,10 +663,11 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
                 )
             )
         else:
+            # Same phantom-marker fix as the blue branch (audit: chart.py:568).
             fig_p.add_trace(
                 go.Scatter(
-                    x=[df.index[-1]],
-                    y=[last_px * 0.996],
+                    x=[],
+                    y=[],
                     mode="markers",
                     marker={**_dm, "color": "#e11d48", "size": 8, "opacity": 0.35},
                     name="Pink diamond",
@@ -593,7 +694,7 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
         )
         if _ov.get("show_crush") and _ov.get("avg_crush_pct") is not None:
             _cr = float(_ov["avg_crush_pct"])
-            _iv_lines.append(f"Avg. Post-Earnings IV Crush: {_cr:+.1f}%")
+            _iv_lines.append(_realized_vol_delta_label(_cr))
         if _ov.get("vega_risk"):
             _iv_lines.append("⚠️ VEGA RISK: IV Crush likely")
     except Exception as _e:
@@ -703,9 +804,18 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
                         y=yv,
                         mode="markers",
                         marker=dict(color="#00FFFF", size=11, symbol="circle", line=dict(width=1, color="rgba(15,23,42,0.85)")),
-                        name="Institutional flow",
+                        name="Unusual volume (proxy)",
                         showlegend=False,
-                        hovertemplate="Institutional Flow (Z-Score: %{customdata:.2f})<extra></extra>",
+                        # Audit finding (Charts/labels, chart.py:687-711 -> ta.py:369-398): this is a
+                        # rolling z-score of total daily volume, not tape-read institutional flow —
+                        # no venue, block, or dark-pool print is inspected. The word "proxy" was
+                        # stuck in the docstring where no chart reader ever sees it; put the
+                        # disclosure in the hover, which is the only text attached to the marker.
+                        hovertemplate=(
+                            "Unusual volume (proxy for institutional flow)"
+                            "<br>Total daily volume z-score: %{customdata:.2f}"
+                            "<br><i>Volume only — no venue or block-print data.</i><extra></extra>"
+                        ),
                         customdata=zz,
                     )
                 )

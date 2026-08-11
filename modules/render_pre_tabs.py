@@ -204,6 +204,19 @@ def apply_auto_watchlist_to_cfg_tx(cfg_tx: ConfigTransaction) -> None:
             )
 
 
+def saved_equity_capital(cfg: dict) -> int:
+    """Persisted capital base, falling back to the documented default (finding #19).
+
+    Pure. Three call sites used to hard-code ``10000``; one of them fed a config
+    mutation, so simply *switching hemisphere* clobbered the saved value on disk.
+    """
+    try:
+        v = int((cfg or {}).get("equity_capital", DEFAULT_CONFIG["equity_capital"]))
+    except (TypeError, ValueError):
+        return int(DEFAULT_CONFIG["equity_capital"])
+    return v if v > 0 else int(DEFAULT_CONFIG["equity_capital"])
+
+
 def render_mission_control_hud(cfg_tx: ConfigTransaction, cfg: dict, saved_scanner_mode: str) -> HudState:
     scanner_watchlist_raw = st.session_state.get("sb_scanner", cfg.get("watchlist", ""))
     watch_items = _parse_watchlist_string(scanner_watchlist_raw)
@@ -219,7 +232,10 @@ def render_mission_control_hud(cfg_tx: ConfigTransaction, cfg: dict, saved_scann
         st.session_state.pop("sb_watch_selected", None)
         ticker = "PLTR"
 
-    equity_capital = 10000
+    # Audit finding #19: this was a hard-coded 10000 literal, so whenever the Equity Radar
+    # capital widget was not on screen the saved value was replaced by the default and
+    # written back to config.json — a user who set $100,000 lost it silently.
+    equity_capital = saved_equity_capital(cfg)
     with st.container(border=True):
         st.markdown(
             "<div style='font-size:.75rem;color:#cbd5e1;font-weight:800;letter-spacing:.12em;margin-bottom:8px;'>MISSION CONTROL</div>",
@@ -325,23 +341,32 @@ def render_mission_control_hud(cfg_tx: ConfigTransaction, cfg: dict, saved_scann
                         help="Switch between premium harvesting (Options) and Delta-One breakout hunting (Equity).",
                     )
             with col_cap:
-                equity_capital = 10000
-                if scanner_mode == "🎯 Equity Radar":
-                    if "sb_equity_capital" not in st.session_state:
-                        st.session_state["sb_equity_capital"] = int(
-                            cfg.get("equity_capital", 10000)
-                        )
-                    equity_capital = st.select_slider(
-                        "Capital Base per Trade ($)",
-                        options=[5000, 10000, 25000, 50000, 100000],
-                        key="sb_equity_capital",
-                        help="Scales Suggested Shares dynamically. Remembered across sessions.",
+                # Finding #19: the control used to exist only inside the Equity Radar
+                # branch, so switching hemisphere dropped the session key and the next
+                # rerun re-read the 10000 literal. Capital drives options contract sizing
+                # too, so it belongs in both hemispheres.
+                _cap_opts = [5000, 10000, 25000, 50000, 100000]
+                if "sb_equity_capital" not in st.session_state:
+                    _saved_cap = saved_equity_capital(cfg)
+                    st.session_state["sb_equity_capital"] = (
+                        _saved_cap if _saved_cap in _cap_opts else min(_cap_opts, key=lambda o: abs(o - _saved_cap))
                     )
+                equity_capital = st.select_slider(
+                    "Capital Base per Trade ($)",
+                    options=_cap_opts,
+                    key="sb_equity_capital",
+                    help=(
+                        "Scales Suggested Shares and options contract counts. Remembered across sessions."
+                    ),
+                )
 
             st.session_state["_cf_scanner_mode"] = scanner_mode
             if scanner_mode != saved_scanner_mode:
-                b = load_config()
-                if save_config({**b, "scanner_mode": scanner_mode}):
+                # Finding #20: this used to load_config()/save_config() behind the
+                # transaction's back; the later flush() then wrote its construction-time
+                # snapshot and reverted the mode the app had just toasted as switched.
+                cfg_tx.update(scanner_mode=scanner_mode)
+                if cfg_tx.flush():
                     st.toast(f"Switched to {scanner_mode}.", icon="✅")
                 else:
                     st.toast(
@@ -374,6 +399,20 @@ def render_mission_control_hud(cfg_tx: ConfigTransaction, cfg: dict, saved_scann
         ticker=ticker,
         equity_capital=equity_capital,
     )
+
+
+def _reusable_snapshot(prev_snap, prev_key, cache_key):
+    """Previous global-market snapshot, but only when it was fetched for THIS key.
+
+    Audit finding: the timeout path read
+    ``_global_snap = _prev_snap if _prev_key == _cache_key else _prev_snap`` — both arms
+    identical, so a bundle fetched for a different watchlist/ticker was reused, then
+    re-stamped with the new cache key, and the tape kept its "(cached)" caption. A
+    mismatched key now yields ``None``, which routes to the honest empty-snapshot branch.
+    """
+    if prev_snap is None or prev_key != cache_key:
+        return None
+    return prev_snap
 
 
 def render_tape_open_editor_flush(
@@ -419,10 +458,10 @@ def render_tape_open_editor_flush(
             f"global bundle wall timeout ({_BUNDLE_WALL_TIMEOUT}s)",
             TimeoutError("yf.download too slow for Cloud health check"),
         )
-        _global_snap = _prev_snap if _prev_key == _cache_key else _prev_snap
+        _global_snap = _reusable_snapshot(_prev_snap, _prev_key, _cache_key)
     except Exception as _e:
         log_warn("global bundle fetch", _e)
-        _global_snap = _prev_snap
+        _global_snap = _reusable_snapshot(_prev_snap, _prev_key, _cache_key)
     finally:
         if _tp is not None:
             try:
@@ -447,7 +486,18 @@ def render_tape_open_editor_flush(
             {},
             {},
         )
-        st.toast("Yahoo data still loading — tape prices may be stale. Refresh in ~30s.", icon="⏳")
+        if _timed_out:
+            st.warning(
+                f"Yahoo did not answer within {_BUNDLE_WALL_TIMEOUT}s and there is no cached snapshot for this "
+                "watchlist. Tape prices are **not loaded** on this pass — they are blank, not stale."
+            )
+        else:
+            st.toast("Yahoo data still loading — tape prices may be stale. Refresh in ~30s.", icon="⏳")
+    elif _timed_out:
+        st.caption(
+            f"Yahoo timed out after {_BUNDLE_WALL_TIMEOUT}s — showing the previous snapshot for this exact watchlist. "
+            "Prices below are from the last successful fetch."
+        )
     elif _boot_guard and len(_bundle_watch_items) < len(watch_items):
         st.caption(
             f"Cold boot protection active: loading {_bundle_watch_items.__len__()}/{len(watch_items)} watchlist symbols first. "
@@ -510,7 +560,12 @@ def render_tape_open_editor_flush(
         "strat_focus": st.session_state.get("sb_strat_radio", DEFAULT_CONFIG["strat_focus"]),
         "strat_horizon": st.session_state.get("sb_horizon_radio", DEFAULT_CONFIG["strat_horizon"]),
         "mini_mode": bool(st.session_state.get("sb_mini_mode", cfg_tx.current.get("mini_mode", False))),
-        "equity_capital": int(st.session_state.get("sb_equity_capital", 10000)),
+        # Finding #19: every sibling on this dict falls back to the persisted value; this
+        # one used a 10000 literal, so a missing widget key produced a real mutation and
+        # flush() overwrote the user's saved capital.
+        "equity_capital": int(
+            st.session_state.get("sb_equity_capital", saved_equity_capital(cfg_tx.current))
+        ),
         "use_quant_models": bool(
             st.session_state.get(
                 "sb_use_quant", cfg_tx.current.get("use_quant_models", DEFAULT_CONFIG["use_quant_models"])
@@ -877,13 +932,19 @@ def render_desk_after_context(
             if df_1mo_spark is not None and not df_1mo_spark.empty
             else df["Close"].tail(min(7, len(df)))
         )
-    vix_spark = (
-        vix_1mo_df["Close"].tail(7)
-        if vix_1mo_df is not None and not vix_1mo_df.empty
-        else pd.Series([vix_v, vix_v, vix_v, vix_v, vix_v, vix_v, vix_v])
-    )
+    if vix_1mo_df is not None and not vix_1mo_df.empty:
+        vix_spark = vix_1mo_df["Close"].tail(7)
+    elif vix_v is not None:
+        vix_spark = pd.Series([float(vix_v)] * 7)
+    else:
+        # VIX feed down: no series. `_glance_sparkline_svg` renders nothing rather than
+        # the old fabricated rising line (audit: empty series -> confident uptrend).
+        vix_spark = pd.Series(dtype="float64")
     earnings_spark = earnings_runway_spark_series(days_to_earnings)
-    qe_spark = pd.Series(np.linspace(max(0, qs - 10), min(100, qs + 4), 7))
+    # Audit finding: this was `np.linspace(qs - 10, qs + 4, 7)` — an always-rising line
+    # captioned "24h directional momentum context". No 24h history of the Quant Edge
+    # score is stored anywhere, so there is nothing honest to plot: draw nothing.
+    qe_spark = pd.Series(dtype="float64")
 
     g1, g2, g3, g4 = st.columns(4)
     with g1:
@@ -949,7 +1010,7 @@ def render_desk_after_context(
             _glance_metric_card(
                 "QUANT EDGE",
                 f"<div class='glance-value' style='font-size:1.28rem;font-weight:700;color:{qe_color}'>{qs:.0f}/100</div>",
-                "<div class='glance-caption'>24h directional momentum context</div>",
+                "<div class='glance-caption'>Composite now: trend, momentum, volume, volatility, structure</div>",
                 qe_spark,
                 qe_color,
             ),

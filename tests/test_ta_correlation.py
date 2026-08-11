@@ -19,10 +19,13 @@ def test_correlation_matrix_single_ticker():
 
 
 def test_correlation_matrix_two_tickers_aligned():
-    idx = pd.date_range("2024-01-01", periods=100, freq="D")
+    # History lengthened (100 -> 160 bars) for AUDIT ta.py:566: a 90-day matrix now needs
+    # 90 + 50 FFD lags + 1 diff of closes to yield >= 60 innovations. At 100 bars only 49
+    # survived and the matrix is now (correctly) refused.
+    idx = pd.date_range("2024-01-01", periods=160, freq="D")
     rng = np.random.default_rng(0)
-    a = pd.Series(100 + np.cumsum(rng.normal(0, 1, 100)), index=idx)
-    b = pd.Series(50 + np.cumsum(rng.normal(0, 1, 100)), index=idx)
+    a = pd.Series(100 + np.cumsum(rng.normal(0, 1, 160)), index=idx)
+    b = pd.Series(50 + np.cumsum(rng.normal(0, 1, 160)), index=idx)
     mat = TA.get_correlation_matrix({"AAA": a, "BBB": b}, lookback_days=90)
     assert not mat.empty
     assert mat.shape == (2, 2)
@@ -33,12 +36,16 @@ def test_correlation_matrix_two_tickers_aligned():
 
 
 def test_correlation_matrix_inner_join_mismatched_dates():
-    """Misaligned calendars should align on intersection only (enough overlap for FFD + diff)."""
-    i1 = pd.date_range("2024-01-01", periods=130, freq="D")
-    i2 = pd.date_range("2024-02-15", periods=130, freq="D")
+    """Misaligned calendars should align on intersection only (enough overlap for FFD + diff).
+
+    Overlap widened (85 -> 155 bars) for the same reason as above: 85 shared bars leave only
+    34 FFD innovations, below the 60-observation floor the matrix now requires.
+    """
+    i1 = pd.date_range("2024-01-01", periods=200, freq="D")
+    i2 = pd.date_range("2024-02-15", periods=200, freq="D")
     rng = np.random.default_rng(1)
-    a = pd.Series(100 + np.cumsum(rng.normal(0, 0.5, 130)), index=i1)
-    b = pd.Series(200 + np.cumsum(rng.normal(0, 0.5, 130)), index=i2)
+    a = pd.Series(100 + np.cumsum(rng.normal(0, 0.5, 200)), index=i1)
+    b = pd.Series(200 + np.cumsum(rng.normal(0, 0.5, 200)), index=i2)
     mat = TA.get_correlation_matrix({"X": a, "Y": b}, lookback_days=90)
     assert not mat.empty
     assert mat.shape == (2, 2)

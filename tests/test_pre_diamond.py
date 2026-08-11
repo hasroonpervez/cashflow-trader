@@ -15,8 +15,8 @@ def _make_df(n=120, trend="up", squeeze=True, vol_ramp=True):
     high = close + np.random.uniform(0.3, 2.0, n)
     low = np.maximum(close - np.random.uniform(0.3, 2.0, n), 0.5)
 
-    tr = np.maximum(high - low, np.abs(high - np.roll(close, 1)), np.abs(low - np.roll(close, 1)))
-    atr = pd.Series(tr).rolling(14).mean().values
+    tr = np.maximum(high - low, np.maximum(np.abs(high - np.roll(close, 1)), np.abs(low - np.roll(close, 1))))
+    atr = pd.Series(tr).rolling(14).mean().to_numpy(copy=True)
     if squeeze:
         # detect_pre_diamond checks rank percentile of the *last* ATR within tail(60),
         # so force the latest ATR to be the local minimum.

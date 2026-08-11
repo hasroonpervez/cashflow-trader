@@ -25,3 +25,7 @@ env/
 # config.json
 trade_journal.json
 radar_hits.json
+# Generated ticker dossiers (cached LLM/fundamentals output)
+dossier_cache.json
+dossier_cache.corrupt-*.json
+*.corrupt-*

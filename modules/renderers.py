@@ -88,7 +88,140 @@ from modules.chart import _chart_hoverlabel, build_correlation_heatmap, build_sk
 from modules.data import compute_iv_rank_proxy, fetch_earnings_calendar_display, fetch_news_headlines
 
 from .desk_locals import DeskLocals
-from .utils import log_warn, safe_float, safe_href, safe_html, safe_last, send_discord_webhook
+from .utils import log_warn, safe_float, safe_href, safe_html, safe_last
+
+
+def classify_vol_skew(skew_pct: Optional[float]) -> Optional[dict]:
+    """Single source of truth for the put/call IV skew verdict on the Cash Flow tab.
+
+    AUDIT (medium, ``renderers.py:1224 / 1643 / 1765``): the same tab rendered three
+    mutually inconsistent skew readouts — the ±10/±3 tiered card, a one-sided
+    ``> 10 / > 5`` tile that painted *every* call-skew reading green "Balanced", and
+    ``calc_skew_regime``'s median-ratio bands at 1.25/1.08/0.85. A trader could read
+    "Heavy Call Skew", "Balanced" and "Put Fear" for the same chain in one screen.
+    All three now render this one classification off one ``calc_vol_skew`` reading.
+
+    ``skew_pct`` is put IV minus call IV in IV points (positive = puts richer).
+    Returns ``None`` when the skew is unavailable — the callers print an explicit
+    "insufficient IV data" state rather than defaulting to a fake "Balanced".
+    """
+    try:
+        v = float(skew_pct)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(v):
+        return None
+    if v > 10:
+        return {
+            "skew": v,
+            "color": "#f59e0b",
+            "icon": "🔥",
+            "label": "Heavy Put Skew",
+            "short": "Puts heavily bid — prime edge is selling cash-secured puts.",
+            "guide": (
+                "Puts are <strong>heavily bid</strong> — smart money is paying up "
+                "for downside protection. Put premium is very expensive right now. "
+                "<strong>Prime edge: sell cash-secured puts</strong> and collect that "
+                "rich premium while the crowd hedges."
+            ),
+        }
+    if v > 3:
+        return {
+            "skew": v,
+            "color": "#f59e0b",
+            "icon": "⚡",
+            "label": "Elevated Put Skew",
+            "short": "Moderate put bid — slight edge to cash-secured puts.",
+            "guide": (
+                "Moderate put premium elevation — bearish hedging is active. "
+                "<strong>Slight edge to selling cash-secured puts.</strong> "
+                "Both strategies are viable; use Signal tab to confirm direction."
+            ),
+        }
+    if v < -10:
+        return {
+            "skew": v,
+            "color": "#06b6d4",
+            "icon": "🚀",
+            "label": "Heavy Call Skew",
+            "short": "Calls heavily bid — prime edge is selling covered calls.",
+            "guide": (
+                "Calls are <strong>heavily bid</strong> — upside speculation is "
+                "elevated. Call premium is very expensive right now. "
+                "<strong>Prime edge: sell covered calls</strong> and collect that "
+                "inflated call premium while the crowd chases."
+            ),
+        }
+    if v < -3:
+        return {
+            "skew": v,
+            "color": "#06b6d4",
+            "icon": "📈",
+            "label": "Elevated Call Skew",
+            "short": "Calls bid above average — slight edge to covered calls.",
+            "guide": (
+                "Calls are bid above average — bullish speculation is active. "
+                "<strong>Slight edge to selling covered calls.</strong> "
+                "Either strategy is viable; use Signal tab to confirm direction."
+            ),
+        }
+    return {
+        "skew": v,
+        "color": "#10b981",
+        "icon": "⚖️",
+        "label": "Balanced Skew",
+        "short": "Put and call premium roughly equal — no hedging bias.",
+        "guide": (
+            "Put and call premium are roughly equal — no institutional hedging "
+            "bias detected. Both covered calls and cash-secured puts offer fair "
+            "premium. Let your directional view (Signal tab) decide."
+        ),
+    }
+
+
+def expected_value_dollars(credit_100, max_loss, pop_pct) -> Optional[float]:
+    """Expected value in dollars, or ``None`` when an input cannot be honestly sourced.
+
+    AUDIT #24: the covered-call line under the "EXPECTED VALUE" card used
+    ``pop_cc = min(85, max(50, 100 - otm_pct * 5))`` and ``max_loss = premium * 3``.
+    Both were invented. With ``max_loss = 3P``, ``calc_ev`` collapses to
+    ``P * (4 * pop - 3)``, which is zero exactly at ``otm_pct == 5.0`` — so the whole
+    dollar figure was a monotone restatement of "is this strike more than 5% OTM",
+    dressed up as expected value under the footer "Positive means edge."
+
+    This gate refuses to print a number unless the probability is a *measured* one
+    (the 10k-path Monte Carlo PoP) and the max loss is a *real* contractual one
+    (defined-risk spread). A covered call has neither a modelled loss branch nor a
+    bounded downside in this app, so its EV comes back ``None`` and the card renders
+    an em dash with the reason instead of a fabricated dollar amount.
+    """
+    try:
+        c = float(credit_100)
+        ml = float(max_loss)
+        p = float(pop_pct)
+    except (TypeError, ValueError):
+        return None
+    if not (math.isfinite(c) and math.isfinite(ml) and math.isfinite(p)):
+        return None
+    if ml <= 0 or not (0.0 <= p <= 100.0):
+        return None
+    return float(calc_ev(c, ml, p))
+
+
+def compound_cumulative_return_pct(ret_pct) -> pd.Series:
+    """Compound a series of per-trade percentage returns into a cumulative % curve.
+
+    AUDIT (medium, ``renderers.py:2138`` with the axis labelled "Cumulative return (%)"
+    at ``2190``): the covered-call simulator plotted ``ret_pct.cumsum()``. Percentages
+    of a moving base do not add — 12×(+8%) and 4×(−20%) sums to +16% where the
+    compounded truth is +3.1%, and because losses compound harder than gains the
+    drawdowns were understated asymmetrically. Index and length are preserved (NaNs
+    are skipped exactly as ``cumsum`` did) so the curve stays aligned with entry dates.
+    """
+    s = pd.to_numeric(pd.Series(ret_pct), errors="coerce").astype(float)
+    if s.empty:
+        return pd.Series(dtype=float)
+    return ((1.0 + s / 100.0).cumprod() - 1.0) * 100.0
 
 
 def _news_item_markdown_html(item: dict) -> str:
@@ -1021,19 +1154,29 @@ def render_cashflow_tab(cfg: dict, d: DeskLocals) -> None:
         )
 
         # ── IVR ENVIRONMENT CHECK ─────────────────────────────────────────────
-        # IVR (IV Rank) measures where current IV sits vs its 52-week range.
-        # Below 30: IV is cheap relative to history → selling premium is UNFAVORABLE
-        #   because you're collecting a thin premium relative to the actual vol risk.
-        # Above 50: IV is rich → selling premium is the correct strategy.
-        # This check fires before showing strikes so the user sees the warning first.
+        # IVR measures where the desk's reference IV sits between the cheapest and
+        # richest ATM IV across the listed expiries. Below 30 the premium is thin,
+        # so selling it carries full assignment risk for a small credit.
+        #
+        # AUDIT #12: this used to call compute_iv_rank_proxy(ticker, df) — the
+        # function takes three required positionals (sym, spot, ref_iv_pct), so the
+        # TypeError was swallowed by a bare `except` that pinned _ivr_val at 50.0.
+        # The warning below was therefore unreachable on every single render. The
+        # three other call sites in the repo already pass the correct arity.
+        # It is also a term-structure cross-section, NOT a 52-week rank (see the
+        # docstring at data.py:1290), so the copy no longer claims "the past year".
+        _ivr_val = None
         try:
-            _ivr_info = compute_iv_rank_proxy(ticker, df)
-            _ivr_val = float(_ivr_info.get("rank", 50)) if _ivr_info else 50.0
-        except Exception:
-            _ivr_val = 50.0
-        if _ivr_val < 30:
+            if ref_iv_bluf:
+                _ivr_info = compute_iv_rank_proxy(ticker, float(price), float(ref_iv_bluf))
+                if _ivr_info:
+                    _ivr_val = safe_float(_ivr_info.get("rank"), None)
+        except Exception as _e:
+            log_warn("cashflow tab IV rank proxy", _e, ticker=str(ticker))
+            _ivr_val = None
+        if _ivr_val is not None and _ivr_val < 30:
             st.warning(
-                f"⚠️ **IV Rank is low ({_ivr_val:.0f}/100)** — implied volatility is cheap relative to the past year. "
+                f"⚠️ **IV Rank is low ({_ivr_val:.0f}/100)** — the reference IV sits near the cheap end of the listed expiry range. "
                 "Selling premium in a low-IV environment means collecting thin credits while carrying full assignment or loss risk. "
                 "**Desk rule:** wait for IVR ≥ 30 before opening new short-premium positions, "
                 "or size down to 50% of your normal contract count."
@@ -1221,60 +1364,20 @@ def render_cashflow_tab(cfg: dict, d: DeskLocals) -> None:
                 # Positive skew  = put IV > call IV  → puts are expensive → sell CSPs
                 # Negative skew  = call IV > put IV  → calls are expensive → sell CCs
                 # This is the single most important structural edge-selector for premium sellers.
+                # AUDIT (medium): one calc_vol_skew reading, one classification —
+                # this card, the Greeks-row VOL SKEW tile and the skew-surface badge
+                # all read _skew_verdict so the tab can no longer contradict itself.
                 _skew_v, _skew_p_iv, _skew_c_iv = calc_vol_skew(price, calls, puts)
-                if _skew_v is not None:
-                    # Determine signal tier and colour
-                    if _skew_v > 10:
-                        _skew_color = "#f59e0b"   # amber — heavy put skew
-                        _skew_icon  = "🔥"
-                        _skew_label = "Heavy Put Skew"
-                        _skew_guide = (
-                            "Puts are <strong>heavily bid</strong> — smart money is paying up "
-                            "for downside protection. Put premium is very expensive right now. "
-                            "<strong>Prime edge: sell cash-secured puts</strong> and collect that "
-                            "rich premium while the crowd hedges."
-                        )
-                    elif _skew_v > 3:
-                        _skew_color = "#f59e0b"
-                        _skew_icon  = "⚡"
-                        _skew_label = "Elevated Put Skew"
-                        _skew_guide = (
-                            "Moderate put premium elevation — bearish hedging is active. "
-                            "<strong>Slight edge to selling cash-secured puts.</strong> "
-                            "Both strategies are viable; use Signal tab to confirm direction."
-                        )
-                    elif _skew_v < -10:
-                        _skew_color = "#06b6d4"   # cyan — heavy call skew
-                        _skew_icon  = "🚀"
-                        _skew_label = "Heavy Call Skew"
-                        _skew_guide = (
-                            "Calls are <strong>heavily bid</strong> — upside speculation is "
-                            "elevated. Call premium is very expensive right now. "
-                            "<strong>Prime edge: sell covered calls</strong> and collect that "
-                            "inflated call premium while the crowd chases."
-                        )
-                    elif _skew_v < -3:
-                        _skew_color = "#06b6d4"
-                        _skew_icon  = "📈"
-                        _skew_label = "Elevated Call Skew"
-                        _skew_guide = (
-                            "Calls are bid above average — bullish speculation is active. "
-                            "<strong>Slight edge to selling covered calls.</strong> "
-                            "Either strategy is viable; use Signal tab to confirm direction."
-                        )
-                    else:
-                        _skew_color = "#10b981"   # green — balanced
-                        _skew_icon  = "⚖️"
-                        _skew_label = "Balanced Skew"
-                        _skew_guide = (
-                            "Put and call premium are roughly equal — no institutional hedging "
-                            "bias detected. Both covered calls and cash-secured puts offer fair "
-                            "premium. Let your directional view (Signal tab) decide."
-                        )
+                _skew_verdict = classify_vol_skew(_skew_v)
+                if _skew_verdict is not None:
+                    _skew_color = _skew_verdict["color"]
+                    _skew_icon = _skew_verdict["icon"]
+                    _skew_label = _skew_verdict["label"]
+                    _skew_guide = _skew_verdict["guide"]
                     # Format display values
                     _put_iv_txt  = f"{_skew_p_iv:.1f}%" if _skew_p_iv is not None else "—"
                     _call_iv_txt = f"{_skew_c_iv:.1f}%" if _skew_c_iv is not None else "—"
-                    _skew_txt    = f"+{_skew_v:.1f}%" if _skew_v >= 0 else f"{_skew_v:.1f}%"
+                    _skew_txt    = f"{_skew_verdict['skew']:+.1f}%"
                     st.markdown(
                         f"""<div style="background:rgba(15,23,42,.75);border:1.5px solid {_skew_color};
                                         border-radius:10px;padding:12px 16px;margin:6px 0 14px 0">
@@ -1373,7 +1476,12 @@ def render_cashflow_tab(cfg: dict, d: DeskLocals) -> None:
                                     "theta_desk_day_entry": _th_day_e,
                                 }
                             )
-                            journal_add_entry(
+                            # AUDIT (medium): journal_add_entry returns False on a
+                            # read-only host. Discarding it made the session ledger row
+                            # appear while nothing reached trade_journal.json, so the
+                            # trade silently vanished on the next refresh. The close
+                            # path already surfaces this; both Track Trade sites now match.
+                            _jrnl_ok = journal_add_entry(
                                 {
                                     "ticker": str(ticker).upper(),
                                     "option_type": "call",
@@ -1388,7 +1496,13 @@ def render_cashflow_tab(cfg: dict, d: DeskLocals) -> None:
                                     "status": "open",
                                 }
                             )
-                            st.rerun()
+                            if _jrnl_ok:
+                                st.rerun()
+                            else:
+                                st.error(
+                                    "Tracked in this session only — the trade journal could not be written to disk "
+                                    "(read-only host?). This row will not survive a refresh."
+                                )
                         if st.checkbox("All CC strikes", key="exp_5"):
                             _cc_df = _options_scan_dataframe(cc, put_table=False)
                             streamlit_show_dataframe(
@@ -1497,7 +1611,9 @@ def render_cashflow_tab(cfg: dict, d: DeskLocals) -> None:
                                     "theta_desk_day_entry": _th_day_e2,
                                 }
                             )
-                            journal_add_entry(
+                            # AUDIT (medium): same discarded-False bug as the CC Track
+                            # Trade site above — a failed disk write must be visible.
+                            _jrnl_ok = journal_add_entry(
                                 {
                                     "ticker": str(ticker).upper(),
                                     "option_type": "put",
@@ -1512,7 +1628,13 @@ def render_cashflow_tab(cfg: dict, d: DeskLocals) -> None:
                                     "status": "open",
                                 }
                             )
-                            st.rerun()
+                            if _jrnl_ok:
+                                st.rerun()
+                            else:
+                                st.error(
+                                    "Tracked in this session only — the trade journal could not be written to disk "
+                                    "(read-only host?). This row will not survive a refresh."
+                                )
                         if st.checkbox("All CSP strikes", key="exp_6"):
                             _csp_df = _options_scan_dataframe(csp, put_table=True)
                             streamlit_show_dataframe(
@@ -1640,18 +1762,26 @@ def render_cashflow_tab(cfg: dict, d: DeskLocals) -> None:
                 with st.expander("📈 Volatility Skew Surface (Tail Risk)", expanded=False):
                     st.caption("Visualizing the 'Smile': Higher IV on puts indicates the market is pricing in heavy downside fear.")
                     try:
-                        regime_label, regime_color, regime_desc = calc_skew_regime(opts_df, price)
-                        st.markdown(
-                            f"""
-                            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 15px; padding: 10px; background: rgba(15, 23, 42, 0.6); border: 1px solid #334155; border-radius: 8px;">
-                                <span style="background: {regime_color}; color: #ffffff; padding: 4px 10px; border-radius: 4px; font-size: 0.8rem; font-weight: 700; letter-spacing: 0.05em;">
-                                    {regime_label}
-                                </span>
-                                <span style="color: #cbd5e1; font-size: 0.85rem;">{regime_desc}</span>
-                            </div>
-                            """,
-                            unsafe_allow_html=True,
-                        )
+                        # AUDIT (medium): this badge used to run calc_skew_regime's
+                        # median IV-ratio bands (1.25/1.08/0.85) — a third, separately
+                        # calibrated verdict that routinely disagreed with the Vol Skew
+                        # card above and the Greeks-row tile below on the same chain.
+                        # The chart still plots the full smile; only the headline
+                        # verdict is unified on the one calc_vol_skew reading.
+                        if _skew_verdict is not None:
+                            st.markdown(
+                                f"""
+                                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 15px; padding: 10px; background: rgba(15, 23, 42, 0.6); border: 1px solid #334155; border-radius: 8px;">
+                                    <span style="background: {_skew_verdict['color']}; color: #0f172a; padding: 4px 10px; border-radius: 4px; font-size: 0.8rem; font-weight: 700; letter-spacing: 0.05em;">
+                                        {safe_html(_skew_verdict['label'].upper())}
+                                    </span>
+                                    <span style="color: #cbd5e1; font-size: 0.85rem;">{safe_html(_skew_verdict['short'])} (10% OTM put IV − call IV: {_skew_verdict['skew']:+.1f} pts)</span>
+                                </div>
+                                """,
+                                unsafe_allow_html=True,
+                            )
+                        else:
+                            st.caption("Skew verdict unavailable — no usable 10% OTM put/call IV pair in this snapshot.")
                         skew_fig = build_skew_chart(opts_df, price)
                         if skew_fig:
                             st.plotly_chart(skew_fig, use_container_width=True, config=_PLOTLY_UI_CONFIG)
@@ -1687,7 +1817,11 @@ def render_cashflow_tab(cfg: dict, d: DeskLocals) -> None:
                             <div style='font-size:1rem;font-weight:700;margin-bottom:8px'>🔷 BLUE DIAMOND AUTO SUGGESTIONS</div>
                             <div style='color:#94a3b8;font-size:.85rem;margin-bottom:10px'>
                                 A Blue Diamond fired {(df.index[-1] - latest_d['date']).days} day(s) ago at ${latest_d['price']:.2f} with composite score {latest_d['score']}.
-                                Historical probability of profit: <strong style='color:#10b981'>{d_wr:.0f}%</strong> ({d_n} signals backtested).
+                                {(
+                                    f"Historical probability of profit: <strong style='color:#10b981'>{d_wr:.0f}%</strong> ({d_n} signals backtested)."
+                                    if d_n and int(d_n) > 0 else
+                                    "No historical win rate yet — this ticker has no completed blue-diamond signals to score against."
+                                )}
                             </div>
                             <div style='color:#e2e8f0;font-size:.9rem;line-height:1.8'>""", unsafe_allow_html=True)
                         suggestions = []
@@ -1705,7 +1839,12 @@ def render_cashflow_tab(cfg: dict, d: DeskLocals) -> None:
                         st.markdown("</div></div>", unsafe_allow_html=True)
                         _explain("Why these trades on a Blue Diamond?",
                             f"The Blue Diamond means {latest_d['score']} out of 9 confluence factors aligned bullish. "
-                            "Historically, similar setups have a strong track record. "
+                            # AUDIT #22: the old copy claimed "a strong track record".
+                            # RESEARCH_UPGRADE.md:14 measured the opposite when Blue is
+                            # used as an entry: t=2.98 full sample but NEGATIVE in the
+                            # second half of all 12 configurations — i.e. regime beta.
+                            "It describes trend health, not a tested entry: our own backtest found Blue confluence used as an entry "
+                            "was negative out of sample in every configuration tried, so treat it as a state to watch rather than a green light. "
                             "Covered Calls collect premium while riding the trend. "
                             "Cash Secured Puts let you buy the dip if it comes. "
                             "Bull Put Spreads give you bullish exposure with capped risk. "
@@ -1747,29 +1886,44 @@ def render_cashflow_tab(cfg: dict, d: DeskLocals) -> None:
                     else:
                         st.markdown("<div class='tc'><span style='color:#64748b'>No CC data for Greeks</span></div>", unsafe_allow_html=True)
                 with gk2:
+                    # AUDIT #24: only defined-risk lines get a dollar EV. The covered
+                    # call has no modelled loss branch here (its downside is foregone
+                    # upside above the strike, unbounded and undistributed), so it
+                    # prints an em dash with the reason instead of the old
+                    # premium×3 / 100−5·OTM% fabrication. See expected_value_dollars.
                     ev_lines = []
                     if cc:
-                        b0 = cc[0]; pop_cc = min(85, max(50, 100 - b0["otm_pct"] * 5))
-                        ev_cc = calc_ev(b0["prem_100"], b0["prem_100"] * 3, pop_cc)
-                        ec = "#10b981" if ev_cc > 0 else "#ef4444"
-                        ev_lines.append(f"CC ${b0['strike']:.0f}: <strong style='color:{ec}'>${ev_cc:+.0f}</strong> (POP ~{pop_cc:.0f}%)")
+                        b0 = cc[0]
+                        _cc_mc_pop = safe_float(b0.get("mc_pop"), None)
+                        _cc_pop_txt = f"MC PoP {_cc_mc_pop:.0f}%" if _cc_mc_pop is not None else "MC PoP unavailable"
+                        ev_lines.append(
+                            f"CC ${b0['strike']:.0f}: <strong style='color:#94a3b8'>—</strong> "
+                            f"<span style='color:#64748b'>({_cc_pop_txt}; no defined max loss to price against)</span>"
+                        )
                     if ps:
-                        b0 = ps[0]; ev_ps = calc_ev(b0["credit_100"], b0["max_loss"], b0["pop"])
-                        ec = "#10b981" if ev_ps > 0 else "#ef4444"
-                        ev_lines.append(f"Put Spread: <strong style='color:{ec}'>${ev_ps:+.0f}</strong> (POP {b0['pop']:.0f}%)")
+                        b0 = ps[0]
+                        ev_ps = expected_value_dollars(b0["credit_100"], b0.get("max_loss"), b0.get("pop"))
+                        if ev_ps is None:
+                            ev_lines.append("Put Spread: <strong style='color:#94a3b8'>—</strong> <span style='color:#64748b'>(missing max loss or POP)</span>")
+                        else:
+                            ec = "#10b981" if ev_ps > 0 else "#ef4444"
+                            ev_lines.append(f"Put Spread: <strong style='color:{ec}'>${ev_ps:+.0f}</strong> (POP {float(b0['pop']):.0f}%)")
                     joined = "<br>".join(ev_lines) if ev_lines else "N/A"
-                    st.markdown(f"<div class='tc'><div style='font-size:.7rem;color:#64748b;text-transform:uppercase'>EXPECTED VALUE</div><div style='margin-top:8px;color:#94a3b8;font-size:.85rem'>{joined}</div><div style='color:#64748b;font-size:.75rem;margin-top:6px'>Positive means edge. Negative means walk away.</div></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='tc'><div style='font-size:.7rem;color:#64748b;text-transform:uppercase'>EXPECTED VALUE</div><div style='margin-top:8px;color:#94a3b8;font-size:.85rem'>{joined}</div><div style='color:#64748b;font-size:.75rem;margin-top:6px'>Shown only where the max loss is contractual and the probability is modelled. A dash means the number cannot be sourced, not that the trade is flat.</div></div>", unsafe_allow_html=True)
                 with gk3:
-                    skew, p_iv, c_iv = calc_vol_skew(price, calls, puts)
-                    if skew is not None:
-                        sc = "#ef4444" if skew > 10 else ("#f59e0b" if skew > 5 else "#10b981")
-                        sm = "Institutions hedging heavily" if skew > 10 else ("Mild put skew" if skew > 5 else "Balanced")
-                        st.markdown(f"<div class='tc'><div style='font-size:.7rem;color:#64748b;text-transform:uppercase'>VOL SKEW</div><div class='mono' style='font-size:1.3rem;color:{sc};margin-top:8px'>{skew:+.1f}%</div><div style='color:#94a3b8;font-size:.85rem;margin-top:4px'>Put IV: {p_iv:.1f}% | Call IV: {c_iv:.1f}%</div><div style='color:#64748b;font-size:.75rem;margin-top:6px'>{sm}</div></div>", unsafe_allow_html=True)
+                    # AUDIT (medium): this tile used a one-sided > 10 / > 5 test that
+                    # painted every negative (call-skew) reading green "Balanced".
+                    # Now shares the tab's single skew classification.
+                    if _skew_verdict is not None:
+                        _p_iv_tile = f"{_skew_p_iv:.1f}%" if _skew_p_iv is not None else "—"
+                        _c_iv_tile = f"{_skew_c_iv:.1f}%" if _skew_c_iv is not None else "—"
+                        st.markdown(f"<div class='tc'><div style='font-size:.7rem;color:#64748b;text-transform:uppercase'>VOL SKEW</div><div class='mono' style='font-size:1.3rem;color:{_skew_verdict['color']};margin-top:8px'>{_skew_verdict['skew']:+.1f}%</div><div style='color:#94a3b8;font-size:.85rem;margin-top:4px'>Put IV: {_p_iv_tile} | Call IV: {_c_iv_tile}</div><div style='color:#64748b;font-size:.75rem;margin-top:6px'>{safe_html(_skew_verdict['label'])} — {safe_html(_skew_verdict['short'])}</div></div>", unsafe_allow_html=True)
                     else:
                         st.markdown("<div class='tc'><div style='font-size:.7rem;color:#64748b'>VOL SKEW</div><div style='color:#94a3b8;margin-top:8px'>Insufficient IV data</div></div>", unsafe_allow_html=True)
 
                 _explain("\U0001f9e0 What do these numbers mean for me?",
                     "<strong>Expected Value (EV)</strong> is your long term profit margin. Think of it like calculating net profit per product after returns. Positive EV means you have a real edge. Negative means avoid the trade. "
+                    "It is only shown for defined-risk lines like the put spread, where the max loss is written into the contract and the probability comes from the model. A covered call has no capped loss to price against, so it shows a dash rather than a guess. "
                     "<strong>Volatility Skew</strong> tells you if big institutions are buying crash insurance. When put prices are much higher than call prices, fear is elevated. You get fatter premiums but the risk is also higher. "
                     "<strong>Edge</strong> is the difference between the market price and the mathematically fair price. Positive Edge means the market is overpaying you. That is exactly what you want.", "neutral")
             else:
@@ -2135,7 +2289,9 @@ def render_intel_tab(d: DeskLocals) -> None:
             help=f"Total gain left on the table when stock was called away ({_called_away_pct:.0f}% of trades). "
                  f"If this >> Est Premium, the OTM% was too tight for the underlying's volatility.",
         )
-        _cum = br["ret_pct"].cumsum().astype(float)
+        # AUDIT (medium): percentages of a moving base compound, they do not add.
+        # cumsum() plotted 12x(+8%) and 4x(-20%) as +16% where the truth is +3.1%.
+        _cum = compound_cumulative_return_pct(br["ret_pct"])
         if not mini_mode:
             fig_b = go.Figure()
             _colors = [_PLOTLY_CASH_UP if (i == 0 or _cum.iloc[i] >= _cum.iloc[i - 1]) else _PLOTLY_CASH_DOWN for i in range(len(_cum))]
@@ -2148,11 +2304,11 @@ def render_intel_tab(d: DeskLocals) -> None:
                     marker=dict(size=6, color=_colors, line=dict(width=0)),
                     fill="tozeroy",
                     fillcolor="rgba(52, 211, 153, 0.12)",
-                    name="Cumulative return",
+                    name="Compounded return",
                     hovertemplate=(
                         "<b>Covered-call sim</b><br>"
                         "Entry %{x|%Y-%m-%d}<br>"
-                        "Cumulative <b>%{y:+.2f}%</b><extra></extra>"
+                        "Compounded <b>%{y:+.2f}%</b><extra></extra>"
                     ),
                 )
             )
@@ -2165,7 +2321,7 @@ def render_intel_tab(d: DeskLocals) -> None:
                 margin=dict(l=48, r=20, t=36, b=44),
                 hoverlabel=_chart_hoverlabel(),
                 title=dict(
-                    text="Modeled cumulative return (% of premium stack)",
+                    text="Modeled compounded return (equity curve, % of starting stake)",
                     x=0,
                     xanchor="left",
                     font=dict(size=13, color="#e2e8f0", family="Inter, system-ui, sans-serif"),
@@ -2187,7 +2343,7 @@ def render_intel_tab(d: DeskLocals) -> None:
                 gridwidth=1,
                 zeroline=True,
                 zerolinecolor="rgba(128,128,128,0.25)",
-                title_text="Cumulative return (%)",
+                title_text="Compounded cumulative return (%)",
                 ticksuffix="%",
                 tickformat=".1f",
                 **_PLOTLY_AXIS_TITLE,
@@ -2195,7 +2351,7 @@ def render_intel_tab(d: DeskLocals) -> None:
             st.plotly_chart(fig_b, use_container_width=True, config=_PLOTLY_UI_CONFIG)
         else:
             st.caption(
-                f"Mini mode parks the cumulative return chart. Modeled cumulative return landed at **{safe_float(safe_last(_cum), 0.0):.1f}%** across {len(br)} trades."
+                f"Mini mode parks the cumulative return chart. Modeled compounded return landed at **{safe_float(safe_last(_cum), 0.0):.1f}%** across {len(br)} trades."
             )
         wr = (br["profit"] > 0).mean() * 100
         _explain("\U0001f9e0 What does this backtest tell me?",
@@ -2274,30 +2430,8 @@ def render_intel_tab(d: DeskLocals) -> None:
         auto_scan_interval = max(0, int(auto_scan_interval or DEFAULT_CONFIG.get("auto_scan_interval", 300)))
         from modules.config import load_config, save_config
 
-        _cfg_alerts = load_config()
-        with st.expander("Alert Settings", expanded=False):
-            _wh = st.text_input(
-                "Discord Webhook URL",
-                value=str(_cfg_alerts.get("discord_webhook_url", "") or ""),
-                type="password",
-                help="Paste a Discord webhook URL to get 💎 CONVICTION alerts.",
-                key="cf_discord_webhook",
-            )
-            _alert_on = st.toggle(
-                "Alert on 💎 CONVICTION",
-                value=bool(_cfg_alerts.get("alert_on_conviction", True)),
-                key="cf_alert_on_conviction",
-            )
-            if st.button("Save Alert Settings", key="cf_save_alert_settings"):
-                _merged_alerts = {
-                    **_cfg_alerts,
-                    "discord_webhook_url": str(_wh or "").strip(),
-                    "alert_on_conviction": bool(_alert_on),
-                }
-                if save_config(_merged_alerts):
-                    st.success("Alert settings saved.")
-                else:
-                    st.error("Could not write alert settings to disk.")
+        # Conviction hits are logged in-app to radar_hits.json and shown in the
+        # Radar History expander. External webhook alerting was removed in v24.0.
 
         _scan_bundle = st.session_state.get("_cf_scanner_bundle")
         _now_ts = float(time.time())
@@ -2308,18 +2442,31 @@ def render_intel_tab(d: DeskLocals) -> None:
             and _has_prior_scan
             and (_now_ts - _last_scan_ts) >= auto_scan_interval
         )
+        # AUDIT (medium): the copy used to read "Auto refresh every 300s · next in Ns",
+        # which describes a timer. There is none — no `run_every`, no `st_autorefresh`
+        # anywhere in the repo. The staleness check only fires when some *other*
+        # interaction reruns the page, and then it blocks that interaction for tens of
+        # seconds. Rather than bolt a background timer onto a scan that already stalls
+        # the UI, the copy now states what actually happens.
         _auto_status = st.empty()
         if auto_scan_interval <= 0:
-            _auto_status.caption("Auto refresh is disabled. Set a scan interval in Settings to enable it.")
+            _auto_status.caption("Auto rescan is off. Set a scan interval in Settings to arm it.")
         elif _has_prior_scan:
-            _remaining = max(0, int(round(auto_scan_interval - (_now_ts - _last_scan_ts))))
+            _age = max(0, int(round(_now_ts - _last_scan_ts)))
             _mode = str((_scan_bundle or {}).get("scan_trigger") or "manual")
             if _auto_due:
-                _auto_status.caption("Auto refresh due now; running scanner...")
+                _auto_status.caption("Results are stale; rescanning now...")
             else:
-                _auto_status.caption(f"Auto refresh every {auto_scan_interval}s · next in {_remaining}s · last trigger: {_mode}.")
+                _auto_status.caption(
+                    f"Last scan {_age}s ago (trigger: {_mode}). Results go stale at {auto_scan_interval}s — "
+                    "there is no background timer, so the rescan runs on your next interaction with this page "
+                    "after that, or press Scan Watchlist now."
+                )
         else:
-            _auto_status.caption(f"Auto refresh set to {auto_scan_interval}s after first manual scan.")
+            _auto_status.caption(
+                f"Rescan armed at {auto_scan_interval}s of staleness, but only after your first manual scan — "
+                "and only on a page interaction, not on a timer."
+            )
         _manual_scan = st.button("Scan Watchlist", key="run_scanner")
         if _manual_scan or _auto_due:
             with st.spinner("📡 Radar active. Scanning institutional order flow…"):
@@ -2533,6 +2680,14 @@ def render_intel_tab(d: DeskLocals) -> None:
                             },
                         )
 
+                # AUDIT #22: this list is a WATCHLIST RANKER, not a buy trigger.
+                # RESEARCH_UPGRADE.md:14 records the repo's own finding on Blue
+                # confluence used as an entry: "regime beta | t=2.98 full sample,
+                # NEGATIVE second half, all 12 configs" — the full-sample t-stat is
+                # regime exposure, and the edge inverted out of sample. The research
+                # module's conclusion was `blue_diamond_rank()` = "watchlist ranker,
+                # not trigger". The screen is kept because ordering candidates by
+                # trend health is still useful; the "💎 CONVICTION" buy framing is not.
                 _conviction = [
                     r for r in scanner_results
                     if "BLUE" in str(r.get("d_status", "")) and int(r.get("10x Potential", 0) or 0) >= 5
@@ -2543,52 +2698,49 @@ def render_intel_tab(d: DeskLocals) -> None:
                         for r in _conviction[:8]
                     )
                     _more = f" +{len(_conviction) - 8} more" if len(_conviction) > 8 else ""
-                    st.success(f"💎 CONVICTION: Blue Diamond + 10x score ≥ 5 — {_tickers}{_more}")
-                    _cfg_alerts_live = load_config()
-                    _webhook = str(_cfg_alerts_live.get("discord_webhook_url", "") or "")
-                    _do_alert = bool(_cfg_alerts_live.get("alert_on_conviction", True))
+                    st.info(f"🔷 WATCHLIST RANK — Blue Diamond + 10x score ≥ 5: {_tickers}{_more}")
+                    st.caption(
+                        "**This is a ranking, not an entry.** Our own research (`RESEARCH_UPGRADE.md`) tested Blue "
+                        "confluence as an entry signal across 12 configurations: t = 2.98 on the full sample, but "
+                        "**negative in the second half of every configuration** — the full-sample number is regime "
+                        "beta, not an edge. Treat these names as candidates to watch and wait for a validated entry "
+                        "(the SMA20-reclaim close, `swing_pullback_signal`), not as a buy list."
+                    )
+
+                    # Persist each conviction ONCE per ticker per day.
+                    #
+                    # This block reads back from the cached scanner bundle, and
+                    # render_intel_tab is an @st.fragment — so any widget in the tab
+                    # (expander, checkbox, selectbox) used to re-enter here and append
+                    # duplicate rows. Because save_radar_hits truncates to the last 200
+                    # entries, ~67 reruns silently evicted the entire genuine hit history
+                    # this tab advertises as "every signal the radar has ever fired".
+                    _seen = st.session_state.setdefault("_cf_logged_convictions", set())
+                    _today = datetime.now().strftime("%Y-%m-%d")
                     for r in _conviction:
+                        _key = (str(r.get("ticker")), _today)
+                        if _key in _seen:
+                            continue
+                        _seen.add(_key)
                         radar_add_hit(
                             {
                                 "scan_time": datetime.now().strftime("%Y-%m-%d %H:%M"),
                                 "ticker": r["ticker"],
                                 "price": r.get("price"),
-                                "source": "scanner_conviction",
+                                # AUDIT #22: logged as a ranking, not a conviction buy.
+                                "source": "scanner_watchlist_rank",
                                 "explosion_score": None,
-                                "pre_diamond": True,
-                                "signal": "💎 CONVICTION",
+                                # Derived, not assumed — the Tier-2 writer computes this
+                                # properly, so hardcoding True produced contradictory
+                                # rows for the same ticker in the persisted log.
+                                "pre_diamond": bool((r.get("pre_diamond_status") or {}).get("is_pre_diamond", False)),
+                                "signal": "🔷 WATCHLIST RANK",
                                 "10x_score": r.get("10x Potential"),
                                 "qs": r.get("qs"),
                                 "struct": r.get("struct"),
                                 "confluence": r.get("cp_score"),
                             }
                         )
-                    if _webhook and _do_alert:
-                        import threading
-
-                        _eq_cap = float(_cfg_alerts_live.get("equity_capital", 10000) or 10000)
-                        for r in _conviction:
-                            _supp = (r.get("pre_diamond_status") or {}).get("support_proximity")
-                            _supp_txt = (
-                                f"{float(_supp):.1f}%"
-                                if _supp is not None and np.isfinite(float(_supp))
-                                else "—"
-                            )
-                            _px = max(1e-9, float(r.get("price") or 0.0))
-                            _kelly = max(0.0, float(r.get("Adj. Kelly %") or 0.0))
-                            _sugg = int(max(0.0, (_eq_cap * (_kelly / 100.0)) / _px))
-                            _msg = (
-                                f"💎 **CONVICTION ALERT** — **{r['ticker']}** @ ${float(r['price']):.2f}\n"
-                                f"Blue Diamond + 10x Score {int(r.get('10x Potential', 0) or 0)}/10\n"
-                                f"QE {float(r['qs']):.0f} · Confluence {int(r['cp_score'])} · {str(r.get('struct', ''))}\n"
-                                f"Support proximity: {_supp_txt} · Suggested shares: {_sugg}\n"
-                                f"Flow: {str(r.get('Flow / Bias', '—'))}"
-                            )
-                            threading.Thread(
-                                target=send_discord_webhook,
-                                args=(_webhook, _msg),
-                                daemon=True,
-                            ).start()
 
                 with st.expander("10x Screener (score ≥ 5)", expanded=False):
                     _ten_rows = [r for r in scanner_results if int(r.get("10x Potential", 0) or 0) >= 5]
