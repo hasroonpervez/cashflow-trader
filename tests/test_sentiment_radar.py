@@ -184,9 +184,41 @@ def test_build_row_thin_confirmation_capped():
 def test_build_row_missing_sources_flagged_partial():
     row = build_row("abc", ape=None, st_sent=None, reddit_count=None,
                     vol_today=None, prior_vols=None,
-                    close_today=None, close_5d_ago=None)
+                    close_today=None, close_5d_ago=None, ape_available=False)
     assert "partial-data" in row.flags
+    assert "no-reddit-data" in row.flags
     assert row.score == 0.0
+
+
+def test_build_row_unranked_ticker_is_data_not_failure():
+    # ApeWisdom fetch WORKED but ticker isn't in top ranks: that's genuinely
+    # low buzz -> zero velocity, NO reddit flag. (The v1 bug showed these as
+    # "Weak data" and confused the whole board.)
+    row = build_row(
+        "ibm", ape=None, ape_available=True,
+        st_sent={"total": 12, "bullish": 8, "messages": 15},
+        reddit_count=0, vol_today=120, prior_vols=[100, 110, 90, 105, 95],
+        close_today=102.0, close_5d_ago=100.0,
+    )
+    assert "no-reddit-data" not in row.flags
+    assert "partial-data" not in row.flags
+    assert row.mentions == 0 and row.velocity == 0.0
+    # score comes only from sentiment + volume + earliness (no velocity part)
+    expected = 100 * (0.25 * wilson_lower_bound(8, 12)
+                      + 0.25 * ((20.0 / math.sqrt(62.5)) / 4.0)
+                      + 0.15 * (1 - 0.02 / 0.30))
+    assert abs(row.score - round(expected, 1)) < 0.05
+
+
+def test_rank_jump_bonus():
+    # velocity 1.0 (log10 -> 0) but rank improved 25 spots -> component 0.15
+    assert abs(velocity_component(1.0, rank=5, rank_prev=30) - 0.15) < APPROX
+    # 10 spots is below the 20-spot threshold -> no bonus
+    assert velocity_component(1.0, rank=20, rank_prev=30) == 0.0
+    # bonus stacks with log but caps at 1: v=10 (comp 1.0) + bonus stays 1.0
+    assert velocity_component(10.0, rank=1, rank_prev=99) == 1.0
+    # rank got WORSE -> no bonus
+    assert velocity_component(1.0, rank=50, rank_prev=10) == 0.0
 
 def test_clip01():
     assert clip01(-5) == 0.0 and clip01(5) == 1.0 and clip01(0.3) == 0.3

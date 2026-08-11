@@ -42,7 +42,6 @@ from __future__ import annotations
 
 import json
 import math
-import time
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Optional
@@ -78,11 +77,24 @@ def mention_velocity(mentions_now: float, mentions_prev: float) -> float:
     return m_now / m_prev
 
 
-def velocity_component(v: float) -> float:
-    """log10 scaling: v=1 -> 0, v=10 -> 1, capped both ends."""
-    if v <= 0:
-        return 0.0
-    return clip01(math.log10(v))
+RANK_JUMP_SPOTS = 20     # climbing this many ApeWisdom rank spots in 24h...
+RANK_JUMP_BONUS = 0.15   # ...adds this to the velocity component (then capped)
+
+
+def velocity_component(v: float, rank: Optional[int] = None,
+                       rank_prev: Optional[int] = None) -> float:
+    """log10 scaling: v=1 -> 0, v=10 -> 1, capped both ends.
+
+    Secondary evidence: a jump of >= RANK_JUMP_SPOTS up the ApeWisdom
+    leaderboard in 24h adds RANK_JUMP_BONUS. Rank is an independent,
+    scale-free confirmation — raw counts can be noisy for small tickers,
+    but climbing 20+ spots means the ticker is out-pacing the whole board.
+    """
+    base = math.log10(v) if v > 0 else 0.0
+    bonus = 0.0
+    if rank is not None and rank_prev is not None and (rank_prev - rank) >= RANK_JUMP_SPOTS:
+        bonus = RANK_JUMP_BONUS
+    return clip01(base + bonus)
 
 
 def wilson_lower_bound(positives: int, total: int, z: float = WILSON_Z) -> float:
@@ -180,12 +192,20 @@ def _get_json(url: str, timeout: float = 12.0) -> Optional[dict]:
         return None
 
 
-def fetch_apewisdom(flt: str = "all-stocks", pages: int = 2) -> Optional[dict[str, dict]]:
-    """{TICKER: {mentions, mentions_24h_ago, upvotes, rank}} or None."""
+def fetch_apewisdom(flt: str = "all-stocks", pages: int = 5) -> Optional[dict[str, dict]]:
+    """{TICKER: {mentions, mentions_24h_ago, upvotes, rank, rank_24h_ago}} or None.
+
+    Pages are fetched IN PARALLEL. A ticker absent from the result means
+    "not in Reddit's top ~{pages*100}" — i.e. genuinely low buzz, which is
+    DATA, not a failure. Only a total fetch failure returns None.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    urls = [APEWISDOM_URL.format(flt=flt, page=p) for p in range(1, pages + 1)]
+    with ThreadPoolExecutor(max_workers=min(len(urls), 5)) as ex:
+        results = list(ex.map(_get_json, urls))
     out: dict[str, dict] = {}
     got_any = False
-    for page in range(1, pages + 1):
-        data = _get_json(APEWISDOM_URL.format(flt=flt, page=page))
+    for data in results:
         if not data or "results" not in data:
             continue
         got_any = True
@@ -198,8 +218,18 @@ def fetch_apewisdom(flt: str = "all-stocks", pages: int = 2) -> Optional[dict[st
                 "mentions_24h_ago": _safe_int(row.get("mentions_24h_ago")),
                 "upvotes": _safe_int(row.get("upvotes")),
                 "rank": _safe_int(row.get("rank")),
+                "rank_24h_ago": _safe_int(row.get("rank_24h_ago")),
             }
     return out if got_any else None
+
+
+def fetch_stocktwits_many(symbols: list[str]) -> dict[str, Optional[dict]]:
+    """All symbols in parallel (8 workers). A burst of ~15 requests is well
+    inside StockTwits' unauthenticated 200/hr budget."""
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        results = list(ex.map(fetch_stocktwits, symbols))
+    return dict(zip(symbols, results))
 
 
 def fetch_stocktwits(symbol: str) -> Optional[dict]:
@@ -282,14 +312,27 @@ def build_row(
     prior_vols: Optional[list[float]],
     close_today: Optional[float],
     close_5d_ago: Optional[float],
+    ape_available: bool = True,
 ) -> RadarRow:
-    """Combine all sources into one scored row. Pure given its inputs."""
+    """Combine all sources into one scored row. Pure given its inputs.
+
+    Semantics matter: `ape is None` with `ape_available=True` means the
+    ApeWisdom fetch SUCCEEDED but this ticker isn't in Reddit's top ranks —
+    that is real information (low buzz -> velocity 0, mentions 0, NO flag).
+    Only `ape_available=False` (the source itself failed) flags the row.
+    """
     row = RadarRow(ticker=ticker.upper())
+    _rank = _rank_prev = None
 
     if ape:
         row.mentions = ape.get("mentions")
         row.mentions_prev = ape.get("mentions_24h_ago")
         row.velocity = mention_velocity(row.mentions or 0, row.mentions_prev or 0)
+        _rank, _rank_prev = ape.get("rank"), ape.get("rank_24h_ago")
+    elif ape_available:
+        row.mentions = 0
+        row.mentions_prev = 0
+        row.velocity = 0.0
     else:
         row.flags.append("no-reddit-data")
 
@@ -315,12 +358,12 @@ def build_row(
         row.flags.append("thin-confirmation")
     if disagree:
         row.flags.append("source-disagreement")
-    if ape is None or st_sent is None:
+    if (not ape_available) or st_sent is None:
         if "partial-data" not in row.flags:
             row.flags.append("partial-data")
 
     row.score = composite_score(
-        velocity_component(row.velocity),
+        velocity_component(row.velocity, _rank, _rank_prev),
         row.wilson,
         volume_component(row.vol_z),
         earliness_component(row.roc_5d),
@@ -334,16 +377,28 @@ def build_row(
 # Streamlit tab — imports kept inside so the math above stays test-importable
 # ---------------------------------------------------------------------------
 
+FIRE_MIN_VELOCITY = 2.0   # 🔥 needs buzz at least doubling...
+FIRE_MIN_WILSON = 0.45    # ...AND real bullish conviction, not just one loud component
+
+
 def verdict_for_row(r: RadarRow) -> str:
-    """One plain-English line per ticker — no jargon."""
+    """One plain-English line per ticker — no jargon.
+
+    The 🔥 verdict is a CO-OCCURRENCE gate, not just score >= 70: weighted
+    sums let a single screaming component fake a high score, but a true
+    asymmetric setup needs buzz acceleration AND bullish conviction AND
+    an early price. This is deliberate double-checking, not redundancy.
+    """
     if "partial-data" in r.flags or "source-disagreement" in r.flags:
         return "⚠️ Weak data — ignore for now"
     if r.roc_5d is not None and abs(r.roc_5d) >= EARLY_ROC_LIMIT:
         return "🏃 Already ran — you'd be late"
     if "thin-confirmation" in r.flags:
         return "🤔 One loud corner of Reddit — wait for confirmation"
-    if r.score >= 70:
+    if r.score >= 70 and r.velocity >= FIRE_MIN_VELOCITY and r.wilson >= FIRE_MIN_WILSON:
         return "🔥 Hot & still early — research this NOW"
+    if r.score >= 70:
+        return "💪 Strong score, mixed signals — verify by hand"
     if r.score >= 50:
         return "👀 Warming up — put on close watch"
     if r.score >= 30:
@@ -397,16 +452,36 @@ if BOTH agree and price is still flat, that's your candidate. Then usual rules: 
         return
 
     rows: list[RadarRow] = []
-    with st.spinner("Fetching ApeWisdom + Reddit cross-check..."):
-        ape_all = fetch_apewisdom("all-stocks", pages=3)
-        recount = reddit_recount(symbols)
+    with st.spinner("Scanning — Reddit, StockTwits, and prices fetched in parallel (~5s)..."):
+        # All three source families run concurrently; total wall time is the
+        # slowest single source, not the sum of every request.
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=3) as ex:
+            f_ape = ex.submit(fetch_apewisdom, "all-stocks", 5)
+            f_st = ex.submit(fetch_stocktwits_many, symbols)
+            f_rc = ex.submit(reddit_recount, symbols)
+            ape_all, st_all, recount = f_ape.result(), f_st.result(), f_rc.result()
 
-    prog = st.progress(0.0, text="Scoring tickers...")
-    for i, sym in enumerate(symbols):
-        st_sent = fetch_stocktwits(sym)
-        vol_today = prior_vols = close_today = close_5d = None
+        # One batch Yahoo download for every symbol (same pattern as radar tier-1).
+        frames: dict = {}
         try:
-            df = fetch_stock(sym, "3mo", "1d")
+            import yfinance as yf
+            from modules.data import _ticker_daily_ohlcv_from_raw
+            raw = yf.download(symbols, period="3mo", interval="1d",
+                              threads=True, progress=False, auto_adjust=True)
+            for sym in symbols:
+                frames[sym] = _ticker_daily_ohlcv_from_raw(raw, sym)
+        except Exception:
+            for sym in symbols:  # fallback: cached per-ticker fetcher
+                try:
+                    frames[sym] = fetch_stock(sym, "3mo", "1d")
+                except Exception:
+                    frames[sym] = None
+
+    for sym in symbols:
+        vol_today = prior_vols = close_today = close_5d = None
+        df = frames.get(sym)
+        try:
             if df is not None and not df.empty and "Volume" in df.columns:
                 vols = pd.to_numeric(df["Volume"], errors="coerce").dropna()
                 closes = pd.to_numeric(df["Close"], errors="coerce").dropna()
@@ -421,13 +496,11 @@ if BOTH agree and price is still flat, that's your candidate. Then usual rules: 
         rows.append(build_row(
             sym,
             (ape_all or {}).get(sym),
-            st_sent,
+            (st_all or {}).get(sym),
             (recount or {}).get(sym),
             vol_today, prior_vols, close_today, close_5d,
+            ape_available=ape_all is not None,
         ))
-        prog.progress((i + 1) / len(symbols), text=f"Scored {sym}")
-        time.sleep(0.35)  # stay polite with StockTwits (200 req/hr unauth)
-    prog.empty()
 
     rows.sort(key=lambda r: r.score, reverse=True)
     from datetime import datetime as _dt
@@ -456,24 +529,54 @@ def _render_results(st, rows: list[RadarRow], when: str) -> None:
                 )
                 st.caption(verdict_for_row(r))
 
-    # ---- Full board, verdict first, numbers for those who want them
+    # ---- Full board, verdict first, numbers for those who want them.
+    # Every column header has a hover tooltip in plain language (the ⓘ).
     df_out = pd.DataFrame([{
         "Ticker": r.ticker,
         "Verdict": verdict_for_row(r),
         "Score": r.score,
-        "Buzz": f"{r.velocity:.1f}x" if r.velocity else "—",
+        "Buzz": (f"{r.velocity:.1f}x" if r.velocity > 0 else "none"),
         "Bullish %": (f"{100 * r.st_bullish / r.st_total:.0f}% of {r.st_total}"
-                      if r.st_total else "no votes"),
-        "Volume": ("normal" if r.vol_z is None else
+                      if r.st_total else "no votes yet"),
+        "Volume": ("no data" if r.vol_z is None else
                    ("🔊 unusual" if r.vol_z >= 2 else "normal")),
-        "5d move": "—" if r.roc_5d is None else f"{100 * r.roc_5d:+.1f}%",
+        "5d move": "no data" if r.roc_5d is None else f"{100 * r.roc_5d:+.1f}%",
     } for r in rows])
 
     st.dataframe(
         df_out, use_container_width=True, hide_index=True,
         column_config={
+            "Ticker": st.column_config.TextColumn(
+                "Ticker", help="The stock's symbol."),
+            "Verdict": st.column_config.TextColumn(
+                "Verdict",
+                help="The bottom line in plain English — what to do with this row. "
+                     "🔥 only fires when buzz, bullishness AND an early price all line up."),
             "Score": st.column_config.ProgressColumn(
-                "Score", min_value=0, max_value=100, format="%.0f"),
+                "Score", min_value=0, max_value=100, format="%.0f",
+                help="0–100 asymmetric-setup score: Reddit buzz speeding up + bullish "
+                     "conviction + unusual volume + price that HASN'T moved yet. "
+                     "70+ = worth researching today. Below 50 = noise."),
+            "Buzz": st.column_config.TextColumn(
+                "Buzz",
+                help="Reddit chatter now vs 24 hours ago. '3.0x' = three times more "
+                     "mentions than yesterday — the crowd is arriving. 'none' = Reddit "
+                     "isn't talking about this stock (that's fine, just no signal)."),
+            "Bullish %": st.column_config.TextColumn(
+                "Bullish %",
+                help="On StockTwits, of the posts that took a side: how many say UP? "
+                     "'78% of 41' = 41 opinionated posts, 78% bullish. Few posts = "
+                     "weak evidence, and the Score already discounts that automatically."),
+            "Volume": st.column_config.TextColumn(
+                "Volume",
+                help="Today's trading volume vs the stock's own 30-day normal. "
+                     "'🔊 unusual' = real money is moving, not just talk. Talk WITHOUT "
+                     "volume is often just noise."),
+            "5d move": st.column_config.TextColumn(
+                "5d move",
+                help="Price change over the last 5 sessions. Near 0% = you'd still be "
+                     "early (that's what you want). A big move = the easy gain may be "
+                     "gone — chasing late is how buzz stocks burn people."),
         },
     )
     with st.expander("🔬 Nerd numbers (raw components & flags)"):
