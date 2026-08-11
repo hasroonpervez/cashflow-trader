@@ -603,18 +603,24 @@ if BOTH agree and price is still flat, that's your candidate. Then usual rules: 
             st.caption("Press **Scan Now** — takes ~30–60s (free sources are rate-limited).")
         return
 
-    rows: list[RadarRow] = []
-    with st.spinner("Scanning — Reddit, StockTwits, and prices fetched in parallel (~5s)..."):
-        # All three source families run concurrently; total wall time is the
-        # slowest single source, not the sum of every request.
+    # One cached unit for the whole social fetch: within the 5-min TTL a
+    # re-scan is near-instant, and the free APIs aren't hammered. Threads
+    # live INSIDE the cached function (safe); cached calls from worker
+    # threads would trip Streamlit's script context, so we don't do that.
+    @st.cache_data(ttl=300, show_spinner=False)
+    def _fetch_social_bundle(symbols_key: tuple):
         from concurrent.futures import ThreadPoolExecutor
+        syms = list(symbols_key)
         with ThreadPoolExecutor(max_workers=4) as ex:
             f_ape = ex.submit(fetch_apewisdom, "all-stocks", 5)
-            f_st = ex.submit(fetch_stocktwits_many, symbols)
-            f_rc = ex.submit(reddit_recount, symbols)
-            f_tr = ex.submit(fetch_google_trends, symbols)
-            ape_all, st_all = f_ape.result(), f_st.result()
-            recount, trends_all = f_rc.result(), f_tr.result()
+            f_st = ex.submit(fetch_stocktwits_many, syms)
+            f_rc = ex.submit(reddit_recount, syms)
+            f_tr = ex.submit(fetch_google_trends, syms)
+            return f_ape.result(), f_st.result(), f_rc.result(), f_tr.result()
+
+    rows: list[RadarRow] = []
+    with st.spinner("Scanning — Reddit, StockTwits, and prices fetched in parallel (~5s)..."):
+        ape_all, st_all, recount, trends_all = _fetch_social_bundle(tuple(symbols))
 
         # One batch Yahoo download for every symbol + ^VIX macro overlay
         # (same pattern as radar tier-1; VIX rides along for free).
@@ -670,9 +676,9 @@ if BOTH agree and price is still flat, that's your candidate. Then usual rules: 
     health = {
         "Reddit ranks (ApeWisdom)": ape_all is not None,
         "StockTwits": any(v is not None for v in (st_all or {}).values()),
-        "Reddit cross-check": recount is not None,
-        "Google Trends": trends_all is not None,
         "Yahoo prices": any(f is not None for f in frames.values()),
+        "Reddit cross-check (optional)": recount is not None,
+        "Google Trends (optional)": trends_all is not None,
     }
     st.session_state["sr_results"] = {
         "rows": rows, "when": when, "vix": vix_last, "health": health,
@@ -690,9 +696,15 @@ def _render_results(st, rows: list[RadarRow], when: str,
     if health:
         bits = " · ".join(("✅ " if ok else "⚠️ ") + name for name, ok in health.items())
         st.caption(f"Sources: {bits}")
-        if not all(health.values()):
-            st.info("Some sources didn't answer — affected rows are flagged and "
-                    "their scores capped, never guessed. Re-scan in a few minutes.")
+        core_down = [n for n, ok in health.items() if not ok and "(optional)" not in n]
+        opt_down = [n for n, ok in health.items() if not ok and "(optional)" in n]
+        if core_down:
+            st.info("A core source didn't answer — affected rows are flagged and their "
+                    "scores capped, never guessed. Re-scan in a few minutes.")
+        elif opt_down:
+            st.caption("ℹ️ Optional cross-checks didn't answer (Reddit and Google often "
+                       "block cloud servers — normal). Core signals are unaffected; "
+                       "scores stand on Reddit ranks + StockTwits + prices.")
 
     # ---- Macro overlay: the market-wide weather report
     risk = macro_risk_level(vix_last)

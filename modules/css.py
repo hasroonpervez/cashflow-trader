@@ -922,7 +922,10 @@ function cfFindMainDashTabButtons(){
     if(tabs.length<3)continue;
     var t0=(tabs[0].textContent||'').trim();
     var t1=(tabs[1].textContent||'').trim();
-    if(t0.indexOf('Setup')>=0&&t1.indexOf('Cashflow')>=0)return tabs;
+    /* Match current labels (Signals / Cash Flow) and legacy (Setup / Cashflow). */
+    var ok0=(t0.indexOf('Signals')>=0||t0.indexOf('Setup')>=0);
+    var ok1=(t1.indexOf('Cash')>=0||t1.indexOf('Cashflow')>=0);
+    if(ok0&&ok1)return tabs;
   }
   return null;
 }
@@ -956,13 +959,41 @@ function cfOpenQuickReference(){
     break;
   }
 }
+function cfMainScroller(){
+  /* The element that actually scrolls the app. Never an overflow:hidden
+     wrapper — those eat scrollIntoView and leave the page stuck at top. */
+  var cands=[
+    pd.querySelector('section[data-testid="stMain"]'),
+    pd.querySelector('section.main'),
+    pd.querySelector('[data-testid="stAppViewContainer"]'),
+    pd.scrollingElement||pd.documentElement
+  ];
+  for(var i=0;i<cands.length;i++){
+    var c=cands[i];
+    if(c&&c.scrollHeight>c.clientHeight+4)return c;
+  }
+  return pd.scrollingElement||pd.documentElement;
+}
 function cfScrollToHashId(id){
   var n=0;
   function one(){
     var el=pd.getElementById(id);
-    if(el){
-      el.scrollIntoView({behavior:'smooth',block:'start'});
-      try{pw.history.replaceState(null,'','#'+id);}catch(e){}
+    /* offsetParent===null => target is inside a hidden (unmounted) tab panel;
+       keep retrying until the tab switch has actually rendered it. */
+    if(el&&el.offsetParent!==null){
+      try{
+        var sc=cfMainScroller();
+        var y;
+        if(sc===pd.scrollingElement||sc===pd.documentElement||sc===pd.body){
+          y=el.getBoundingClientRect().top+(pw.pageYOffset||sc.scrollTop||0);
+        }else{
+          y=el.getBoundingClientRect().top-sc.getBoundingClientRect().top+sc.scrollTop;
+        }
+        sc.scrollTo({top:Math.max(0,y),behavior:'smooth'});
+      }catch(e){
+        try{el.scrollIntoView({behavior:'smooth',block:'start'});}catch(e2){}
+      }
+      try{pw.history.replaceState(null,'','#'+id);}catch(e3){}
       return;
     }
     n++; if(n<50)setTimeout(one,110);
