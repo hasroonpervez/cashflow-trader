@@ -15,3 +15,5 @@ requests==2.32.5
 # Institutional Quant Edge (HMM); without hmmlearn, A/B diagnostics fall back to retail pillars only
 hmmlearn>=0.3.2
 scipy>=1.11.0
+# Sentiment Radar: Google Trends search-attention signal (free; fails soft if rate-limited)
+pytrends>=4.9.2

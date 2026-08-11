@@ -60,7 +60,15 @@ MIN_CONFIRM_MSGS = 3     # StockTwits msgs needed to confirm a Reddit spike
 THIN_CONFIRM_CAP = 60.0
 DISAGREE_RATIO = 5.0
 DISAGREE_CAP = 50.0
-WEIGHTS = {"velocity": 0.35, "wilson": 0.25, "volume_z": 0.25, "earliness": 0.15}
+TRENDS_SATURATION = 3.0  # search interest 3x its own baseline = full marks
+WEIGHTS = {
+    "velocity": 0.30,   # Reddit mention acceleration (+ rank-jump evidence)
+    "wilson": 0.20,     # StockTwits bullish conviction, small-sample discounted
+    "volume_z": 0.20,   # real money confirmation vs 30d baseline
+    "earliness": 0.15,  # price hasn't moved yet = the asymmetry
+    "trends": 0.15,     # Google search attention — the cross-platform echo
+}                        # (captures X/Twitter, TikTok, news spikes indirectly:
+                         #  attention anywhere ends up as ticker searches)
 
 # ---------------------------------------------------------------------------
 # Pure math — no I/O, no Streamlit. Everything here is unit-tested.
@@ -146,8 +154,32 @@ def earliness_component(roc_5d: Optional[float]) -> float:
     return clip01(1.0 - abs(float(roc_5d)) / EARLY_ROC_LIMIT)
 
 
+def trends_ratio(recent_mean: Optional[float], baseline_mean: Optional[float]) -> Optional[float]:
+    """Google Trends: last-7-day mean interest vs the prior-baseline mean.
+
+    Returns None (no signal) when either side is missing or baseline is ~0 —
+    a dead baseline would make any blip look infinite.
+    """
+    if recent_mean is None or baseline_mean is None:
+        return None
+    if baseline_mean <= 1e-9:
+        return None
+    return max(0.0, float(recent_mean)) / float(baseline_mean)
+
+
+def trends_component(ratio: Optional[float]) -> float:
+    """ratio<=1 (search flat or falling) -> 0; ratio>=3x -> 1; linear between.
+
+    (ratio-1)/(TRENDS_SATURATION-1): 2x -> 0.5, 3x -> 1.0.
+    """
+    if ratio is None or ratio <= 1.0:
+        return 0.0
+    return clip01((ratio - 1.0) / (TRENDS_SATURATION - 1.0))
+
+
 def composite_score(
     vel_c: float, wilson_c: float, volz_c: float, early_c: float,
+    trends_c: float = 0.0,
     thin_confirmation: bool = False, source_disagreement: bool = False,
 ) -> float:
     """Weighted composite, 0-100, with integrity caps applied AFTER weighting."""
@@ -156,6 +188,7 @@ def composite_score(
         + WEIGHTS["wilson"] * clip01(wilson_c)
         + WEIGHTS["volume_z"] * clip01(volz_c)
         + WEIGHTS["earliness"] * clip01(early_c)
+        + WEIGHTS["trends"] * clip01(trends_c)
     )
     if source_disagreement:
         raw = min(raw, DISAGREE_CAP)
@@ -220,6 +253,47 @@ def fetch_apewisdom(flt: str = "all-stocks", pages: int = 5) -> Optional[dict[st
                 "rank": _safe_int(row.get("rank")),
                 "rank_24h_ago": _safe_int(row.get("rank_24h_ago")),
             }
+    return out if got_any else None
+
+
+def fetch_google_trends(symbols: list[str]) -> Optional[dict[str, Optional[float]]]:
+    """{SYM: trends_ratio or None} via pytrends, or None if the lib/service fails.
+
+    Searches '<SYM> stock' (disambiguates tickers like IBM or HOOD) over the
+    last 3 months, then compares the most recent 7 datapoints' mean to the
+    prior baseline mean. Batches of 5 keywords per request (Google's limit).
+    Fails soft: any error -> None for that batch, never fabricated data.
+    """
+    try:
+        from pytrends.request import TrendReq
+    except Exception:
+        return None
+    out: dict[str, Optional[float]] = {s: None for s in symbols}
+    got_any = False
+    try:
+        py = TrendReq(hl="en-US", tz=0, timeout=(5, 12))
+    except Exception:
+        return None
+    for i in range(0, len(symbols), 5):
+        batch = symbols[i:i + 5]
+        kws = [f"{s} stock" for s in batch]
+        try:
+            py.build_payload(kws, timeframe="today 3-m")
+            df = py.interest_over_time()
+            if df is None or df.empty:
+                continue
+            got_any = True
+            for sym, kw in zip(batch, kws):
+                if kw not in df.columns:
+                    continue
+                series = df[kw].astype(float)
+                if len(series) < 12:
+                    continue
+                recent = series.iloc[-7:].mean()
+                baseline = series.iloc[:-7].mean()
+                out[sym] = trends_ratio(recent, baseline)
+        except Exception:
+            continue
     return out if got_any else None
 
 
@@ -299,6 +373,7 @@ class RadarRow:
     wilson: float = 0.0
     vol_z: Optional[float] = None
     roc_5d: Optional[float] = None
+    trends: Optional[float] = None
     score: float = 0.0
     flags: list[str] = field(default_factory=list)
 
@@ -313,6 +388,7 @@ def build_row(
     close_today: Optional[float],
     close_5d_ago: Optional[float],
     ape_available: bool = True,
+    trends: Optional[float] = None,
 ) -> RadarRow:
     """Combine all sources into one scored row. Pure given its inputs.
 
@@ -362,11 +438,13 @@ def build_row(
         if "partial-data" not in row.flags:
             row.flags.append("partial-data")
 
+    row.trends = trends
     row.score = composite_score(
         velocity_component(row.velocity, _rank, _rank_prev),
         row.wilson,
         volume_component(row.vol_z),
         earliness_component(row.roc_5d),
+        trends_component(trends),
         thin_confirmation=thin,
         source_disagreement=disagree,
     )
@@ -379,6 +457,66 @@ def build_row(
 
 FIRE_MIN_VELOCITY = 2.0   # 🔥 needs buzz at least doubling...
 FIRE_MIN_WILSON = 0.45    # ...AND real bullish conviction, not just one loud component
+
+# --- Attention cascade (the "graph" logic) -------------------------------
+# Attention propagates through a causal chain:
+#   social buzz (Reddit/X) --> search interest (Google) --> volume --> price.
+# The STAGE of that cascade is itself a signal: being early in the chain is
+# where asymmetric returns live; the last node (price moved) means it's over.
+STAGE_ATTENTION_VEL = 2.0    # buzz doubling counts as "attention lit"
+STAGE_ATTENTION_TRENDS = 1.5 # or searches 1.5x baseline
+STAGE_VOLUME_Z = 2.0         # volume node fires at z >= 2
+STAGE_LATE_ROC = 0.15        # price node fires at +/-15% in 5d (half the cap)
+
+STAGE_LABELS = {
+    0: "💤 Dormant — no attention anywhere",
+    1: "🌱 Smoldering — talk started, money hasn't moved (earliest edge)",
+    2: "🚀 Igniting — talk AND volume, price still flat (confirmation)",
+    3: "🌋 Erupted — price already moved (you're late)",
+}
+
+
+VIX_ELEVATED = 20.0
+VIX_STRESS = 25.0
+
+
+def macro_risk_level(vix_last: Optional[float]) -> str:
+    """Macro overlay from VIX: 'calm' < 20 <= 'elevated' < 25 <= 'stress'.
+
+    In stress regimes, retail-buzz spikes are unreliable longs (bear-market
+    rallies attract the loudest crowds). Unknown VIX -> 'unknown', shown
+    honestly rather than assumed calm.
+    """
+    if vix_last is None:
+        return "unknown"
+    v = float(vix_last)
+    if v >= VIX_STRESS:
+        return "stress"
+    if v >= VIX_ELEVATED:
+        return "elevated"
+    return "calm"
+
+
+def attention_stage(velocity: float, trends: Optional[float],
+                    vol_z: Optional[float], roc_5d: Optional[float]) -> int:
+    """Locate the ticker on the attention cascade. Pure + unit-tested.
+
+    3: price node fired (|5d ROC| >= 15%) — regardless of the rest, it's late.
+    2: attention lit AND volume confirming, price still early.
+    1: attention lit, volume/price still quiet — the asymmetric sweet spot.
+    0: nothing lit.
+    """
+    price_fired = roc_5d is not None and abs(roc_5d) >= STAGE_LATE_ROC
+    if price_fired:
+        return 3
+    attention = (velocity >= STAGE_ATTENTION_VEL) or (
+        trends is not None and trends >= STAGE_ATTENTION_TRENDS)
+    volume = vol_z is not None and vol_z >= STAGE_VOLUME_Z
+    if attention and volume:
+        return 2
+    if attention:
+        return 1
+    return 0
 
 
 def verdict_for_row(r: RadarRow) -> str:
@@ -407,6 +545,18 @@ def verdict_for_row(r: RadarRow) -> str:
 
 
 def render_sentiment_radar_tab(universe_csv: str) -> None:
+    """No-fail outer shell: whatever breaks inside, the app never crashes."""
+    import streamlit as st
+    try:
+        _render_sentiment_radar_tab(universe_csv)
+    except Exception as exc:  # last-resort layer — degrade, don't die
+        st.error("📡 Sentiment Radar hit an unexpected error this scan. "
+                 "Your other tabs are unaffected — try scanning again in a minute.")
+        with st.expander("Technical details"):
+            st.code(repr(exc))
+
+
+def _render_sentiment_radar_tab(universe_csv: str) -> None:
     import streamlit as st
     import pandas as pd
     from modules.data import fetch_stock
@@ -429,6 +579,7 @@ def render_sentiment_radar_tab(universe_csv: str) -> None:
 | **Below 50** | Noise. Do nothing. |
 | **"Already ran"** 🏃 | Buzz is high but the stock already jumped — the easy part is over. Chasing = being exit liquidity. |
 | **"Weak data"** ⚠️ | Sources disagree or are missing — the score can't be trusted this scan. |
+| **Stage 🌱→🚀→🌋** | Attention travels: talk → searches → volume → price. 🌱 = earliest edge, 🚀 = confirmed and still early, 🌋 = too late. |
 
 **Workflow:** scan here → cross-check hot names in 🌎 Market Radar (technical coil) →
 if BOTH agree and price is still flat, that's your candidate. Then usual rules: small size, confirm every order.
@@ -446,7 +597,8 @@ if BOTH agree and price is still flat, that's your candidate. Then usual rules: 
     if not scan_clicked:
         cached = st.session_state.get("sr_results")
         if cached is not None:
-            _render_results(st, cached["rows"], cached["when"])
+            _render_results(st, cached["rows"], cached["when"],
+                            cached.get("vix"), cached.get("health"))
         else:
             st.caption("Press **Scan Now** — takes ~30–60s (free sources are rate-limited).")
         return
@@ -456,23 +608,32 @@ if BOTH agree and price is still flat, that's your candidate. Then usual rules: 
         # All three source families run concurrently; total wall time is the
         # slowest single source, not the sum of every request.
         from concurrent.futures import ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=3) as ex:
+        with ThreadPoolExecutor(max_workers=4) as ex:
             f_ape = ex.submit(fetch_apewisdom, "all-stocks", 5)
             f_st = ex.submit(fetch_stocktwits_many, symbols)
             f_rc = ex.submit(reddit_recount, symbols)
-            ape_all, st_all, recount = f_ape.result(), f_st.result(), f_rc.result()
+            f_tr = ex.submit(fetch_google_trends, symbols)
+            ape_all, st_all = f_ape.result(), f_st.result()
+            recount, trends_all = f_rc.result(), f_tr.result()
 
-        # One batch Yahoo download for every symbol (same pattern as radar tier-1).
+        # One batch Yahoo download for every symbol + ^VIX macro overlay
+        # (same pattern as radar tier-1; VIX rides along for free).
         frames: dict = {}
+        vix_last = None
         try:
             import yfinance as yf
             from modules.data import _ticker_daily_ohlcv_from_raw
-            raw = yf.download(symbols, period="3mo", interval="1d",
+            raw = yf.download(symbols + ["^VIX"], period="3mo", interval="1d",
                               threads=True, progress=False, auto_adjust=True)
             for sym in symbols:
                 frames[sym] = _ticker_daily_ohlcv_from_raw(raw, sym)
+            vdf = _ticker_daily_ohlcv_from_raw(raw, "^VIX")
+            if vdf is not None and not vdf.empty:
+                vc = pd.to_numeric(vdf["Close"], errors="coerce").dropna()
+                if len(vc):
+                    vix_last = float(vc.iloc[-1])
         except Exception:
-            for sym in symbols:  # fallback: cached per-ticker fetcher
+            for sym in symbols:  # fallback layer: cached per-ticker fetcher
                 try:
                     frames[sym] = fetch_stock(sym, "3mo", "1d")
                 except Exception:
@@ -500,19 +661,52 @@ if BOTH agree and price is still flat, that's your candidate. Then usual rules: 
             (recount or {}).get(sym),
             vol_today, prior_vols, close_today, close_5d,
             ape_available=ape_all is not None,
+            trends=(trends_all or {}).get(sym),
         ))
 
     rows.sort(key=lambda r: r.score, reverse=True)
     from datetime import datetime as _dt
     when = _dt.now().strftime("%b %d, %I:%M %p")
-    st.session_state["sr_results"] = {"rows": rows, "when": when}
-    _render_results(st, rows, when)
+    health = {
+        "Reddit ranks (ApeWisdom)": ape_all is not None,
+        "StockTwits": any(v is not None for v in (st_all or {}).values()),
+        "Reddit cross-check": recount is not None,
+        "Google Trends": trends_all is not None,
+        "Yahoo prices": any(f is not None for f in frames.values()),
+    }
+    st.session_state["sr_results"] = {
+        "rows": rows, "when": when, "vix": vix_last, "health": health,
+    }
+    _render_results(st, rows, when, vix_last, health)
 
 
-def _render_results(st, rows: list[RadarRow], when: str) -> None:
+def _render_results(st, rows: list[RadarRow], when: str,
+                    vix_last=None, health: Optional[dict] = None) -> None:
     import pandas as pd
 
     st.caption(f"Last scan: **{when}** — results stay until you scan again.")
+
+    # ---- No-fail layer 1: show exactly which sources answered this scan
+    if health:
+        bits = " · ".join(("✅ " if ok else "⚠️ ") + name for name, ok in health.items())
+        st.caption(f"Sources: {bits}")
+        if not all(health.values()):
+            st.info("Some sources didn't answer — affected rows are flagged and "
+                    "their scores capped, never guessed. Re-scan in a few minutes.")
+
+    # ---- Macro overlay: the market-wide weather report
+    risk = macro_risk_level(vix_last)
+    if risk == "stress":
+        st.error(f"🌪️ **Macro: STRESS** (VIX {vix_last:.0f}). In fear regimes, buzz "
+                 "spikes are usually bear-market rallies — treat every signal below "
+                 "as research-only and cut size expectations in half.")
+    elif risk == "elevated":
+        st.warning(f"🌥️ **Macro: elevated risk** (VIX {vix_last:.0f}). Market is "
+                   "jumpy — demand 🚀-stage confirmation before acting on anything.")
+    elif risk == "calm":
+        st.caption(f"☀️ Macro: calm (VIX {vix_last:.0f}) — normal conditions for buzz signals.")
+    else:
+        st.caption("Macro: VIX unavailable this scan — no market-weather adjustment shown.")
 
     # ---- Top-3 spotlight cards: the only thing a beginner needs to look at
     top = [r for r in rows if r.score > 0][:3]
@@ -534,12 +728,16 @@ def _render_results(st, rows: list[RadarRow], when: str) -> None:
     df_out = pd.DataFrame([{
         "Ticker": r.ticker,
         "Verdict": verdict_for_row(r),
+        "Stage": STAGE_LABELS[attention_stage(r.velocity, r.trends, r.vol_z, r.roc_5d)].split(" — ")[0],
         "Score": r.score,
         "Buzz": (f"{r.velocity:.1f}x" if r.velocity > 0 else "none"),
         "Bullish %": (f"{100 * r.st_bullish / r.st_total:.0f}% of {r.st_total}"
                       if r.st_total else "no votes yet"),
         "Volume": ("no data" if r.vol_z is None else
                    ("🔊 unusual" if r.vol_z >= 2 else "normal")),
+        "Searches": ("no data" if r.trends is None else
+                     (f"📈 rising {r.trends:.1f}x" if r.trends > 1.2 else
+                      ("flat" if r.trends >= 0.8 else "fading"))),
         "5d move": "no data" if r.roc_5d is None else f"{100 * r.roc_5d:+.1f}%",
     } for r in rows])
 
@@ -552,6 +750,13 @@ def _render_results(st, rows: list[RadarRow], when: str) -> None:
                 "Verdict",
                 help="The bottom line in plain English — what to do with this row. "
                      "🔥 only fires when buzz, bullishness AND an early price all line up."),
+            "Stage": st.column_config.TextColumn(
+                "Stage",
+                help="Where the stock sits on the attention chain: talk → searches → "
+                     "volume → price. 💤 Dormant: nothing yet. 🌱 Smoldering: people are "
+                     "talking but money hasn't moved — the earliest (riskiest) edge. "
+                     "🚀 Igniting: talk AND real volume, price still flat — the "
+                     "confirmation sweet spot. 🌋 Erupted: price already jumped — late."),
             "Score": st.column_config.ProgressColumn(
                 "Score", min_value=0, max_value=100, format="%.0f",
                 help="0–100 asymmetric-setup score: Reddit buzz speeding up + bullish "
@@ -572,6 +777,12 @@ def _render_results(st, rows: list[RadarRow], when: str) -> None:
                 help="Today's trading volume vs the stock's own 30-day normal. "
                      "'🔊 unusual' = real money is moving, not just talk. Talk WITHOUT "
                      "volume is often just noise."),
+            "Searches": st.column_config.TextColumn(
+                "Searches",
+                help="Google searches for '<ticker> stock' this week vs its own recent "
+                     "normal. This catches attention from EVERYWHERE — X/Twitter, TikTok, "
+                     "news — because people who see a stock anywhere go google it. "
+                     "'📈 rising 2.0x' = twice the usual search interest."),
             "5d move": st.column_config.TextColumn(
                 "5d move",
                 help="Price change over the last 5 sessions. Near 0% = you'd still be "
@@ -588,7 +799,9 @@ def _render_results(st, rows: list[RadarRow], when: str) -> None:
             "Bull/Labeled": f"{r.st_bullish}/{r.st_total}",
             "Wilson LB": round(r.wilson, 3),
             "Vol z": None if r.vol_z is None else round(r.vol_z, 2),
+            "Trends ratio": None if r.trends is None else round(r.trends, 2),
             "5d ROC": None if r.roc_5d is None else round(r.roc_5d, 4),
+            "Stage": attention_stage(r.velocity, r.trends, r.vol_z, r.roc_5d),
             "Flags": ", ".join(r.flags) if r.flags else "clean",
         } for r in rows]), use_container_width=True, hide_index=True)
         st.caption(
