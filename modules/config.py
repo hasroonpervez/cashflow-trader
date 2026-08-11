@@ -18,6 +18,12 @@ DEFAULT_CONFIG = {
         "PLTR,HIMS,TSLA,SOFI,RIVN,CIFR,SPY,QQQ"
     ),
     "radar_universe": _RADAR_UNIVERSE,
+    # Quantum computing watchlist — user picks + researched pure-plays.
+    # IBM = large-cap anchor; the rest are speculative small/mid caps.
+    "quantum_watchlist": "INFQ,IONQ,QBTS,RGTI,IBM,QUBT,ARQQ,LAES,BTQ",
+    # Universe scanned by the 📡 Sentiment tab (defaults to quantum list +
+    # a few high-buzz names so the heat board has contrast).
+    "sentiment_universe": "INFQ,IONQ,QBTS,RGTI,IBM,QUBT,ARQQ,LAES,BTQ,PLTR,HIMS,SOFI,HOOD,TSLA",
     "scanner_sort_mode": "Custom watchlist order",
     "scanner_mode": "📈 Options Yield",
     "equity_capital": 10000,

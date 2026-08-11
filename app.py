@@ -325,13 +325,14 @@ def main():
         ctx.mobile_chart_layout,
     )
 
-    dash_tab_setup, dash_tab_cashflow, dash_tab_intel, dash_tab_ledger, dash_tab_radar = st.tabs(
+    dash_tab_setup, dash_tab_cashflow, dash_tab_intel, dash_tab_ledger, dash_tab_radar, dash_tab_sentiment = st.tabs(
         [
             "📍 Signals",
             "💰 Cash Flow",
             "🔍 Scanner & Intel",
             "📋 My Positions",
             "🌎 Market Radar",
+            "📡 Sentiment",
         ]
     )
 
@@ -345,6 +346,11 @@ def main():
         render_ledger_tab(desk)
     with dash_tab_radar:
         render_radar_tab(desk)
+    with dash_tab_sentiment:
+        from modules.sentiment_radar import render_sentiment_radar_tab
+        render_sentiment_radar_tab(
+            cfg.get("sentiment_universe", cfg.get("quantum_watchlist", ""))
+        )
 
 
 if __name__ == "__main__":
