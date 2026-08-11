@@ -60,7 +60,7 @@ def _priced(**kw):
 # =====================================================================
 #  FINDING: "A crash is scored identically to a rally."
 #  abs(roc_5d) at earliness_component / attention_stage / verdict_for_row
-#  rendered a -25% capitulation as "Already ran — you'd be late" / "Erupted".
+#  rendered a -25% capitulation as "Already ran: you'd be late" / "Erupted".
 # =====================================================================
 
 def test_crash_does_not_consume_earliness():
@@ -137,7 +137,7 @@ def test_crash_and_rally_of_equal_magnitude_now_score_differently():
 
 
 # =====================================================================
-#  FINDING: "The VIX macro gate gates nothing" — banner only, no score change.
+#  FINDING: "The VIX macro gate gates nothing", banner only, no score change.
 # =====================================================================
 
 def test_macro_cap_table():
@@ -181,7 +181,7 @@ def test_macro_gate_never_raises_a_quiet_score():
 
 
 def test_macro_gate_defaults_to_off_for_callers_without_a_vix():
-    """find10x calls build_row with no macro_risk — it must be unaffected."""
+    """find10x calls build_row with no macro_risk: it must be unaffected."""
     hot = dict(ape=_ape(mentions=2000, prev=100), st_sent=_st(total=200, bullish=180),
                reddit_count=1800, vol_today=400.0, prior_vols=[100.0] * 30,
                close_today=100.0, close_5d_ago=100.0, trends=3.0)
@@ -206,7 +206,7 @@ def test_macro_capped_row_gets_an_honest_verdict():
 
 
 # =====================================================================
-#  FINDING: a "⚠️ Weak data — ignore for now" row could occupy a
+#  FINDING: a "⚠️ Weak data, ignore for now" row could occupy a
 #  "🏆 Today's top signals" card.
 # =====================================================================
 
@@ -232,12 +232,12 @@ def test_top_signal_selection_drops_weak_rows():
     top = [r for r in rows if r.score > 0 and not is_weak_data(r)][:3]
 
     assert [r.ticker for r in top] == ["GOOD"]
-    # the two loudest scores were both untrustworthy — and were both excluded
+    # the two loudest scores were both untrustworthy, and were both excluded
     assert rows[0].ticker == "PART"
 
 
 def test_a_thin_confirmation_row_is_still_card_eligible():
-    """Only missing/contradictory SOURCES disqualify — 'thin' is a real reading."""
+    """Only missing/contradictory SOURCES disqualify: 'thin' is a real reading."""
     thin = RadarRow(ticker="THIN", score=55.0, flags=["thin-confirmation"])
     assert is_weak_data(thin) is False
     assert [r.ticker for r in [thin] if not is_weak_data(r)] == ["THIN"]
@@ -275,7 +275,7 @@ def test_onscreen_weights_caption_is_generated_from_the_weights_dict():
 
     The old caption listed four literals and summed to 85%. Regenerating it
     from WEIGHTS is what makes drift structurally impossible, so that is what
-    is asserted — a value assertion would pass again the moment someone
+    is asserted: a value assertion would pass again the moment someone
     re-hardcodes the numbers correctly and then changes WEIGHTS.
     """
     src = Path(__file__).parent.parent / "modules" / "sentiment_radar.py"
@@ -298,7 +298,7 @@ def test_docstring_documents_the_macro_gate_and_the_direction_rule():
 
 # =====================================================================
 #  FINDING: mention velocity is an unstabilised ratio with the denominator
-#  floored at 1 — 1->10 mentions maxes the largest weight while 200->600
+#  floored at 1: 1->10 mentions maxes the largest weight while 200->600
 #  earns 0.48.
 # =====================================================================
 
@@ -323,7 +323,7 @@ def test_small_absolute_counts_can_no_longer_max_the_largest_weight():
 
 
 def test_shrinkage_leaves_large_counts_essentially_untouched():
-    """K=10 is a prior, not a distortion — it must vanish at scale."""
+    """K=10 is a prior, not a distortion, it must vanish at scale."""
     raw = 3000.0 / 1000.0
     assert abs(mention_velocity(3000, 1000) - raw) < 0.03
 

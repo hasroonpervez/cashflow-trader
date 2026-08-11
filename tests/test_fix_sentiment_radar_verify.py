@@ -55,7 +55,7 @@ def test_confirm_macro_cap_is_a_real_ceiling_not_a_banner():
 
 
 # ---------------------------------------------------------------------------
-# Velocity shrinkage — thresholds must track the metric (was: 6 xfail probes)
+# Velocity shrinkage: thresholds must track the metric (was: 6 xfail probes)
 # ---------------------------------------------------------------------------
 
 def test_a_genuine_doubling_of_mentions_lights_attention():
@@ -66,7 +66,7 @@ def test_a_genuine_doubling_of_mentions_lights_attention():
 
 
 def test_thin_confirmation_guard_still_catches_a_2x_spike():
-    """INTEGRITY CAP — the regression that mattered most.
+    """INTEGRITY CAP: the regression that mattered most.
 
     A 2.25x mention spike (20 -> 45) backed by a single StockTwits message must be
     flagged thin-confirmation and capped. With the trigger left at a literal 2.0 the
@@ -98,7 +98,7 @@ def test_small_count_doublings_deliberately_do_not_clear_the_gate():
 
 
 def test_velocity_is_not_the_raw_mention_ratio_and_the_tooltip_says_so():
-    """3x more mentions renders as ~2.8x by design — so the Buzz help text must not
+    """3x more mentions renders as ~2.8x by design, so the Buzz help text must not
     promise "'3.0x' = three times more mentions", which is what it used to claim."""
     assert mention_velocity(300, 100) < 3.0
     src = (Path(__file__).parent.parent / "modules" / "sentiment_radar.py").read_text("utf-8")

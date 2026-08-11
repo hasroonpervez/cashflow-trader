@@ -1,7 +1,7 @@
 """Regression tests for the AUDIT_2026-08 data-layer fixes (modules/data.py).
 
 Covers: #16 partial intraday bar, #17 tz-aware earnings comparison, #25 efficiency-ratio
-sign guard, plus the medium items — rate-limit caching/thread-safety, unaligned RS-vs-SPY,
+sign guard, plus the medium items, rate-limit caching/thread-safety, unaligned RS-vs-SPY,
 and tape % change reporting the prior session.
 """
 import threading
@@ -14,7 +14,7 @@ from modules import data as D
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# #16 — partial intraday bar must not be consumed as a completed session
+# #16: partial intraday bar must not be consumed as a completed session
 # ─────────────────────────────────────────────────────────────────────────
 def _bdays(n, end="2026-08-10"):
     return pd.bdate_range(end=pd.Timestamp(end), periods=n)
@@ -58,7 +58,7 @@ def test_drop_partial_last_bar_only_drops_when_in_progress():
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# radar_broad_filter — partial bar (#16) + inner-joined RS vs SPY (medium)
+# radar_broad_filter: partial bar (#16) + inner-joined RS vs SPY (medium)
 # ─────────────────────────────────────────────────────────────────────────
 def _panel(index, volumes, closes, spy_closes):
     """``Price`` x ``Ticker`` MultiIndex panel in the real ``yf.download`` shape."""
@@ -89,7 +89,7 @@ def test_radar_volume_z_ignores_the_in_progress_bar(monkeypatch):
     rng = np.random.default_rng(11)
     vols = pd.Series(1_000_000.0 + rng.normal(0, 20_000, 200), index=idx)
     vols.iloc[-2] = 5_000_000.0  # yesterday: a completed accumulation day
-    vols.iloc[-1] = 250_000.0  # today, 10:30 ET — a quarter of a session printed
+    vols.iloc[-1] = 250_000.0  # today, 10:30 ET, a quarter of a session printed
 
     open_now = pd.Timestamp("2026-08-10 10:30", tz="America/New_York")
     closed = pd.Timestamp("2026-08-10 18:30", tz="America/New_York")
@@ -142,7 +142,7 @@ def test_close_matrix_with_spy_aligns_tz_aware_benchmark():
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# #17 — tz-aware earnings_dates index must not blank the crush proxy
+# #17: tz-aware earnings_dates index must not blank the crush proxy
 # ─────────────────────────────────────────────────────────────────────────
 def _crush_frame(n=200, end="2026-08-10"):
     idx = _bdays(n, end=end)
@@ -201,7 +201,7 @@ def test_crush_proxy_returns_none_without_usable_history():
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# #25 — efficiency ratio sign guard
+# #25: efficiency ratio sign guard
 # ─────────────────────────────────────────────────────────────────────────
 def test_efficiency_ratio_none_when_the_business_is_collapsing():
     """#25: EBITDA −50% over assets −10% used to read +5.0 and flag a 10x candidate."""
@@ -242,7 +242,7 @@ def test_ten_x_requires_the_fcf_leg_too():
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# Medium — transient rate-limits must not be cached as durable answers
+# Medium: transient rate-limits must not be cached as durable answers
 # ─────────────────────────────────────────────────────────────────────────
 class _RateLimited(Exception):
     """Shaped like yfinance's throttling error for ``_is_yahoo_rate_limit_error``."""
@@ -340,7 +340,7 @@ def test_fetch_info_keeps_its_clear_api():
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# Medium — tape % change must be None when today's bar is missing
+# Medium: tape % change must be None when today's bar is missing
 # ─────────────────────────────────────────────────────────────────────────
 def test_tape_pct_none_when_symbol_missing_the_newest_bar():
     idx = _bdays(5)

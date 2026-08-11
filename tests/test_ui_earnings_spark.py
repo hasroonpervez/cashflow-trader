@@ -1,4 +1,4 @@
-"""Earnings glance sparkline series — monotonic / length invariants."""
+"""Earnings glance sparkline series: monotonic / length invariants."""
 from __future__ import annotations
 
 import numpy as np

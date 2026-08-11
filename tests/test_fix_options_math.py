@@ -8,7 +8,7 @@ One test family per audit finding:
   full-Kelly branch for every ``f* >= 2``.
 * **#4**  ``detect_diamonds`` derived the weekly bias and the Hurst-adaptive RSI/MACD periods
   from the **complete** frame and then applied them as per-bar gates, and passed the unsliced
-  weekly frame into the per-bar confluence call — a full-sample lookahead under every
+  weekly frame into the per-bar confluence call: a full-sample lookahead under every
   historical diamond and every displayed win rate.
 * **#10** ``find_gamma_flip`` searched for a positive→negative crossing when the signing
   convention produces a negative→positive one.
@@ -56,13 +56,13 @@ POP_MULT_AT_100 = (100.0 / 85.0) ** 0.5
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  #1 — Kelly can exceed 100% of bankroll
+#  #1: Kelly can exceed 100% of bankroll
 # ═══════════════════════════════════════════════════════════════════════════
 
 def test_continuous_kelly_no_longer_returns_108_5_percent_at_pop_100():
     """The exact number in the audit. f* = 25, half-Kelly, PoP 100, no haircut.
 
-    Old: ``max(0, min(1, 12.5)) * 100 * 1.0 * 1.0847`` = **108.5** — more than the whole
+    Old: ``max(0, min(1, 12.5)) * 100 * 1.0 * 1.0847`` = **108.5**: more than the whole
     bankroll on a single short put.
     """
     old_broken_value = round(min(1.0, 25.0 / 2.0) * 100 * 1.0 * POP_MULT_AT_100, 1)
@@ -81,7 +81,7 @@ def test_continuous_kelly_no_longer_returns_108_5_percent_at_pop_100():
 
 
 def test_continuous_kelly_cap_survives_the_true_hedge_haircut():
-    """``Opt.calc_kelly_haircut`` returns 1.20 for a "true hedge" — it must not breach the cap."""
+    """``Opt.calc_kelly_haircut`` returns 1.20 for a "true hedge", it must not breach the cap."""
     hedge_haircut = PortfolioRisk.calc_kelly_haircut(-0.4)
     assert hedge_haircut == 1.20  # the boost that used to push the result past 130%
 
@@ -155,7 +155,7 @@ def test_discrete_kelly_branch_cannot_exceed_the_bankroll():
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  #4 — lookahead bias in detect_diamonds
+#  #4: lookahead bias in detect_diamonds
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _synthetic_ohlcv(n, seed, drift=0.0015):
@@ -178,7 +178,7 @@ def _weekly(df):
 
 
 def _rally_then_crash(n=240, cut=150, seed=11):
-    """Bullish through ``cut``, then a hard crash — so the *full*-frame weekly bias is
+    """Bullish through ``cut``, then a hard crash, so the *full*-frame weekly bias is
     BEARISH while the point-in-time bias at ``cut`` is still BULLISH."""
     df = _synthetic_ohlcv(n, seed)
     df.iloc[cut + 1:, df.columns.get_loc("Close")] = df["Close"].iloc[cut] * np.exp(
@@ -266,7 +266,7 @@ def test_causal_weekly_slice_drops_the_week_still_in_progress():
     sliced = _causal_weekly_slice(wk, ts)
     assert len(sliced) < len(wk)
     assert (sliced.index <= ts).all()
-    # the bar covering ``ts`` itself carries that week's later sessions — it must be gone
+    # the bar covering ``ts`` itself carries that week's later sessions, it must be gone
     assert (sliced.index <= pd.Timestamp(ts) - pd.Timedelta(days=6)).all()
 
 
@@ -277,12 +277,12 @@ def test_causal_weekly_slice_tolerates_missing_input():
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  #10 — find_gamma_flip searched the wrong crossing direction
+#  #10: find_gamma_flip searched the wrong crossing direction
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _put_skewed_chain(spot=100.0):
     """S=100, 30 DTE, strikes 70→130. Put OI concentrated at and below spot (hedging),
-    call OI above — the ordinary shape of a listed equity chain."""
+    call OI above: the ordinary shape of a listed equity chain."""
     rows = []
     for k in np.arange(70.0, 131.0, 5.0):
         rows.append({
@@ -303,13 +303,13 @@ def _put_skewed_chain(spot=100.0):
 def test_find_gamma_flip_locates_the_negative_to_positive_crossing():
     """Cumulative GEX from the lowest strike upward starts negative (deep-OTM put OI) and
     crosses positive above spot. The finder used to accept only the opposite direction and
-    therefore returned ``None`` on this — entirely ordinary — chain."""
+    therefore returned ``None`` on this: entirely ordinary, chain."""
     gex = Opt.calc_gamma_exposure(_put_skewed_chain(), 100.0)
     cum = gex.sort_index().cumsum()
     assert cum.iloc[0] < 0 and cum.iloc[-1] > 0, "fixture must contain a neg→pos crossing"
     assert not any(
         float(cum.iloc[j]) > 0 and float(cum.iloc[j + 1]) < 0 for j in range(len(cum) - 1)
-    ), "fixture must contain NO pos→neg crossing — the old code returned None here"
+    ), "fixture must contain NO pos→neg crossing, the old code returned None here"
 
     flip = Opt.find_gamma_flip(gex)
     assert flip is not None
@@ -317,7 +317,7 @@ def test_find_gamma_flip_locates_the_negative_to_positive_crossing():
 
 
 def test_find_gamma_flip_agrees_with_the_downstream_regime_convention():
-    """``gex_regime = STABLE if price > gamma_flip`` — dealers long gamma above the flip."""
+    """``gex_regime = STABLE if price > gamma_flip``: dealers long gamma above the flip."""
     flip = float(Opt.find_gamma_flip(Opt.calc_gamma_exposure(_put_skewed_chain(), 100.0)))
     gex = Opt.calc_gamma_exposure(_put_skewed_chain(), 100.0).sort_index()
     cum = gex.cumsum()
@@ -333,11 +333,11 @@ def test_find_gamma_flip_returns_none_without_a_crossing():
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  #11 — Pre-Diamond squeeze gate is dead and fails open
+#  #11: Pre-Diamond squeeze gate is dead and fails open
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _raw_ohlcv(n=140, *, expanding, seed=5):
-    """Raw OHLCV **exactly as the production path delivers it** — no ATR / BBW column."""
+    """Raw OHLCV **exactly as the production path delivers it**: no ATR / BBW column."""
     rng = np.random.default_rng(seed)
     idx = pd.date_range("2024-01-01", periods=n, freq="B")
     close = 100.0 + np.cumsum(rng.normal(0.02, 0.20, n))
@@ -364,7 +364,7 @@ def test_squeeze_gate_fails_closed_when_volatility_cannot_be_measured():
 
 
 def test_squeeze_gate_is_computed_from_raw_ohlcv():
-    """No ``ATR`` column anywhere — the gate has to build one itself, and it has to
+    """No ``ATR`` column anywhere: the gate has to build one itself, and it has to
     discriminate between a coil and a maximum-expansion tape."""
     coiled = _raw_ohlcv(expanding=False)
     expanded = _raw_ohlcv(expanding=True)
@@ -403,7 +403,7 @@ def test_pre_diamond_rejects_a_maximum_expansion_name():
     result = _pre_diamond(expanded)
     assert result["is_pre_diamond"] is False
     assert result["gates"]["squeeze"][0] is False
-    # and every *other* gate passed — the squeeze is provably what rejected it
+    # and every *other* gate passed: the squeeze is provably what rejected it
     assert all(ok for name, (ok, _) in result["gates"].items() if name != "squeeze")
 
 
@@ -447,7 +447,7 @@ def test_stock_stop_price_falls_back_only_when_atr_is_unavailable():
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  #13 — compute_explosion_score triple-counts and pays for missing data
+#  #13: compute_explosion_score triple-counts and pays for missing data
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _row(**over):
@@ -456,16 +456,16 @@ def _row(**over):
         "10x Potential": 0,
         "qs": 0.0,
         "d_status": "None",
-        "GEX Regime": "—",
+        "GEX Regime": "n/a",
     }
     row.update(over)
     return row
 
 
 def test_missing_options_data_scores_zero_not_five():
-    """``gex_regime`` defaults to "—" whenever the chain fetch fails. Paying +5 for that
+    """``gex_regime`` defaults to "n/a" whenever the chain fetch fails. Paying +5 for that
     ranked names with no listed options above names measured as TURBULENT."""
-    assert compute_explosion_score(_row(**{"GEX Regime": "—"})) == 0.0
+    assert compute_explosion_score(_row(**{"GEX Regime": "n/a"})) == 0.0
     assert compute_explosion_score(_row(**{"GEX Regime": ""})) == 0.0
     assert explosion_score_detail(_row())["gex_available"] is False
     assert explosion_score_detail(_row())["components"]["gex"] == 0.0
@@ -538,7 +538,7 @@ def test_score_10x_no_longer_pays_for_a_diamond_that_scores_elsewhere():
     assert blue_flags["blue_diamond"] is True
     assert "pre_diamond" in pre_flags
     assert "blue_diamond" not in plain_flags
-    # `flags` holds MATCHED FACTORS only — the Flags column is rendered as
+    # `flags` holds MATCHED FACTORS only: the Flags column is rendered as
     # ", ".join(sorted(flags.keys())), so bookkeeping keys would display as factors.
     assert "max_score" not in plain_flags
     assert TEN_X_MAX_SCORE == 9
@@ -557,7 +557,7 @@ def test_ten_x_score_never_exceeds_its_advertised_maximum():
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  #23 — "PoP" blends long and short win rates
+#  #23: "PoP" blends long and short win rates
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _win_rate_fixture():
@@ -617,7 +617,7 @@ def test_win_rate_is_zero_with_no_signals_of_that_side():
 # ═══════════════════════════════════════════════════════════════════════════
 
 def test_pink_diamond_weekly_filter_is_not_a_tautology():
-    """The guard read ``if wk_bias in ("BEARISH", "MIXED", "UNKNOWN", "BULLISH")`` — all four
+    """The guard read ``if wk_bias in ("BEARISH", "MIXED", "UNKNOWN", "BULLISH")``, all four
     values ``weekly_trend_label`` can return."""
     labels = {"BEARISH", "MIXED", "UNKNOWN", "BULLISH"}
     for line in OPTIONS_SRC.splitlines():
@@ -652,7 +652,7 @@ def test_discrete_kelly_inputs_actually_move_the_number():
     high = kelly_criterion(94.0, 1.0, 1.0, use_quant=False)
     assert low != high
 
-    # the continuous branch is blind to them — which is precisely why the scanner must not
+    # the continuous branch is blind to them: which is precisely why the scanner must not
     # rely on it alone for a defined-credit short put
     quant_kw = dict(use_quant=True, expected_return=0.20, variance=0.04)
     assert kelly_criterion(5.0, 1.0, 1.0, **quant_kw) == kelly_criterion(

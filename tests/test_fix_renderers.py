@@ -30,7 +30,7 @@ SOURCE = RENDERERS_PATH.read_text()
 TREE = ast.parse(SOURCE)
 
 
-# Copy assertions must read what the app *renders*, not what the comments explain —
+# Copy assertions must read what the app *renders*, not what the comments explain
 # the fix comments quote the old wording verbatim, so a raw-text scan would match them.
 RENDERED_TEXT = "\n".join(
     n.value for n in ast.walk(TREE) if isinstance(n, ast.Constant) and isinstance(n.value, str)
@@ -50,7 +50,7 @@ def _calls_named(name: str):
 
 
 def test_iv_rank_proxy_requires_three_positional_args():
-    """The callee's real contract — three required positionals, no defaults."""
+    """The callee's real contract: three required positionals, no defaults."""
     params = list(inspect.signature(compute_iv_rank_proxy).parameters.values())
     required = [p for p in params if p.default is inspect.Parameter.empty]
     assert [p.name for p in required] == ["sym", "spot", "ref_iv_pct"]
@@ -65,7 +65,7 @@ def test_renderers_calls_iv_rank_proxy_with_correct_arity():
         assert not call.keywords, "IVR proxy is called positionally in this file"
         assert len(call.args) == 3, (
             f"compute_iv_rank_proxy called with {len(call.args)} args at "
-            f"renderers.py:{call.lineno} — the function needs three"
+            f"renderers.py:{call.lineno}, the function needs three"
         )
 
 
@@ -97,7 +97,7 @@ def test_renderers_has_no_hardcoded_equity_capital():
 
 def test_blue_diamond_screen_is_not_badged_as_a_conviction_buy():
     """AUDIT #22: RESEARCH_UPGRADE.md records Blue confluence *as an entry* as regime
-    beta — t=2.98 full sample, negative in the second half of all 12 configs. The
+    beta: t=2.98 full sample, negative in the second half of all 12 configs. The
     screen survives as a watchlist ranker; the buy framing does not."""
     assert "💎 CONVICTION: Blue Diamond" not in RENDERED_TEXT
     assert '"signal": "💎 CONVICTION"' not in SOURCE
@@ -136,7 +136,7 @@ def test_expected_value_matches_calc_ev_when_inputs_are_real():
     ],
 )
 def test_expected_value_returns_none_rather_than_a_fabricated_number(credit, max_loss, pop):
-    """AUDIT #24: an unsourceable EV must be Optional-None so the UI can print '—'."""
+    """AUDIT #24: an unsourceable EV must be Optional-None so the UI can print 'n/a'."""
     assert R.expected_value_dollars(credit, max_loss, pop) is None
 
 
@@ -149,7 +149,7 @@ def test_fabricated_covered_call_pop_and_max_loss_are_gone():
 
 
 def test_defined_risk_spread_still_prints_a_number():
-    """The put spread has a contractual max loss and a modelled POP — it must survive."""
+    """The put spread has a contractual max loss and a modelled POP, it must survive."""
     ev = R.expected_value_dollars(150.0, 350.0, 75.0)
     assert ev is not None and ev == pytest.approx(150 * 0.75 - 350 * 0.25)
 
@@ -179,7 +179,7 @@ def test_skew_classification_tiers(skew, label):
 
 def test_call_skew_is_never_reported_as_balanced():
     """The Greeks-row tile used a one-sided `> 10 / > 5` test, so every negative skew
-    — however extreme the call bid — rendered green 'Balanced'."""
+: however extreme the call bid: rendered green 'Balanced'."""
     for skew in (-4.0, -12.0, -40.0):
         assert R.classify_vol_skew(skew)["label"] != "Balanced Skew"
         assert "call" in R.classify_vol_skew(skew)["label"].lower()
@@ -250,7 +250,7 @@ def test_equity_curve_call_site_uses_the_compounding_helper():
 def test_journal_add_entry_return_is_never_discarded():
     """AUDIT (medium): on a read-only host the ledger row appeared and nothing reached
     trade_journal.json. The close path already handled this; both Track Trade sites
-    must too — the return value may not be a bare expression statement."""
+    must too: the return value may not be a bare expression statement."""
     discarded = [
         node.lineno
         for node in ast.walk(TREE)

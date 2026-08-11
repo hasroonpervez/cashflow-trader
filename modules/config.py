@@ -1,5 +1,5 @@
 """
-Config persistence — watchlist, scanner, strategy, chart overlays.
+Config persistence: watchlist, scanner, strategy, chart overlays.
 Atomic JSON writes, st.secrets overlay for Streamlit Cloud.
 """
 from __future__ import annotations
@@ -18,7 +18,7 @@ DEFAULT_CONFIG = {
         "PLTR,HIMS,TSLA,SOFI,RIVN,CIFR,SPY,QQQ"
     ),
     "radar_universe": _RADAR_UNIVERSE,
-    # Quantum computing watchlist — user picks + researched pure-plays.
+    # Quantum computing watchlist: user picks + researched pure-plays.
     # IBM = large-cap anchor; the rest are speculative small/mid caps.
     "quantum_watchlist": "INFQ,IONQ,QBTS,RGTI,IBM,QUBT,ARQQ,LAES,BTQ",
     # Universe scanned by the 📡 Sentiment tab (defaults to quantum list +
@@ -52,7 +52,7 @@ _LEGACY_CONFIG_KEYS = frozenset({
     "whatsapp_phone", "whatsapp_apikey", "alert_threshold", "last_alert_date",
 })
 
-# Anonymous reference only — used for Kelly / ATR example math (not user portfolio data).
+# Anonymous reference only: used for Kelly / ATR example math (not user portfolio data).
 REF_NOTIONAL = 100_000.0
 RISK_PCT_EXAMPLE = 3.0
 KELLY_DISPLAY_CAP_PCT = 5.0
@@ -88,7 +88,7 @@ def _streamlit_secrets_flat():
 # --- Audit finding #21 -------------------------------------------------------
 # `st.secrets` scalars are merged into the in-memory config so Cloud deployments can
 # override settings, but every persistence site is a read-modify-write of that same
-# dict — so a token in secrets.toml used to land verbatim in the git-tracked
+# dict: so a token in secrets.toml used to land verbatim in the git-tracked
 # config.json on the next watchlist edit. Secrets are usable in memory and are
 # NEVER written to disk. Two rules, both applied in `save_config`:
 #   1. any key whose *name* looks like a credential, and
@@ -139,7 +139,7 @@ def load_config():
     return merged
 
 def save_config(cfg) -> bool:
-    """Atomic write — writes to .tmp first, then renames. Returns False if the host cannot write (e.g. read-only Cloud)."""
+    """Atomic write: writes to .tmp first, then renames. Returns False if the host cannot write (e.g. read-only Cloud)."""
     try:
         cfg = {**DEFAULT_CONFIG, **(cfg or {})}
         cfg["use_quant_models"] = bool(cfg.get("use_quant_models", DEFAULT_CONFIG["use_quant_models"]))
@@ -175,7 +175,7 @@ def _quarantine_corrupt(path: Path) -> bool:
     """Rename an unparseable JSON file aside so the next save cannot destroy it.
 
     Returns True when the original path is now free (safe to write a fresh file).
-    Renaming *preserves* the bytes — we never delete a file we failed to read.
+    Renaming *preserves* the bytes: we never delete a file we failed to read.
     """
     try:
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -183,7 +183,7 @@ def _quarantine_corrupt(path: Path) -> bool:
         os.replace(path, dest)
         _QUARANTINE_NOTICES.append(
             f"{path.name} could not be read and was preserved as {dest.name}. "
-            f"A new empty {path.name} was started — your old data is still on disk."
+            f"A new empty {path.name} was started, your old data is still on disk."
         )
         return True
     except Exception:
@@ -195,7 +195,7 @@ def _quarantine_corrupt(path: Path) -> bool:
 
 
 def _load_json_list(path: Path) -> tuple[list, bool]:
-    """``(entries, writable)`` — ``writable=False`` means DO NOT overwrite ``path``.
+    """``(entries, writable)``, ``writable=False`` means DO NOT overwrite ``path``.
 
     A corrupt file used to be swallowed into ``[]``, and the next append then atomically
     replaced the whole history with a single entry. Now it is quarantined, and if that
@@ -210,7 +210,7 @@ def _load_json_list(path: Path) -> tuple[list, bool]:
         return [], _quarantine_corrupt(path)
     if isinstance(data, list):
         return data, True
-    # Parsed, but not the shape we persist — still a corruption event.
+    # Parsed, but not the shape we persist, still a corruption event.
     return [], _quarantine_corrupt(path)
 
 
@@ -255,14 +255,14 @@ CLOSE_BASES = (CLOSE_BASIS_BUYBACK, CLOSE_BASIS_EXPIRY)
 def realized_pnl_for_close(entry: dict, close_price: float, basis: str = CLOSE_BASIS_BUYBACK):
     """Realized P&L in dollars for closing one short-premium journal row.
 
-    Pure — no Streamlit, no disk. Returns ``None`` (not a fake ``0.0``) when the row
+    Pure: no Streamlit, no disk. Returns ``None`` (not a fake ``0.0``) when the row
     carries no usable credit, so the caller can say "unknown" instead of "break-even".
 
     ``basis``:
-      ``CLOSE_BASIS_BUYBACK`` — ``close_price`` is the option's price **per share**
+      ``CLOSE_BASIS_BUYBACK``: ``close_price`` is the option's price **per share**
         paid to buy the contract back. P&L = (credit/share - debit/share) x 100 x contracts.
         Correct at any point in the life of the trade, extrinsic included.
-      ``CLOSE_BASIS_EXPIRY`` — ``close_price`` is the **underlying** at expiry; the short
+      ``CLOSE_BASIS_EXPIRY``: ``close_price`` is the **underlying** at expiry; the short
         settles to intrinsic. Only correct when the contract is actually held to expiry.
     """
     if basis not in CLOSE_BASES:
@@ -312,8 +312,8 @@ def journal_close_trade(
     e["close_date"] = close_date or datetime.now().strftime("%Y-%m-%d")
     pnl = realized_pnl_for_close(e, close_price, basis)
     if pnl is None:
-        # No usable credit on the row — do not invent a zero. Leave the key absent so
-        # readers fall back to "—" rather than reporting a break-even trade.
+        # No usable credit on the row: do not invent a zero. Leave the key absent so
+        # readers fall back to "n/a" rather than reporting a break-even trade.
         e.pop("realized_pnl", None)
         e["realized_pnl_unavailable"] = "missing or unparseable premium_100"
     else:

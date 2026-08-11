@@ -1,5 +1,5 @@
 """
-Chart builder — four-panel Plotly figures (price, volume, RSI, MACD).
+Chart builder: four-panel Plotly figures (price, volume, RSI, MACD).
 """
 import html as _html_mod
 import pandas as pd
@@ -35,7 +35,7 @@ def _levels_nearest(levels, price, n, side=None):
     Audit finding (Charts/labels, chart.py:236-249): ranking purely by ``abs(x - price)``
     let a green "S" rail be drawn ABOVE spot and a red "R" rail BELOW it, which inverts the
     meaning of every support/resistance line on the chart. Returning fewer (or zero) rails is
-    correct here — a fabricated rail on the wrong side is worse than an absent one.
+    correct here: a fabricated rail on the wrong side is worse than an absent one.
     """
     if not levels:
         return []
@@ -78,7 +78,7 @@ def _fib_levels_directional(high, low, swing_is_down):
     Audit finding (Charts/labels, chart.py:189-191 / ta.py:293-296): ``TA.fib_retracement``
     always puts 0% at the high, which is only right for an up-swing. When the swing low
     postdates the swing high, 0% belongs at the low and the retracement counts back up toward
-    the high — otherwise the 38.2% and 61.8% labels are printed on each other's prices.
+    the high: otherwise the 38.2% and 61.8% labels are printed on each other's prices.
     The root fix belongs in ``ta.py`` (not owned by this module), so the correction is applied
     chart-side; keys match ``TA.fib_retracement`` exactly so the drawing code is unchanged.
     """
@@ -94,7 +94,7 @@ def _realized_vol_delta_label(cr_pct):
 
     Audit finding #18 (chart.py:596): the box was labelled "Avg. Post-Earnings IV Crush" but the
     number is ``(realized_vol_post - realized_vol_pre) / realized_vol_pre`` over ±11 close-to-close
-    bars (data.py) — no implied vol is read anywhere in that path. Because the sign can be
+    bars (data.py), no implied vol is read anywhere in that path. Because the sign can be
     positive, the old caption could read "IV Crush: +42.1%", which a premium seller reads as
     "IV collapses 42% after the print." Name what is actually plotted, and only use crush framing
     when the delta is negative. A true reading needs ATM IV diffed across the print from the chain.
@@ -103,9 +103,9 @@ def _realized_vol_delta_label(cr_pct):
     tail = (
         "realized vol fell after past prints (crush-like)"
         if cr < 0
-        else "realized vol ROSE after past prints — no crush"
+        else "realized vol ROSE after past prints: no crush"
     )
-    return f"Post-earnings realized-vol Δ (proxy): {cr:+.1f}% — {tail}"
+    return f"Post-earnings realized-vol Δ (proxy): {cr:+.1f}%, {tail}"
 
 
 def _chart_hoverlabel():
@@ -139,7 +139,7 @@ def _price_overlay_key_html(rows, mobile_layout):
             f"<span style='position:absolute;left:0;top:0.35em;width:4px;height:0.85em;border-radius:2px;"
             f"background:{_html_mod.escape(swatch)};display:inline-block'></span>"
             f"<strong style='color:#e2e8f0'>{_html_mod.escape(short)}</strong>"
-            f"<span style='color:#94a3b8'> — {_html_mod.escape(full)}</span></li>"
+            f"<span style='color:#94a3b8'>, {_html_mod.escape(full)}</span></li>"
         )
     parts.append("</ul></div>")
     return "".join(parts)
@@ -152,7 +152,7 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
                 earnings_days_to=None, iv_overlay_symbol=None,
                 shadow_lower=None, shadow_upper=None, opex_pin_price=None,
                 mark_whale_volume=True):
-    """Build four separate figures: price (+ overlays), volume, RSI, MACD — easier to read than one stacked chart.
+    """Build four separate figures: price (+ overlays), volume, RSI, MACD, easier to read than one stacked chart.
 
     When ``mobile_layout`` is True (narrow UA / phone), the price panel drops the legend, tightens margins,
     fixes height, and pins Fib / Gann / Gold annotations to the left so labels do not sit on the candles.
@@ -277,7 +277,7 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
             if lab in fib_labeled:
                 ann = f"{lab.split('.')[0]}% ${lev:.0f}"
             elif lab in fib_short:
-                # Keep 0%/100% as thin guides without text — reduces left-edge pile-up.
+                # Keep 0%/100% as thin guides without text: reduces left-edge pile-up.
                 ann = ""
             lw = 1.9 if lab in fib_labeled else 1.1
             op = 0.62 if lab in fib_labeled else 0.38
@@ -387,7 +387,7 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
                             "Negative-gamma tint",
                             f"Whole-panel red wash: spot ${float(last_px):,.0f} is below the "
                             f"gamma flip (${_gf:,.0f}), i.e. dealers are short gamma and hedging "
-                            "amplifies moves. Background shading only — not a price level.",
+                            "amplifies moves. Background shading only, not a price level.",
                         )
                     )
             except Exception as _e:
@@ -494,9 +494,9 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
                     _iv_w = float(em_upper) - float(em_lower)
                     if _iv_w > 0:
                         if _sh_w < 0.88 * _iv_w:
-                            _cmp = " Shadow band narrower than IV 1σ — options may be overpricing move risk."
+                            _cmp = " Shadow band narrower than IV 1σ: options may be overpricing move risk."
                         elif _sh_w > 1.12 * _iv_w:
-                            _cmp = " Shadow band wider than IV 1σ — whale prints suggest break potential."
+                            _cmp = " Shadow band wider than IV 1σ: whale prints suggest break potential."
                         else:
                             _cmp = " Shadow vs IV band broadly aligned."
             except Exception as _e:
@@ -506,7 +506,7 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
                 (
                     "#a855f7",
                     "Shadow move (whale)",
-                    f"Purple band: ~70% of last 30d whale-volume (Z>2) close range (${_sl:,.0f}–${_su:,.0f}).{_cmp}",
+                    f"Purple band: ~70% of last 30d whale-volume (Z>2) close range (${_sl:,.0f}-${_su:,.0f}).{_cmp}",
                 )
             )
     except Exception as _e:
@@ -531,7 +531,7 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
                 (
                     "#f472b6",
                     "Predicted OpEx pin",
-                    f"GEX gamma-wall blend with Θ/Γ magnet (${_op:,.0f}). Not a guarantee — positioning artifact.",
+                    f"GEX gamma-wall blend with Θ/Γ magnet (${_op:,.0f}). Not a guarantee, positioning artifact.",
                 )
             )
     except Exception as _e:
@@ -611,7 +611,7 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
         # Slightly smaller markers: legend row height matches line swatches better than size 17.
         _dm = dict(symbol="diamond", size=13, line=dict(color="rgba(248,250,252,0.95)", width=1.5))
         # Audit finding (Charts/labels, chart.py:527/556): the markers used to be plotted at
-        # price * 0.985 / 1.015, i.e. a 1.5% PRICE-space lie — on a $600 name the diamond sat
+        # price * 0.985 / 1.015, i.e. a 1.5% PRICE-space lie, on a $600 name the diamond sat
         # $9 away from the bar it describes and read off the y-axis as a different level.
         # Plot at the true signal price and clear the candle with a screen-space (pixel)
         # standoff instead, which is scale-invariant and cannot misstate a price.
@@ -807,14 +807,14 @@ def build_chart(df, ticker, show_ind=True, show_fib=True, show_gann=True, show_s
                         name="Unusual volume (proxy)",
                         showlegend=False,
                         # Audit finding (Charts/labels, chart.py:687-711 -> ta.py:369-398): this is a
-                        # rolling z-score of total daily volume, not tape-read institutional flow —
+                        # rolling z-score of total daily volume, not tape-read institutional flow
                         # no venue, block, or dark-pool print is inspected. The word "proxy" was
                         # stuck in the docstring where no chart reader ever sees it; put the
                         # disclosure in the hover, which is the only text attached to the marker.
                         hovertemplate=(
                             "Unusual volume (proxy for institutional flow)"
                             "<br>Total daily volume z-score: %{customdata:.2f}"
-                            "<br><i>Volume only — no venue or block-print data.</i><extra></extra>"
+                            "<br><i>Volume only: no venue or block-print data.</i><extra></extra>"
                         ),
                         customdata=zz,
                     )

@@ -39,7 +39,7 @@ def _ohlcv(n=300, seed=0, base=100.0):
 
 
 def _fgn(n, H, rng):
-    """Fractional Gaussian noise (Davies-Harte circulant embedding) — a series with a
+    """Fractional Gaussian noise (Davies-Harte circulant embedding), a series with a
     *known* true Hurst exponent, which a drift-plus-iid-noise series is not: R/S removes
     the mean, so constant drift carries no persistence."""
     k = np.arange(0, n)
@@ -67,7 +67,7 @@ def _wilder_rma(values, p):
 
 
 # --------------------------------------------------------------------------------------
-# AUDIT #26 — volume Z-score ceiling
+# AUDIT #26: volume Z-score ceiling
 # --------------------------------------------------------------------------------------
 @pytest.mark.parametrize("w", [10, 30, 40])
 def test_volume_zscore_is_not_capped_at_sqrt_w_minus_one(w, monkeypatch):
@@ -118,7 +118,7 @@ def test_volume_zscore_quiet_tape_stays_small():
 
 
 # --------------------------------------------------------------------------------------
-# AUDIT #27 — Hurst
+# AUDIT #27: Hurst
 # --------------------------------------------------------------------------------------
 def test_hurst_null_is_centred_on_half_after_bias_correction():
     """Anis-Lloyd correction: raw log(R/S)/log(n) measured 0.524 on pure noise."""
@@ -160,7 +160,7 @@ def test_hurst_returns_none_when_uncertainty_spans_the_threshold():
 
 
 def test_hurst_any_returned_value_clears_the_callers_published_cutoffs():
-    """Callers branch on 0.55 / 0.45 — a returned value must never sit inside that band."""
+    """Callers branch on 0.55 / 0.45, a returned value must never sit inside that band."""
     rng = np.random.default_rng(404)
     seen = 0
     for _ in range(300):
@@ -218,7 +218,7 @@ def test_hurst_returns_random_walk_prior_rather_than_a_verdict():
 
 
 # --------------------------------------------------------------------------------------
-# ATR / ADX — Wilder RMA
+# ATR / ADX: Wilder RMA
 # --------------------------------------------------------------------------------------
 def test_atr_is_wilder_rma_not_sma():
     df = _ohlcv(120, seed=11)
@@ -318,7 +318,7 @@ def test_correlation_matrix_keeps_ffd_warmup_on_top_of_the_lookback():
 
 
 def test_correlation_matrix_refuses_when_too_few_observations_survive():
-    """39 observations give Pearson SE ~= 0.167 against 0.75/0.80 cutoffs — refuse instead."""
+    """39 observations give Pearson SE ~= 0.167 against 0.75/0.80 cutoffs, refuse instead."""
     d = {"AAA": _closes(95, 3), "BBB": _closes(95, 4)}
     mat = TA.get_correlation_matrix(d, lookback_days=90)
     assert mat.empty  # callers read empty as "apply no correlation penalty"
@@ -341,7 +341,7 @@ def test_correlation_matrix_values_remain_valid_pearson():
 
 
 # --------------------------------------------------------------------------------------
-# ffd_returns_from_closes — short-history tickers are flagged, not silently dropped
+# ffd_returns_from_closes: short-history tickers are flagged, not silently dropped
 # --------------------------------------------------------------------------------------
 def test_ffd_returns_flags_dropped_short_history_tickers():
     idx = pd.date_range("2024-01-01", periods=200, freq="B")

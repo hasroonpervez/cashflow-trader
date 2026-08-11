@@ -1,7 +1,7 @@
 """Tests for the Find 10x ranking logic.
 
 The point of this tab is that it ranks on payoff SHAPE first and attention
-second — the inverse of the audited `score_10x_potential`, which had no payoff
+second: the inverse of the audited `score_10x_potential`, which had no payoff
 term at all. These tests pin that ordering so it cannot regress.
 """
 import numpy as np
@@ -121,7 +121,7 @@ def test_is_partial_flags_incomplete_rows():
 
 
 # --------------------------------------------------------------------------
-# Plain English — the UX requirement, pinned
+# Plain English: the UX requirement, pinned
 # --------------------------------------------------------------------------
 
 def test_verdict_is_a_real_sentence_with_no_jargon():

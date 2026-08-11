@@ -1,5 +1,5 @@
 """
-Find 10x — the asymmetric-opportunity tab.
+Find 10x: the asymmetric-opportunity tab.
 
 One screen that answers one question: **which name is worth looking at today, and why?**
 
@@ -17,11 +17,11 @@ Why the ranking is what it is
 The audit's central finding was that the app's "10x Potential" score summed
 points for *attention* and *trend* and then called the result asymmetry. It had
 no payoff term and no probability term, so a name that had already run scored
-highest — precisely the wrong end of the move.
+highest: precisely the wrong end of the move.
 
 This tab ranks on ``opportunity = convexity x confirmation``:
 
-    convexity     from asymmetry.convexity_score — (target-entry)/(entry-stop).
+    convexity     from asymmetry.convexity_score, (target-entry)/(entry-stop).
                   A pure payoff-shape number. No attention in it at all.
     confirmation  blended attention: radar score and creator consensus.
                   This is a TIE-BREAKER on top of payoff shape, never a
@@ -39,7 +39,7 @@ Honesty rules (inherited from the modules, enforced again here)
 2. ``validation_status`` is displayed verbatim. Nothing here has cleared
    ``validated_signals.promotion_gate`` on live forward returns yet, so every
    row reads ``unvalidated`` until an outcome ledger exists. That word is the
-   point — see Stage 2 of the roadmap in AUDIT_2026-08.md.
+   point: see Stage 2 of the roadmap in AUDIT_2026-08.md.
 3. This tab suggests what to RESEARCH. It sizes nothing and places nothing.
 
 Pure ranking logic lives above the Streamlit import so it is testable headless.
@@ -57,7 +57,7 @@ W_CONVEXITY = 0.60
 W_CONFIRMATION = 0.40
 
 # A convexity ratio of this or better earns full marks. 5:1 is the classic
-# asymmetric-bet threshold — risk 1 to make 5.
+# asymmetric-bet threshold: risk 1 to make 5.
 CONVEXITY_SATURATION = 5.0
 
 # Below this, a row is noise and is not shown at all.
@@ -76,7 +76,7 @@ def clip01(x: float) -> float:
 def convexity_component(ratio: Optional[float]) -> Optional[float]:
     """Map a convexity ratio to 0..1, saturating at ``CONVEXITY_SATURATION``.
 
-    ``None`` in, ``None`` out — an unknown payoff shape is not a bad one, and
+    ``None`` in, ``None`` out, an unknown payoff shape is not a bad one, and
     must not be scored as 0.
     """
     r = safe_float(ratio, None)
@@ -164,7 +164,7 @@ class OpportunityRow:
 
 
 def plain_verdict(row: OpportunityRow) -> tuple[str, str]:
-    """``(sentence, tone)`` — the plain-English "so what" for one row.
+    """``(sentence, tone)``, the plain-English "so what" for one row.
 
     House rule from modules/explain.py: no card ships without one of these.
     Deliberately written for someone who does not know what convexity means.
@@ -176,10 +176,10 @@ def plain_verdict(row: OpportunityRow) -> tuple[str, str]:
     if cx is not None and row.upside_frac is not None and row.downside_frac is not None:
         shape = (
             f"Risking about {row.downside_frac * 100:.0f}% to reach a "
-            f"{row.upside_frac * 100:.0f}% target — roughly {cx:.1f} to 1."
+            f"{row.upside_frac * 100:.0f}% target, roughly {cx:.1f} to 1."
         )
     else:
-        shape = "Payoff shape unknown — no clear support level to risk against."
+        shape = "Payoff shape unknown: no clear support level to risk against."
 
     if row.creator_sources >= 2 and (row.radar_score or 0) >= 50:
         who = " Independent creators and retail chatter are both picking it up."
@@ -191,7 +191,7 @@ def plain_verdict(row: OpportunityRow) -> tuple[str, str]:
         who = " Retail chatter is building, but no creator coverage yet."
         tone = "warn"
     else:
-        who = " Nobody is talking about it yet — early, or nothing there."
+        who = " Nobody is talking about it yet: early, or nothing there."
         tone = "neutral"
 
     if cx is not None and cx < 2.0:
@@ -261,7 +261,7 @@ def build_opportunity_row(
 
 
 # ---------------------------------------------------------------------------
-# Streamlit tab — streamlit imported inside so the ranking math above stays
+# Streamlit tab: streamlit imported inside so the ranking math above stays
 # importable headless (same pattern as modules/sentiment_radar.py).
 # ---------------------------------------------------------------------------
 
@@ -283,7 +283,7 @@ def _render(universe_csv: str) -> None:
 
     st.subheader("Find 10x")
     st.caption(
-        "Names where the possible gain is much larger than the risk — and "
+        "Names where the possible gain is much larger than the risk, and "
         "something is starting to wake them up."
     )
 
@@ -294,7 +294,7 @@ def _render(universe_csv: str) -> None:
 
     X.verdict_line(
         "This tab tells you what to RESEARCH, not what to buy. Nothing here has "
-        "been proven on forward returns yet — every row is marked 'unvalidated' "
+        "been proven on forward returns yet: every row is marked 'unvalidated' "
         "on purpose until an outcome ledger exists.",
         "neutral",
     )
@@ -308,7 +308,7 @@ def _render(universe_csv: str) -> None:
         else:
             st.caption(
                 f"Press **Find opportunities** to scan {len(symbols)} tickers. "
-                "Takes ~30-60s — the free data sources are rate-limited."
+                "Takes ~30-60s: the free data sources are rate-limited."
             )
         return
 
@@ -394,12 +394,12 @@ def _render_rows(st, X, rows: list[OpportunityRow], when: str, health: dict) -> 
     if bad:
         st.warning(
             f"Some sources did not answer ({', '.join(bad)}). Rows below are scored on "
-            "what we could actually read — the missing pieces are named on each card."
+            "what we could actually read: the missing pieces are named on each card."
         )
 
     if not rows:
         st.info(
-            "Nothing cleared the bar this scan. That is a real answer, not an error — "
+            "Nothing cleared the bar this scan. That is a real answer, not an error, "
             "most days there is no asymmetric setup in a small watchlist."
         )
         return
@@ -417,24 +417,24 @@ def _render_rows(st, X, rows: list[OpportunityRow], when: str, health: dict) -> 
             with c1:
                 X.metric(
                     "Reward vs risk",
-                    X.ratio(r.convexity_ratio) if r.convexity_ratio else "—",
+                    X.ratio(r.convexity_ratio) if r.convexity_ratio else "n/a",
                     hint="How many dollars of upside per dollar risked.",
                     help_extra=(
                         "(target - entry) / (entry - support). Support is the trailing "
                         "20-day swing low; target is ATR-expansion based. Computed "
-                        "point-in-time — no future bars are used."
+                        "point-in-time: no future bars are used."
                     ),
                 )
             with c2:
                 X.metric(
                     "Chatter",
-                    X.score(r.radar_score) if r.radar_score is not None else "—",
+                    X.score(r.radar_score) if r.radar_score is not None else "n/a",
                     hint="Retail attention: Reddit mentions, StockTwits, searches.",
                 )
             with c3:
                 X.metric(
                     "Creators",
-                    str(r.creator_sources) if r.creator_sources else "—",
+                    str(r.creator_sources) if r.creator_sources else "n/a",
                     hint="Independent creators calling it. Two or more is the bar.",
                 )
 
@@ -475,7 +475,7 @@ def _render_dossier(st, X, ticker: str) -> None:
             st.info("Could not build a dossier for this name.")
             return
 
-    st.caption(f"Generated by `{getattr(d, 'generated_by', 'unknown')}` at {getattr(d, 'generated_at', '—')}")
+    st.caption(f"Generated by `{getattr(d, 'generated_by', 'unknown')}` at {getattr(d, 'generated_at', 'n/a')}")
     facts = getattr(d, "facts", {}) or {}
     shown = [f for f in facts.values() if getattr(f, "value", None) is not None]
     if shown:
@@ -486,10 +486,10 @@ def _render_dossier(st, X, ticker: str) -> None:
 
     narrative = getattr(d, "narrative", None)
     if narrative is not None:
-        st.markdown("**Generated summary** — prose only; every figure above comes from the data layer.")
+        st.markdown("**Generated summary**: prose only; every figure above comes from the data layer.")
         st.markdown(getattr(narrative, "text", "") or "")
     else:
         st.caption(
-            "Narrative unavailable — the `claude` CLI is not signed in. "
+            "Narrative unavailable: the `claude` CLI is not signed in. "
             "Run `claude` in a terminal to authenticate; the numbers above do not need it."
         )

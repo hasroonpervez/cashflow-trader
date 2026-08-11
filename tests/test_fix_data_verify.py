@@ -168,7 +168,7 @@ def test_25_no_sign_combination_other_than_both_positive_produces_a_ratio(eb, ay
 
 
 def test_25_consumers_that_read_the_sieve_dict_tolerate_a_none_ratio():
-    """options.py / signal_desk.py read ten_x_candidate + fcf_yield only — prove they cope."""
+    """options.py / signal_desk.py read ten_x_candidate + fcf_yield only, prove they cope."""
     from modules.signal_desk import compute_desk_consensus  # noqa: F401  (import must not explode)
 
     sieve = D.fundamental_sieve_from_inputs(20.0, 100.0, -0.5, -0.1)

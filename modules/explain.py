@@ -1,5 +1,5 @@
 """
-Progressive-disclosure toolkit — one shared way to show a number and explain it.
+Progressive-disclosure toolkit: one shared way to show a number and explain it.
 
 The product rule this module encodes:
 
@@ -9,11 +9,11 @@ The product rule this module encodes:
 
 Three layers, in the order a normal person meets them:
 
-    1. ``verdict_line(text, tone)`` — the one-sentence "so what" that tops a card.
-    2. ``metric(label, value, term=..., hint=...)`` — the number, with a plain-English
+    1. ``verdict_line(text, tone)``, the one-sentence "so what" that tops a card.
+    2. ``metric(label, value, term=..., hint=...)``, the number, with a plain-English
        tooltip attached via Streamlit's native ``help=`` (no custom HTML, no injection
        surface) and an optional one-line ``hint`` caption underneath.
-    3. ``explain(term_key)`` — the "What does this mean?" expander:
+    3. ``explain(term_key)``, the "What does this mean?" expander:
        plain sentence -> real explanation -> the actual formula THIS app uses.
 
 Design constraints (deliberate):
@@ -85,7 +85,7 @@ class Term:
     plain:
         One sentence a non-trader understands. No other jargon allowed inside it.
     detail:
-        The real explanation — what it measures, how to read it, when it lies.
+        The real explanation: what it measures, how to read it, when it lies.
     formula:
         The math *as this codebase computes it*. For terms that are a labelled
         state rather than a number, this states the exact rule that produces
@@ -131,7 +131,7 @@ TERMS: dict[str, Term] = {
         label="Edge Score",
         aliases=("quant edge", "quant edge score", "qe", "qs", "edge"),
         short="Overall setup quality, 0-100",
-        plain="One number for how good the conditions are right now — above 70 is a green light, below 40 means wait.",
+        plain="One number for how good the conditions are right now, above 70 is a green light, below 40 means wait.",
         detail=(
             "Five checks are scored 0-100 each and averaged: trend (where price sits "
             "versus its 20/50/200-day averages), momentum (RSI in the calm 40-60 band "
@@ -193,13 +193,13 @@ TERMS: dict[str, Term] = {
         label="Blue Diamond",
         aliases=("blue diamond signal", "blue"),
         short="Strong confirmed buy signal",
-        plain="Everything lined up at once — the strongest bullish setup this app produces.",
+        plain="Everything lined up at once: the strongest bullish setup this app produces.",
         detail=(
             "A Blue Diamond needs four things simultaneously: confluence crossing up to "
             "7 or more out of 9, daily structure BULLISH, the weekly bias not BEARISH, "
             "and volume at least 90% of its 20-day average (so the move has real "
             "participation, not a thin-tape fake). A blow-off filter based on ATR "
-            "removes manic single-bar spikes. It is a signal to act, not a guarantee — "
+            "removes manic single-bar spikes. It is a signal to act, not a guarantee, "
             "the app also shows the historical hit rate of past diamonds on this ticker."
         ),
         formula=(
@@ -213,7 +213,7 @@ TERMS: dict[str, Term] = {
         label="Pink Diamond",
         aliases=("pink diamond signal", "pink"),
         short="Take-profit / exhaustion warning",
-        plain="The easy money in this move is probably done — tighten stops or take profit.",
+        plain="The easy money in this move is probably done, tighten stops or take profit.",
         detail=(
             "Fires when bullish confluence collapses, or when momentum is exhausted "
             "(RSI above 75 while confluence is weak). It is not a short signal. Treat it "
@@ -229,7 +229,7 @@ TERMS: dict[str, Term] = {
         label="Pre-Diamond Coil",
         aliases=("pre diamond", "coil", "coil_active", "pre-diamond"),
         short="Quiet build-up before a breakout",
-        plain="The stock is coiled and quietly being accumulated — a Blue Diamond may be close, but has not fired.",
+        plain="The stock is coiled and quietly being accumulated, a Blue Diamond may be close, but has not fired.",
         detail=(
             "An early-warning state, not a signal. All six conditions must hold: "
             "confluence sitting at 5-6 and rising, volatility squeezed into the bottom "
@@ -254,7 +254,7 @@ TERMS: dict[str, Term] = {
         detail=(
             "A ranking number for the Radar tab only. It is a weighted roll-up of "
             "signals you can also see individually, so it never tells you anything the "
-            "row does not — it just orders the list. Use it to decide what to read "
+            "row does not: it just orders the list. Use it to decide what to read "
             "first, not what to buy."
         ),
         formula=(
@@ -268,7 +268,7 @@ TERMS: dict[str, Term] = {
         label="10x Potential",
         aliases=("10x", "10x potential", "tenx"),
         short="Count of long-shot growth traits, 0-10",
-        plain="How many high-upside characteristics a small company has — a research filter, not a forecast.",
+        plain="How many high-upside characteristics a small company has, a research filter, not a forecast.",
         detail=(
             "One point each for: market cap under $10B, revenue growth over 25% (a "
             "second point over 50%), short interest over 15% of float, volatility "
@@ -288,7 +288,7 @@ TERMS: dict[str, Term] = {
         label="Delta",
         aliases=("Δ", "delta_", "d"),
         short="Price sensitivity and rough assignment odds",
-        plain="How much the option moves for a $1 move in the stock — and roughly the chance it ends up being exercised.",
+        plain="How much the option moves for a $1 move in the stock, and roughly the chance it ends up being exercised.",
         detail=(
             "A 0.16 delta call moves about 16 cents per $1 of stock, and has roughly a "
             "16% chance of finishing in the money. That is why this desk targets 0.16 "
@@ -306,7 +306,7 @@ TERMS: dict[str, Term] = {
         label="Gamma",
         aliases=("Γ",),
         short="How fast delta itself changes",
-        plain="How quickly your risk changes as the stock moves — high gamma means today's small move becomes tomorrow's big problem.",
+        plain="How quickly your risk changes as the stock moves, high gamma means today's small move becomes tomorrow's big problem.",
         detail=(
             "Gamma is highest at the money and in the last week before expiry. For a "
             "premium seller it is the enemy: it is what turns a safe-looking short "
@@ -322,11 +322,11 @@ TERMS: dict[str, Term] = {
         label="Theta",
         aliases=("Θ", "theta/day", "theta per day", "θ/day"),
         short="Dollars of time-decay per day",
-        plain="How much the option loses in value every day just from time passing — if you sold it, that is your daily income.",
+        plain="How much the option loses in value every day just from time passing, if you sold it, that is your daily income.",
         detail=(
             "This app reports theta per calendar day, and the ledger flips the sign so a "
             "short position shows positive theta (money you collect). Theta accelerates "
-            "into expiry, which is exactly when gamma risk also spikes — that trade-off "
+            "into expiry, which is exactly when gamma risk also spikes, that trade-off "
             "is the whole game for premium sellers."
         ),
         formula=(
@@ -344,7 +344,7 @@ TERMS: dict[str, Term] = {
         detail=(
             "Short options have negative vega: if implied volatility spikes after you "
             "sell, your position loses money even if the stock has not moved. That is "
-            "why the app prefers selling when IV rank is already high — there is more "
+            "why the app prefers selling when IV rank is already high, there is more "
             "room for volatility to fall in your favour than to rise against you."
         ),
         formula=(
@@ -374,7 +374,7 @@ TERMS: dict[str, Term] = {
         plain="How your directional exposure changes overnight purely because expiry got one day closer.",
         detail=(
             "Also called delta decay. Near expiry, out-of-the-money options bleed delta "
-            "toward zero and in-the-money options creep toward 1 — that drift is charm. "
+            "toward zero and in-the-money options creep toward 1, that drift is charm. "
             "It is one reason pin behaviour strengthens into expiry week."
         ),
         formula=(
@@ -389,7 +389,7 @@ TERMS: dict[str, Term] = {
         plain="Whether the daily income you collect is worth the overnight risk you are carrying.",
         detail=(
             "Above 2.0 the app calls it high decay efficiency: you are being paid well "
-            "for the risk. Below 0.5 it flags gamma risk — a squeeze is likely to hurt "
+            "for the risk. Below 0.5 it flags gamma risk, a squeeze is likely to hurt "
             "more than the decay pays. Between the two, no strong opinion. It is also "
             "the weight the app uses when predicting an OpEx pin: high Θ/Γ makes the "
             "gamma wall more magnetic."
@@ -406,11 +406,11 @@ TERMS: dict[str, Term] = {
         label="Gamma Exposure (GEX)",
         aliases=("gamma exposure", "dealer gex", "net gex"),
         short="Dealer hedging pressure by strike",
-        plain="How much the big option dealers have to buy or sell to stay hedged — it tells you whether moves get damped or amplified.",
+        plain="How much the big option dealers have to buy or sell to stay hedged, it tells you whether moves get damped or amplified.",
         detail=(
             "Positive GEX means dealers are long gamma: they sell into rallies and buy "
             "dips, which pins price and calms the tape. Negative GEX means the reverse "
-            "— they chase, which amplifies moves. The app signs calls positive and puts "
+            "they chase, which amplifies moves. The app signs calls positive and puts "
             "negative, and gives strikes sitting on a high-volume node a 1.2x weight, on "
             "the theory that those price levels attract real order flow. A figure like "
             "'-2.3B' is notional dollars of gamma, not money at risk."
@@ -446,9 +446,9 @@ TERMS: dict[str, Term] = {
         short="Where price may stick at expiry",
         plain="The price the stock may get magnetically stuck near as options expire.",
         detail=(
-            "The app finds the gamma wall — the strike with the largest absolute dealer "
+            "The app finds the gamma wall: the strike with the largest absolute dealer "
             "GEX, preferring one within 12% of spot if it carries at least a quarter of "
-            "the peak — and then blends it toward the current price. Higher Θ/Γ pulls "
+            "the peak: and then blends it toward the current price. Higher Θ/Γ pulls "
             "the estimate closer to the wall, because pins stick harder when short "
             "premium dominates. This is a positioning heuristic. It is not a settlement "
             "prediction and it fails on news."
@@ -466,7 +466,7 @@ TERMS: dict[str, Term] = {
         label="Implied Volatility (IV)",
         aliases=("implied volatility", "atm iv"),
         short="The market's expected move, annualised",
-        plain="How big a swing the options market is pricing in — higher IV means richer premium for sellers and more expected movement.",
+        plain="How big a swing the options market is pricing in, higher IV means richer premium for sellers and more expected movement.",
         detail=(
             "IV is backed out of the option's price, so it is the market's opinion, not "
             "a measurement. It rises into earnings and macro events and collapses "
@@ -507,7 +507,7 @@ TERMS: dict[str, Term] = {
         detail=(
             "Contango (near IV below far IV) is the normal, calm state and the better "
             "environment for selling near-dated premium. Backwardation (near IV above "
-            "far IV) means something is expected soon — earnings, a court date, a Fed "
+            "far IV) means something is expected soon: earnings, a court date, a Fed "
             "meeting. Selling into backwardation without knowing the catalyst is how "
             "premium sellers get run over."
         ),
@@ -521,7 +521,7 @@ TERMS: dict[str, Term] = {
         label="Volatility Skew",
         aliases=("skew", "put skew", "call skew"),
         short="Put IV minus call IV, 10% out",
-        plain="Whether crash insurance costs more than upside bets — a read on which way institutions are nervous.",
+        plain="Whether crash insurance costs more than upside bets, a read on which way institutions are nervous.",
         detail=(
             "A positive number means the 10%-out-of-the-money put is pricier than the "
             "matching call: someone is paying up for downside protection. That makes put "
@@ -561,7 +561,7 @@ TERMS: dict[str, Term] = {
         detail=(
             "The app draws this as gold rails on the chart and uses it as a safety "
             "check: a short strike OUTSIDE the expected move is the high-safety case, "
-            "INSIDE it means you should watch gamma. Two-thirds is not certainty — one "
+            "INSIDE it means you should watch gamma. Two-thirds is not certainty, one "
             "expiry in three lands outside by design, and earnings gaps ignore it "
             "entirely."
         ),
@@ -599,7 +599,7 @@ TERMS: dict[str, Term] = {
         detail=(
             "The app simulates 10,000 price paths with a fixed random seed (so the "
             "number does not jitter on every rerun) and counts how many finish on the "
-            "profitable side of your breakeven — not merely out of the money, which is "
+            "profitable side of your breakeven: not merely out of the money, which is "
             "the softer number most brokers quote. Antithetic pairs halve the noise. It "
             "assumes lognormal returns, so it understates fat-tail and gap risk."
         ),
@@ -613,7 +613,7 @@ TERMS: dict[str, Term] = {
         label="Expected Value",
         aliases=("expected value", "ev per contract"),
         short="Average profit per trade, long run",
-        plain="What this trade earns on average if you took it hundreds of times — positive means a real edge.",
+        plain="What this trade earns on average if you took it hundreds of times, positive means a real edge.",
         detail=(
             "A high win rate is not the same as a good trade. Expected value weighs the "
             "size of the wins against the size of the losses. A 90% win rate that loses "
@@ -629,7 +629,7 @@ TERMS: dict[str, Term] = {
         label="Kelly Size",
         aliases=("kelly criterion", "kelly %", "half kelly", "full kelly"),
         short="Mathematically optimal bet size",
-        plain="The share of your account this trade mathematically justifies — and it is usually smaller than you would guess.",
+        plain="The share of your account this trade mathematically justifies, and it is usually smaller than you would guess.",
         detail=(
             "Full Kelly maximises long-run growth but produces stomach-churning "
             "drawdowns, so the app also shows Half Kelly and caps what it displays. Two "
@@ -672,7 +672,7 @@ TERMS: dict[str, Term] = {
             "Computed from the dollar delta of every open leg, scaled by each name's "
             "20-day realised volatility, then combined through the correlation matrix so "
             "that positions moving together do not net each other out. The one day in "
-            "twenty it is wrong is usually much worse than the number — VaR says nothing "
+            "twenty it is wrong is usually much worse than the number, VaR says nothing "
             "about how deep the tail goes."
         ),
         formula=(
@@ -724,7 +724,7 @@ TERMS: dict[str, Term] = {
         detail=(
             "Your safety buffer. Bigger is safer and pays less. The app scores this "
             "alongside yield so the recommended strike is not simply the fattest premium "
-            "— the contribution to the score is capped at 15%, past which extra distance "
+            "the contribution to the score is capped at 15%, past which extra distance "
             "buys nothing in ranking terms."
         ),
         formula=(
@@ -739,7 +739,7 @@ TERMS: dict[str, Term] = {
         plain="The cash you collect, as a percentage of what the shares are worth.",
         detail=(
             "This makes contracts on a $40 stock and a $400 stock comparable. It is a "
-            "per-cycle figure, not annual — a 1.5% yield on a 30-day contract is a "
+            "per-cycle figure, not annual, a 1.5% yield on a 30-day contract is a "
             "different animal to 1.5% on a 90-day one, which is what the annualised "
             "figure exists to fix."
         ),
@@ -752,7 +752,7 @@ TERMS: dict[str, Term] = {
         label="Annualized Yield",
         aliases=("annualized yield", "annualised yield", "ann yield", "ann_yield"),
         short="Yield scaled to a full year",
-        plain="What this trade would earn per year if you could repeat it over and over — a comparison tool, not a promise.",
+        plain="What this trade would earn per year if you could repeat it over and over, a comparison tool, not a promise.",
         detail=(
             "Useful only for ranking one contract against another. Nobody achieves it: "
             "it assumes you re-sell instantly at identical terms, are never assigned, "
@@ -772,7 +772,7 @@ TERMS: dict[str, Term] = {
         detail=(
             "For a covered call the app reports spot minus the credit received: the "
             "premium lowers your effective cost basis, which is the real downside "
-            "cushion. For a cash-secured put it is the strike minus the credit — the "
+            "cushion. For a cash-secured put it is the strike minus the credit, the "
             "price you effectively pay if you are assigned."
         ),
         formula=(
@@ -784,7 +784,7 @@ TERMS: dict[str, Term] = {
         label="Open Interest",
         aliases=("oi", "open interest"),
         short="Contracts currently outstanding",
-        plain="How many of this exact contract are being held right now — a proxy for how easily you can get out.",
+        plain="How many of this exact contract are being held right now, a proxy for how easily you can get out.",
         detail=(
             "Low open interest means wide spreads and a bad fill when you want to close "
             "early. The app requires at least 100 open interest and 10 daily volume, and "
@@ -802,11 +802,11 @@ TERMS: dict[str, Term] = {
         label="Covered Call",
         aliases=("cc", "covered calls"),
         short="Sell a call against 100 shares",
-        plain="You own 100 shares and sell someone the right to buy them higher — you keep the cash either way.",
+        plain="You own 100 shares and sell someone the right to buy them higher, you keep the cash either way.",
         detail=(
             "If the stock stays below the strike you keep both the cash and the shares, "
             "and you can do it again. If it goes above, your shares get sold at the "
-            "strike, which caps your upside — you still profit, just less than holding. "
+            "strike, which caps your upside, you still profit, just less than holding. "
             "The realistic target here is 1-3% per month in cash income."
         ),
         formula=(
@@ -822,7 +822,7 @@ TERMS: dict[str, Term] = {
         detail=(
             "If the stock stays above your strike you keep the credit and repeat. If it "
             "falls below you buy the shares at the strike, minus the premium you already "
-            "collected. Then you sell covered calls against those shares — that loop is "
+            "collected. Then you sell covered calls against those shares, that loop is "
             "the Wheel. Only sell puts on stock you actually want to own."
         ),
         formula=(
@@ -856,7 +856,7 @@ TERMS: dict[str, Term] = {
         plain="An energy gauge: near 70 buyers are tired, near 30 sellers have panicked.",
         detail=(
             "This app uses Wilder's smoothing (matching TradingView and Bloomberg), not "
-            "the simple moving average some libraries use — the two disagree enough to "
+            "the simple moving average some libraries use: the two disagree enough to "
             "change signals. Above 70 is a good moment to sell calls, below 30 a good "
             "moment to sell puts, and 40-60 is the calm middle the Edge Score rewards "
             "most for premium selling."
@@ -874,7 +874,7 @@ TERMS: dict[str, Term] = {
         detail=(
             "The MACD line crossing above its signal line means buyers are taking over; "
             "below means sellers are. Standard 12/26/9 settings. It lags by "
-            "construction, so it confirms a move rather than predicting one — which is "
+            "construction, so it confirms a move rather than predicting one, which is "
             "why it is one vote among four in the weekly bias, never the whole call."
         ),
         formula=(
@@ -886,7 +886,7 @@ TERMS: dict[str, Term] = {
         label="ADX",
         aliases=("adx di", "average directional index", "+di", "-di"),
         short="Trend strength, no direction",
-        plain="How strong the current move is — it does not say up or down, only strong or weak.",
+        plain="How strong the current move is: it does not say up or down, only strong or weak.",
         detail=(
             "Above 25 means a real trend is running and trend-following tools can be "
             "trusted. Below 20 means the market is drifting and those same tools "
@@ -904,7 +904,7 @@ TERMS: dict[str, Term] = {
         label="OBV",
         aliases=("on balance volume", "on-balance volume"),
         short="Running volume-flow tally",
-        plain="Tracks whether volume is arriving on up days or down days — a read on quiet institutional buying.",
+        plain="Tracks whether volume is arriving on up days or down days, a read on quiet institutional buying.",
         detail=(
             "Volume is added on up days and subtracted on down days. Rising OBV while "
             "price is flat suggests accumulation before a move. The most useful case is "
@@ -922,10 +922,10 @@ TERMS: dict[str, Term] = {
         label="Supertrend",
         aliases=("super trend", "st"),
         short="ATR-based trailing trend line",
-        plain="A moving floor under the price in an uptrend, or a ceiling above it in a downtrend — when it flips, act.",
+        plain="A moving floor under the price in an uptrend, or a ceiling above it in a downtrend, when it flips, act.",
         detail=(
             "Built from the ATR, so it widens automatically when volatility rises and "
-            "tightens when the tape calms — that is why it whipsaws less than a fixed "
+            "tightens when the tape calms: that is why it whipsaws less than a fixed "
             "percentage stop. Green below price is bullish, red above is bearish. It is "
             "worth 2 of the 9 confluence points, the joint-largest single weight."
         ),
@@ -955,7 +955,7 @@ TERMS: dict[str, Term] = {
         label="ATR",
         aliases=("average true range", "atr14"),
         short="Average daily move, in dollars",
-        plain="How much this stock typically moves in a day, in dollars — the unit for sizing stops sanely.",
+        plain="How much this stock typically moves in a day, in dollars, the unit for sizing stops sanely.",
         detail=(
             "A $2 ATR means a $2 move is an ordinary day, not an event. The app uses it "
             "for stop distance, position sizing, Supertrend bands, and as the squeeze "
@@ -976,7 +976,7 @@ TERMS: dict[str, Term] = {
             "The simplest honest description of a trend, and it needs no indicator. The "
             "app looks at the last two swing highs and lows found with a 5-bar window: "
             "both higher is BULLISH, both lower is BEARISH, anything mixed is RANGING. "
-            "Ranging is not a bad state for premium sellers — it is the best one."
+            "Ranging is not a bad state for premium sellers, it is the best one."
         ),
         formula=(
             "swing points from a 5-bar lookback each side;\n"
@@ -1006,7 +1006,7 @@ TERMS: dict[str, Term] = {
         label="Hurst Exponent",
         aliases=("hurst exponent", "h", "r/s"),
         short="Trending vs mean-reverting, 0-1",
-        plain="Tells you whether this stock tends to keep going in one direction or snap back — and whether trend indicators can be trusted at all.",
+        plain="Tells you whether this stock tends to keep going in one direction or snap back, and whether trend indicators can be trusted at all.",
         detail=(
             "Above 0.55 the stock trends, so Supertrend, ADX and MACD are meaningful. "
             "Below 0.45 it mean-reverts, which favours selling options at extremes. "
@@ -1025,7 +1025,7 @@ TERMS: dict[str, Term] = {
         label="POC (Point of Control)",
         aliases=("point of control", "volume poc"),
         short="Price with the most traded volume",
-        plain="The price level where the most shares actually changed hands — a magnet the stock keeps returning to.",
+        plain="The price level where the most shares actually changed hands, a magnet the stock keeps returning to.",
         detail=(
             "Real transactions, not a moving average, which is why it is the "
             "highest-weighted input to the Gold Zone. Price tends to gravitate back to "
@@ -1041,7 +1041,7 @@ TERMS: dict[str, Term] = {
         label="HVN (High Volume Node)",
         aliases=("high volume node", "hvn floor", "volume node"),
         short="Secondary heavy-volume price shelf",
-        plain="Another price shelf where lots of trading happened — these act as support and resistance.",
+        plain="Another price shelf where lots of trading happened, these act as support and resistance.",
         detail=(
             "Where the POC is the single fullest bin, HVNs are the other peaks in the "
             "volume profile. The app uses the nearest one within 2% of spot as a Gold "
@@ -1058,7 +1058,7 @@ TERMS: dict[str, Term] = {
         label="Fibonacci 61.8%",
         aliases=("fib", "fib 61.8%", "golden ratio", "fib retracement"),
         short="Golden-ratio pullback level",
-        plain="After a big run, stocks often pull back about 62% of the way before continuing — this is that line.",
+        plain="After a big run, stocks often pull back about 62% of the way before continuing, this is that line.",
         detail=(
             "There is no physical law here; it works partly because a very large number "
             "of traders watch the same level and place orders there. The app computes it "
@@ -1075,7 +1075,7 @@ TERMS: dict[str, Term] = {
         label="Gann Square of 9",
         aliases=("gann", "square of 9", "gann sq9"),
         short="Geometric price levels",
-        plain="Support and resistance prices derived from a mathematical spiral — the most speculative input the app uses.",
+        plain="Support and resistance prices derived from a mathematical spiral, the most speculative input the app uses.",
         detail=(
             "Included for completeness and weighted the lowest of every Gold Zone "
             "component (0.55 versus 1.35 for volume-based levels) because there is no "
@@ -1091,7 +1091,7 @@ TERMS: dict[str, Term] = {
         label="Whale Volume Z-Score",
         aliases=("volume z", "volume z-score", "dark pool proxy", "whale alert", "volz"),
         short="How unusual today's volume is",
-        plain="How far above normal today's volume is — above 2 means someone big is almost certainly trading.",
+        plain="How far above normal today's volume is: above 2 means someone big is almost certainly trading.",
         detail=(
             "A z-score of 2 means volume is two standard deviations above its recent "
             "average, which happens rarely by chance. The lookback window adapts to the "
@@ -1109,7 +1109,7 @@ TERMS: dict[str, Term] = {
         label="Shadow Move",
         aliases=("shadow", "shadow band", "shadow low", "purple band"),
         short="Price range the whales traded in",
-        plain="The purple band shows where the big-volume days actually traded — compare it to what options are pricing in.",
+        plain="The purple band shows where the big-volume days actually traded, compare it to what options are pricing in.",
         detail=(
             "Only bars with a whale-level volume z-score count. Their closes are sorted "
             "by price and the middle 70% of that volume defines the band. The read is "
@@ -1147,7 +1147,7 @@ TERMS: dict[str, Term] = {
         label="Squeeze Percentile",
         aliases=("bbw", "bbw percentile", "bbw_pctile", "bollinger band width", "squeeze"),
         short="How compressed volatility is",
-        plain="How tightly the price range has compressed compared to its own past year — low numbers mean a spring is loaded.",
+        plain="How tightly the price range has compressed compared to its own past year, low numbers mean a spring is loaded.",
         detail=(
             "Measures Bollinger band width and ranks it against its own history rather "
             "than an absolute threshold, so it works on both a sleepy utility and a "
@@ -1186,11 +1186,11 @@ TERMS: dict[str, Term] = {
         label="Market Regime",
         aliases=("hmm", "regime", "regime detection", "regime probability"),
         short="Calm / medium / stressed probability",
-        plain="A model's read on whether the market is currently calm, choppy, or stressed — used to size positions down when it is stressed.",
+        plain="A model's read on whether the market is currently calm, choppy, or stressed, used to size positions down when it is stressed.",
         detail=(
             "A three-state hidden Markov model fitted to fractionally differenced returns "
             "and their rolling volatility. States are always sorted by volatility so "
-            "state 0 is the calmest regardless of how the fit initialised — that makes "
+            "state 0 is the calmest regardless of how the fit initialised, that makes "
             "the labels stable across tickers and reruns. High-vol probability directly "
             "reduces the institutional Edge Score, so the app shrinks conviction rather "
             "than merely warning you."
@@ -1208,7 +1208,7 @@ TERMS: dict[str, Term] = {
         plain="A pricing model that allows for crashes being more likely than the textbook assumes.",
         detail=(
             "Standard Black-Scholes assumes returns are normally distributed, which "
-            "underprices the tails — real markets crash more often than the bell curve "
+            "underprices the tails: real markets crash more often than the bell curve "
             "allows. The Corrado-Su expansion adds skew and kurtosis corrections on top "
             "of the Black-Scholes price. Only active when Quant mode is on."
         ),
@@ -1225,7 +1225,7 @@ TERMS: dict[str, Term] = {
         short="Bullish share, penalised for small samples",
         plain="How bullish the crowd is, deliberately discounted when only a handful of people have posted.",
         detail=(
-            "Two bullish messages out of two is not 100% bullish conviction — it is two "
+            "Two bullish messages out of two is not 100% bullish conviction, it is two "
             "people. The Wilson lower bound scores that around 0.34, while 40 bullish "
             "out of 50 scores about 0.67. This is the anti-hype guard in Sentiment "
             "Radar: it makes a genuinely broad bullish crowd score higher than a loud "
@@ -1240,7 +1240,7 @@ TERMS: dict[str, Term] = {
         label="Mention Velocity",
         aliases=("velocity", "buzz velocity", "mention acceleration"),
         short="Buzz growth versus yesterday",
-        plain="How fast chatter about a ticker is accelerating — doubling matters more than being loud.",
+        plain="How fast chatter about a ticker is accelerating, doubling matters more than being loud.",
         detail=(
             "Absolute mention counts favour the mega-caps that are always discussed. "
             "Velocity finds the names waking up. It is measured on a log scale so a "
@@ -1258,12 +1258,12 @@ TERMS: dict[str, Term] = {
         label="Attention Stage",
         aliases=("stage", "cascade stage", "attention cascade"),
         short="How far the hype has travelled",
-        plain="Attention spreads in order — talk, then searches, then volume, then price. This says which step you are at.",
+        plain="Attention spreads in order: talk, then searches, then volume, then price. This says which step you are at.",
         detail=(
             "The seedling stage is the earliest and most valuable: people are talking but "
             "nothing has moved. The rocket stage means volume has confirmed the story but "
             "price has not fully run. The volcano stage means price already moved and you "
-            "would be buying from the people who were early. Later is not better — it is "
+            "would be buying from the people who were early. Later is not better, it is "
             "the opposite."
         ),
         formula=(
@@ -1276,7 +1276,7 @@ TERMS: dict[str, Term] = {
         label="Sentiment Score",
         aliases=("asymmetric score", "buzz score", "sentiment radar score"),
         short="Composite retail-buzz score, 0-100",
-        plain="One number for how early and how real the crowd interest is — high means buzz is building before the price moved.",
+        plain="One number for how early and how real the crowd interest is, high means buzz is building before the price moved.",
         detail=(
             "Five weighted components: mention velocity, crowd conviction, volume "
             "confirmation, earliness (has price already run?), and Google search "
@@ -1300,7 +1300,7 @@ TERMS: dict[str, Term] = {
             "Words about the future (guidance, outlook, forecast) are weighted about 1.45 "
             "while backward-looking words (beat, miss) get about 0.82. So 'missed "
             "earnings but raised guidance' tilts bullish, which is usually how the tape "
-            "reacts too. It is a keyword lexicon, not a language model — sarcasm and "
+            "reacts too. It is a keyword lexicon, not a language model, sarcasm and "
             "unusual phrasing will fool it, and empty or neutral text scores zero."
         ),
         formula=(
@@ -1366,7 +1366,7 @@ def get(key: Any) -> Optional[Term]:
 
 
 def lookup(key: Any) -> Optional[Term]:
-    """Return the :class:`Term` for a key, label, or alias — or ``None``."""
+    """Return the :class:`Term` for a key, label, or alias, or ``None``."""
     if key is None:
         return None
     if isinstance(key, Term):
@@ -1377,7 +1377,7 @@ def lookup(key: Any) -> Optional[Term]:
 
 
 def require(key: Any) -> Term:
-    """Like :func:`lookup` but raises ``KeyError`` — use in tests and migrations."""
+    """Like :func:`lookup` but raises ``KeyError``, use in tests and migrations."""
     t = lookup(key)
     if t is None:
         raise KeyError(f"explain: unknown term {key!r}")
@@ -1469,7 +1469,7 @@ def check_registry() -> list[str]:
         if len(t.short.split()) > 8:
             problems.append(f"{where}.short: too long for a tooltip ({len(t.short.split())} words)")
         if len(t.detail) < len(t.plain):
-            problems.append(f"{where}.detail: shorter than .plain — no added depth")
+            problems.append(f"{where}.detail: shorter than .plain, no added depth")
         nl = normalize_key(t.label)
         if nl in seen_labels and seen_labels[nl] != key:
             problems.append(f"{where}.label: duplicate of {seen_labels[nl]!r}")
@@ -1498,7 +1498,7 @@ def _finite(value: Any) -> Optional[float]:
     return f
 
 
-def money(value: Any, decimals: int = 2, dash: str = "—") -> str:
+def money(value: Any, decimals: int = 2, dash: str = "n/a") -> str:
     """``1234.5`` -> ``"$1,234.50"``. Non-numeric input returns ``dash``."""
     f = _finite(value)
     if f is None:
@@ -1507,25 +1507,25 @@ def money(value: Any, decimals: int = 2, dash: str = "—") -> str:
     return f"{sign}${abs(f):,.{decimals}f}"
 
 
-def pct(value: Any, decimals: int = 1, dash: str = "—") -> str:
+def pct(value: Any, decimals: int = 1, dash: str = "n/a") -> str:
     """``67.3`` -> ``"67.3%"``. Expects an already-scaled percentage."""
     f = _finite(value)
     return dash if f is None else f"{f:.{decimals}f}%"
 
 
-def ratio(value: Any, decimals: int = 2, dash: str = "—") -> str:
+def ratio(value: Any, decimals: int = 2, dash: str = "n/a") -> str:
     """``2.0`` -> ``"2.00x"``."""
     f = _finite(value)
     return dash if f is None else f"{f:.{decimals}f}x"
 
 
-def score(value: Any, out_of: int = 100, decimals: int = 0, dash: str = "—") -> str:
+def score(value: Any, out_of: int = 100, decimals: int = 0, dash: str = "n/a") -> str:
     """``72`` -> ``"72 / 100"``."""
     f = _finite(value)
     return dash if f is None else f"{f:.{decimals}f} / {out_of:g}"
 
 
-def compact(value: Any, decimals: int = 1, dash: str = "—") -> str:
+def compact(value: Any, decimals: int = 1, dash: str = "n/a") -> str:
     """``-2_300_000_000`` -> ``"-2.3B"``. For GEX and other notional figures."""
     f = _finite(value)
     if f is None:
@@ -1538,7 +1538,7 @@ def compact(value: Any, decimals: int = 1, dash: str = "—") -> str:
     return f"{sign}{a:.{decimals}f}"
 
 
-def signed(value: Any, decimals: int = 2, dash: str = "—") -> str:
+def signed(value: Any, decimals: int = 2, dash: str = "n/a") -> str:
     """``0.4`` -> ``"+0.40"``. For deltas where the sign is the point."""
     f = _finite(value)
     return dash if f is None else f"{f:+.{decimals}f}"
@@ -1642,7 +1642,7 @@ def verdict_line(text: str, tone: str = "neutral") -> None:
 
 
 def term_badge(term_key: Any, *, prefix: str = "") -> bool:
-    """Render just the short gloss as a caption — for tables and dense rows
+    """Render just the short gloss as a caption: for tables and dense rows
     where a full expander would not fit. Returns ``False`` if unknown."""
     import streamlit as st
 

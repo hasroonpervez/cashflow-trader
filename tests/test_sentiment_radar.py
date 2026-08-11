@@ -1,7 +1,7 @@
 """Hand-verified unit tests for every formula in modules/sentiment_radar.py.
 
 Each expected value below was computed by hand (shown in comments), then the
-test asserts the code matches — the code is checked against the math, not
+test asserts the code matches: the code is checked against the math, not
 against itself.
 Run:  python -m pytest tests/test_sentiment_radar.py -q
 """
@@ -32,7 +32,7 @@ def test_velocity_basic():
     assert mention_velocity(30, 10) == 2.0
 
 def test_velocity_zero_prior_floored():
-    # UPDATED: the old assertion (8/max(1,0) == 8.0) encoded the bug —
+    # UPDATED: the old assertion (8/max(1,0) == 8.0) encoded the bug
     # eight mentions out of nowhere read as an 8x spike and maxed the
     # largest weight. Shrunk: (8+10)/(0+10) = 1.8
     assert abs(mention_velocity(8, 0) - 1.8) < APPROX
@@ -114,7 +114,7 @@ def test_earliness_hand_values():
     assert abs(earliness_component(0.15) - 0.5) < APPROX
     assert earliness_component(0.45) == 0.0   # already ran up, fully late
     # UPDATED: the old assertion `earliness_component(-0.15) == 0.5` was
-    # "direction-agnostic" — which is the audit finding itself. A -15% drop
+    # "direction-agnostic": which is the audit finding itself. A -15% drop
     # is not half a missed rally; the upside is entirely still available on
     # this axis, so earliness stays 1.0 (the risk is reported by the Stage
     # and Verdict columns as a selloff instead).
@@ -182,7 +182,7 @@ def test_stage_dormant():
 def test_stage_smoldering_via_buzz_or_trends():
     # buzz lit, volume quiet, price flat
     assert attention_stage(2.5, None, 0.5, 0.01) == 1
-    # searches lit instead of buzz — same stage
+    # searches lit instead of buzz: same stage
     assert attention_stage(1.0, 1.6, None, 0.01) == 1
 
 def test_stage_igniting_needs_attention_AND_volume():
@@ -193,8 +193,8 @@ def test_stage_igniting_needs_attention_AND_volume():
 def test_stage_erupted_overrides_everything():
     assert attention_stage(9.0, 3.0, 5.0, 0.20) == 3
     # UPDATED: the old line asserted `... -0.20) == 3   # crash counts as
-    # erupted too`, i.e. it pinned the bug in place — a -20% capitulation
-    # was labelled "🌋 Erupted — price already moved (you're late)".
+    # erupted too`, i.e. it pinned the bug in place, a -20% capitulation
+    # was labelled "🌋 Erupted: price already moved (you're late)".
     # A downward break is its own state, off the upward cascade.
     from modules.sentiment_radar import STAGE_SELLOFF
     assert attention_stage(9.0, 3.0, 5.0, -0.20) == STAGE_SELLOFF

@@ -1,4 +1,4 @@
-"""Quant Edge Score — drives trade recommendation context."""
+"""Quant Edge Score: drives trade recommendation context."""
 import numpy as np
 import pandas as pd
 

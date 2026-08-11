@@ -14,7 +14,7 @@ import pytest
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Finding #3 — journal realized P&L used expiry intrinsic against an option price
+# Finding #3: journal realized P&L used expiry intrinsic against an option price
 # ─────────────────────────────────────────────────────────────────────────────
 
 _CSP = {
@@ -128,7 +128,7 @@ def test_unknowable_pnl_leaves_the_key_absent_rather_than_reporting_break_even(t
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Finding #20 — ConfigTransaction.flush() wrote a construction-time snapshot
+# Finding #20: ConfigTransaction.flush() wrote a construction-time snapshot
 # ─────────────────────────────────────────────────────────────────────────────
 
 @pytest.fixture()
@@ -168,7 +168,7 @@ def test_flush_writes_nothing_when_there_are_no_mutations(config_at):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Finding #21 — st.secrets scalars persisted into the git-tracked config.json
+# Finding #21: st.secrets scalars persisted into the git-tracked config.json
 # ─────────────────────────────────────────────────────────────────────────────
 
 def test_secrets_are_usable_in_memory_but_never_written_to_disk(tmp_path, monkeypatch):
@@ -211,7 +211,7 @@ def test_strip_secrets_is_pure_and_keeps_ordinary_settings(config_at):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Finding #7 — a previous ticker's OpEx pin survived into the next ticker's render
+# Finding #7: a previous ticker's OpEx pin survived into the next ticker's render
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _synth_daily(n=300, start=100.0):
@@ -303,7 +303,7 @@ def test_a_real_series_still_draws():
 def test_glance_card_labels_a_missing_series_instead_of_faking_one():
     from modules.ui_helpers import _glance_metric_card
 
-    html = _glance_metric_card("MARKET MOOD (VIX)", "<div>—</div>", "<div>n/a</div>", [], "#fff")
+    html = _glance_metric_card("MARKET MOOD (VIX)", "<div>-</div>", "<div>n/a</div>", [], "#fff")
     assert "NO SERIES" in html
     assert "<path" not in html
 
@@ -357,7 +357,7 @@ def test_a_snapshot_from_a_different_watchlist_is_not_reused_on_timeout():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Finding #19 — equity_capital hard-coded to 10000 and clobbering the saved value
+# Finding #19: equity_capital hard-coded to 10000 and clobbering the saved value
 # ─────────────────────────────────────────────────────────────────────────────
 
 def test_saved_capital_is_read_from_config_not_a_literal():
@@ -378,7 +378,7 @@ def test_saved_capital_survives_a_config_transaction_round_trip(config_at):
     from modules.render_pre_tabs import saved_equity_capital
 
     tx = cfg.ConfigTransaction()
-    # No `sb_equity_capital` in session — the fallback is now the persisted value.
+    # No `sb_equity_capital` in session: the fallback is now the persisted value.
     tx.update(equity_capital=saved_equity_capital(tx.current))
     assert tx.flush()
 
@@ -386,7 +386,7 @@ def test_saved_capital_survives_a_config_transaction_round_trip(config_at):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# mechanical_exit — inclusive entry-bar slice, and a stop that latched forever
+# mechanical_exit: inclusive entry-bar slice, and a stop that latched forever
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _exit_frame(breach_at=None, n=60, breach_low=90.0):
@@ -408,7 +408,7 @@ def _exit_frame(breach_at=None, n=60, breach_low=90.0):
 def test_the_entry_bar_low_cannot_stop_you_out_before_you_are_in():
     from modules.validated_signals import mechanical_exit
 
-    # The entry bar itself printed below the stop — before the position existed.
+    # The entry bar itself printed below the stop: before the position existed.
     out = mechanical_exit(
         _exit_frame(breach_at=30, n=40), entry_price=100.0, entry_index=30, max_hold_sessions=15
     )
@@ -419,7 +419,7 @@ def test_the_entry_bar_low_cannot_stop_you_out_before_you_are_in():
 def test_a_stop_after_the_time_exit_does_not_retroactively_close_the_trade():
     from modules.validated_signals import mechanical_exit
 
-    # Breach 20 sessions after entry — the 15-session time exit already closed it.
+    # Breach 20 sessions after entry: the 15-session time exit already closed it.
     out = mechanical_exit(_exit_frame(breach_at=50), entry_price=100.0, entry_index=30, max_hold_sessions=15)
 
     assert out["directive"] == "exit_time"
@@ -533,7 +533,7 @@ def test_banding_is_decided_on_the_raw_scale_so_verdicts_are_unchanged():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# app.py — the deferred first pass had no banner and no rerun
+# app.py, the deferred first pass had no banner and no rerun
 # ─────────────────────────────────────────────────────────────────────────────
 
 def test_deferred_first_pass_warns_and_schedules_a_rerun():

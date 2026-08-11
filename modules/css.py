@@ -221,7 +221,7 @@ section[data-testid="stSidebar"],
   -webkit-text-fill-color:#fff!important;
 }
 /* Streamlit 1.39+ st.segmented_control: BaseButton <button kind="segmented_control"> (not baseweb).
-   Theme bgColor is light on some hosts — force HUD pills readable without BorderWrapper ancestry. */
+   Theme bgColor is light on some hosts: force HUD pills readable without BorderWrapper ancestry. */
 .main [data-testid="stButtonGroup"] button[kind="segmented_control"],
 [data-testid="stMain"] [data-testid="stButtonGroup"] button[kind="segmented_control"],
 .block-container [data-testid="stButtonGroup"] button[kind="segmented_control"]{
@@ -367,7 +367,7 @@ section[data-testid="stSidebar"],
 }
 [data-testid="stSidebar"] [data-testid="stHorizontalBlock"] [data-testid="column"]{min-width:0!important}
 [data-testid="stSidebar"] textarea{font-family:'JetBrains Mono',monospace!important;font-size:.78rem!important;line-height:1.35!important}
-/* Scoped typography only — a global `span,label` rule breaks Streamlit expander chevrons
+/* Scoped typography only: a global `span,label` rule breaks Streamlit expander chevrons
    (Material Symbols render as literal names like _arrow_right and overlap the label). */
 .stMarkdown,.stText{color:var(--t1)!important;font-family:'Inter',sans-serif!important}
 h1,h2,h3,h4,h5,h6{font-family:'Inter',sans-serif!important;font-weight:700!important;color:var(--cyan-bright)!important}
@@ -667,7 +667,7 @@ div[data-testid="stMetricValue"], .mono, .glance-value, .ticker, .price-value{
 .earn-pill{padding:6px 10px;border-radius:999px;border:1px solid rgba(0,229,255,.35);background:rgba(2,6,23,.66);color:#cbd5e1;font-size:.82rem}
 @media(max-width:900px){.earnings-intel-grid{grid-template-columns:1fr}}
 /* Command bar + watchlist tape (main column HUD)
-   Gold gradient rule below the tape — single 3px line makes the layout feel
+   Gold gradient rule below the tape: single 3px line makes the layout feel
    intentional and separates the tape from the HUD metrics beneath it. */
 .cf-command-bar .stMarkdown p{margin:0!important}
 .cf-tape-title{font-size:.82rem!important;font-weight:700!important;color:#e2e8f0!important;margin:2px 0 6px 0!important}
@@ -802,7 +802,7 @@ div[data-testid="stMetricValue"], .mono, .glance-value, .ticker, .price-value{
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# SIDEBAR TOGGLE — injected via iframe srcdoc inside st.markdown
+# SIDEBAR TOGGLE: injected via iframe srcdoc inside st.markdown
 # ─────────────────────────────────────────────────────────────────────────
 _TOGGLE_JS = r"""(function(){
 function resolveDoc(){
@@ -902,7 +902,7 @@ function onDocClick(ev){
   toggleFromUi(ev);
 }
 pd.addEventListener('click',onDocClick,false);
-/* Sticky nav: anchors inside inactive st.tabs are not mounted — switch tab first, then scroll. */
+/* Sticky nav: anchors inside inactive st.tabs are not mounted, switch tab first, then scroll. */
 function cfFindMainDashTabButtons(){
   var raw=[],sels=['[data-baseweb="tab-list"]','[role="tablist"]'];
   for(var s=0;s<sels.length;s++){
@@ -961,7 +961,7 @@ function cfOpenQuickReference(){
 }
 function cfMainScroller(){
   /* The element that actually scrolls the app. Never an overflow:hidden
-     wrapper — those eat scrollIntoView and leave the page stuck at top. */
+     wrapper: those eat scrollIntoView and leave the page stuck at top. */
   var cands=[
     pd.querySelector('section[data-testid="stMain"]'),
     pd.querySelector('section.main'),
@@ -1009,7 +1009,7 @@ function cfOnStickyNavClick(ev){
   var href=a.getAttribute('href')||'';
   var id=href.slice(1);
   if(!id)return;
-  /* Execution + Charts live above st.tabs — scroll only, no tab switch. */
+  /* Execution + Charts live above st.tabs, scroll only, no tab switch. */
   if(id==='execution'||id==='charts'){
     ev.preventDefault();
     ev.stopPropagation();

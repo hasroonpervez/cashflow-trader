@@ -2,7 +2,7 @@
 Desk-level consensus signal, trader's note, and bento-style copy from DashContext + OHLCV.
 
 Blends quant edge, confluence, sentiment, structure, volume Z, and rolling **VWAP distance Z**
-(daily multi-bar VWAP from typical price; Z vs prior deviation history — not intraday session VWAP).
+(daily multi-bar VWAP from typical price; Z vs prior deviation history, not intraday session VWAP).
 """
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ _COIL_BBW_PCTILE_MAX = 0.05
 _HURST_WINDOW = 100
 
 # ``compute_desk_consensus`` linear blend: heuristic relative emphasis of each pillar.
-# Not calibrated to a dataset — change only with backtests / sensitivity notes.
+# Not calibrated to a dataset: change only with backtests / sensitivity notes.
 _CONSENSUS_W_QS = 0.28
 _CONSENSUS_W_CONFLUENCE = 0.20
 _CONSENSUS_W_FG = 0.16
@@ -63,7 +63,7 @@ def desk_conviction_multiplier(
     if coil_active and absorption and sweep_gate:
         return 2.0, "Perfect desk: COIL · ICEBERG · SWEEP"
     if sweep_gate:
-        return 1.5, "SWEEP — VWAP urgency and/or whale sweep (volume + ask-side proxy)"
+        return 1.5, "SWEEP, VWAP urgency and/or whale sweep (volume + ask-side proxy)"
     if coil_active or absorption:
         return 1.25, "COIL and/or ICEBERG (squeeze ≤5% BBW and/or absorption)"
     return 1.0, "Baseline (no elite microstructure gates)"
@@ -129,14 +129,14 @@ font-size:0.62rem;font-weight:700;letter-spacing:0.12em;color:#64748b">{lab}</di
         vwap_urgency=bool(c.get("vwap_urgency")),
         whale_sweep=bool(c.get("whale_sweep")),
     )
-    sub = html_mod.escape(f"Conviction ×{mult:.2f} — {why}")
+    sub = html_mod.escape(f"Conviction ×{mult:.2f}, {why}")
     regime = str(c.get("hurst_regime_label") or "").strip()
     mode = str(c.get("trading_mode_recommendation") or "").strip()
     reg_line = ""
     if regime or mode:
         reg_line = (
             f"<div style=\"margin-top:6px;font-size:0.72rem;color:#a5b4fc;font-weight:700;letter-spacing:0.08em\">"
-            f"REGIME · {html_mod.escape(regime or '—')}"
+            f"REGIME · {html_mod.escape(regime or 'n/a')}"
             f"{(' · ' + html_mod.escape(mode)) if mode else ''}</div>"
         )
     dom_line = ""
@@ -149,8 +149,8 @@ font-size:0.62rem;font-weight:700;letter-spacing:0.12em;color:#64748b">{lab}</di
     if leader:
         rs_d = c.get("rs_spy_ratio")
         vz_d = c.get("volume_z")
-        rs_s = f"{float(rs_d):.2f}" if rs_d is not None and np.isfinite(float(rs_d)) else "—"
-        vz_s = f"{float(vz_d):+.1f}σ" if vz_d is not None and np.isfinite(float(vz_d)) else "—"
+        rs_s = f"{float(rs_d):.2f}" if rs_d is not None and np.isfinite(float(rs_d)) else "n/a"
+        vz_s = f"{float(vz_d):+.1f}σ" if vz_d is not None and np.isfinite(float(vz_d)) else "n/a"
         lead_line = (
             f"<div style=\"margin-top:6px;font-size:0.72rem;color:#6ee7b7;font-weight:700;letter-spacing:0.06em\">"
             f"MARKET LEADER · RS {html_mod.escape(rs_s)} &gt; 1 vs SPY · Whale volume {html_mod.escape(vz_s)}</div>"
@@ -178,7 +178,7 @@ def vwap_distance_stats(
     μ and σ are taken from the prior ``prior_sessions`` bars (last bar excluded), matching
     the volume-Z pattern in ``last_bar_volume_zscore``.
 
-    Not intraday session VWAP — daily OHLCV proxy only.
+    Not intraday session VWAP: daily OHLCV proxy only.
     """
     out: dict = {"vwap_z": None, "rolling_vwap": None, "deviation_pct": None}
     need = vwap_window + prior_sessions + 2
@@ -254,7 +254,7 @@ def daily_aggressor_proxy(df: pd.DataFrame, *, tail_bars: int = 3) -> dict:
     Daily-bar stand-in for order-flow imbalance (not true OFI): where the close prints inside the
     range, weighted by recent volume intensity. Composite in roughly [-1, 1].
     """
-    out: dict = {"ofi_proxy": None, "label": "—", "detail": {}}
+    out: dict = {"ofi_proxy": None, "label": "n/a", "detail": {}}
     if df is None or getattr(df, "empty", True) or len(df) < 5:
         return out
     needed = ("High", "Low", "Close", "Volume")
@@ -354,7 +354,7 @@ def blend_unified_probability(
     conf_pct: float,
     rs_spy_ratio: Optional[float],
 ) -> float:
-    """Blend Quant Edge, confluence %, and RS vs SPY into a single 0–100 dial."""
+    """Blend Quant Edge, confluence %, and RS vs SPY into a single 0-100 dial."""
     qs = float(max(0.0, min(100.0, qs)))
     conf_pct = float(max(0.0, min(100.0, conf_pct)))
     rs_adj = 50.0
@@ -509,7 +509,7 @@ def _bbw_last_pctile(df: pd.DataFrame, lookback: int = 60) -> Optional[float]:
         return None
 
 
-# Structure / weekly pillars emit four discrete values each, inside a narrow band —
+# Structure / weekly pillars emit four discrete values each, inside a narrow band
 # see `scale_consensus_score` for why that matters to the displayed 0-100 number.
 _STRUCT_SCORES = (72.0, 28.0, 50.0, 48.0)   # BULL, BEAR, RANGE/MIXED, UNKNOWN
 _WK_SCORES = (70.0, 32.0, 52.0, 50.0)       # BULL, BEAR, MIXED, UNKNOWN
@@ -544,7 +544,7 @@ def _wk_score(label: str) -> float:
 # and weekly pillars never leave their narrow bands. The gauge could never empty or fill,
 # and the 40 / 62 band cutoffs were chosen against a scale that does not exist. Map the
 # raw sum onto the range it can actually occupy, and map the cutoffs through the *same*
-# transform so every verdict is bit-for-bit unchanged — only the number is now honest.
+# transform so every verdict is bit-for-bit unchanged, only the number is now honest.
 _CONSENSUS_PILLAR_RANGES = (
     (_CONSENSUS_W_QS, 0.0, 100.0),
     (_CONSENSUS_W_CONFLUENCE, 0.0, 100.0),
@@ -587,7 +587,7 @@ def compute_desk_consensus(
     rs_spy_ratio: Optional[float] = None,
     fundamental_sieve: Optional[dict] = None,
 ) -> dict:
-    """Return score 0–100, traffic-light band, UI hints, and bento strings.
+    """Return score 0-100, traffic-light band, UI hints, and bento strings.
 
     ``rs_spy_ratio``: optional **~90-session** growth-factor ratio vs SPY from the global close matrix
     (> 1 ⇒ outperformance). Combined with **volume Z > 4** → **market leader** ribbon.
@@ -701,7 +701,7 @@ def compute_desk_consensus(
         ring_bg = "rgba(248,113,113,0.15)"
     elif score_raw < _CONSENSUS_RAW_CUT_CONVICTION:
         band = "neutral"
-        label = "Neutral — wait for catalyst"
+        label = "Neutral: wait for catalyst"
         color = "#fbbf24"
         ring_bg = "rgba(251,191,36,0.12)"
     else:
@@ -712,7 +712,7 @@ def compute_desk_consensus(
     setup_hint = "Volatility: "
     if bbwp is not None:
         if bbwp <= _COIL_BBW_PCTILE_MAX:
-            setup_hint += f"Bollinger bandwidth in the **extreme lower** range (≤**{_COIL_BBW_PCTILE_MAX:.0%}** tile — **COIL** / spring risk)."
+            setup_hint += f"Bollinger bandwidth in the **extreme lower** range (≤**{_COIL_BBW_PCTILE_MAX:.0%}** tile, **COIL** / spring risk)."
         elif bbwp <= 0.15:
             setup_hint += "Bollinger bandwidth in the **lower** range (squeeze / coil risk)."
         elif bbwp >= 0.85:
@@ -760,7 +760,7 @@ def compute_desk_consensus(
     _opx = ofi_st.get("ofi_proxy")
     if _opx is not None and np.isfinite(float(_opx)) and abs(float(_opx)) >= 0.2:
         mom_parts.append(
-            f"**Aggressor proxy** (daily OFI stand-in): **{float(_opx):+.2f}** — {ofi_st.get('label', '')}"
+            f"**Aggressor proxy** (daily OFI stand-in): **{float(_opx):+.2f}**: {ofi_st.get('label', '')}"
         )
     if vz is not None:
         mom_parts.append(f"Volume Z today **{vz:+.1f}**")
@@ -786,11 +786,11 @@ def compute_desk_consensus(
             mom_parts.append("**Institutional absorption** (whale trap): extreme volume vs muted close")
     if hurst_h is not None and np.isfinite(float(hurst_h)):
         mom_parts.append(
-            f"Hurst **{float(hurst_h):.2f}** ({hurst_regime_label}) — flow blend tilts **RSI/Bollinger** vs **MACD/RS** by regime."
+            f"Hurst **{float(hurst_h):.2f}** ({hurst_regime_label}), flow blend tilts **RSI/Bollinger** vs **MACD/RS** by regime."
         )
     if whale_sweep:
         mom_parts.append(
-            "**Whale sweep:** spot above rolling VWAP, volume Z >4, aggressor proxy >0.7 — urgency / ask-side pressure (proxy)."
+            "**Whale sweep:** spot above rolling VWAP, volume Z >4, aggressor proxy >0.7, urgency / ask-side pressure (proxy)."
         )
     if institutional_dominance:
         mom_parts.append("**TOTAL INSTITUTIONAL DOMINANCE:** sweep plus **Iceberg absorption** simultaneously.")
@@ -802,7 +802,7 @@ def compute_desk_consensus(
         dist = (px / gz - 1.0) * 100.0
         exit_hint = f"Gold Zone ~${gz:,.2f} (**{dist:+.1f}%** vs spot). Use your plan for stops (e.g. ATR multiple below entry)."
     else:
-        exit_hint = "Gold Zone not fused — use structure and your own stop rule."
+        exit_hint = "Gold Zone not fused: use structure and your own stop rule."
     try:
         atr_last = float(safe_last(TA.atr(df), 0.0)) if df is not None and len(df) >= 15 else 0.0
     except (TypeError, ValueError):
@@ -874,11 +874,11 @@ def _absorption_banner_html(c: dict) -> str:
     if rp is not None and thr is not None and np.isfinite(rp) and np.isfinite(thr):
         sub = html_mod.escape(f"Last session {rp:+.2f}% vs ≤{thr:.2f}% quiet band (volume {vz_s} vs 20d norm).")
     else:
-        sub = html_mod.escape("Extreme volume vs muted daily close — often absorption / liquidity reload.")
+        sub = html_mod.escape("Extreme volume vs muted daily close, often absorption / liquidity reload.")
     return f"""<div style="margin-top:10px;padding:10px 12px;border-radius:10px;border:1px solid rgba(34,211,238,0.35);
 background:rgba(6,182,212,0.12);font-size:0.78rem;color:#a5f3fc;line-height:1.5">
 <strong style="color:#22d3ee;letter-spacing:0.06em">INSTITUTIONAL ABSORPTION</strong> · {sub}
-<span style="display:block;margin-top:4px;color:#64748b;font-size:0.72rem">Microstructure proxy on daily bars — not order-book imbalance.</span></div>"""
+<span style="display:block;margin-top:4px;color:#64748b;font-size:0.72rem">Microstructure proxy on daily bars, not order-book imbalance.</span></div>"""
 
 
 def consensus_banner_html(ticker: str, c: dict) -> str:
@@ -932,7 +932,7 @@ def consensus_compact_html(ticker: str, c: dict) -> str:
         _rg = f" · <span style=\"color:#a5b4fc;font-weight:700\">{html_mod.escape(hr[:24])}</span>"
     return f"""<div style="margin:0 0 10px 0;padding:8px 12px;border-radius:10px;border:1px solid rgba(148,163,184,0.2);
 background:rgba(15,23,42,0.9);font-size:0.82rem;color:#cbd5e1">
-<strong style="color:{col};font-family:JetBrains Mono,monospace">{pct}</strong>/100 consensus · {tk} — <span style="color:#e2e8f0">{lab}</span>{_abs}{_sw}{_rg}</div>"""
+<strong style="color:{col};font-family:JetBrains Mono,monospace">{pct}</strong>/100 consensus · {tk}, <span style="color:#e2e8f0">{lab}</span>{_abs}{_sw}{_rg}</div>"""
 
 
 def _recent_resistance_high(df: pd.DataFrame, bars: int = 20) -> Optional[float]:
@@ -975,7 +975,7 @@ def traders_note_markdown(
     squeeze = bbwp is not None and bbwp <= 0.15
     perfect_storm = bool(c.get("coil_active") and c.get("absorption") and c.get("market_leader"))
     parts = [
-        f"**Trader's note — {tk}** is trading near **${px:,.2f}** ({chg:+.2f}% vs prior close). "
+        f"**Trader's note: {tk}** is trading near **${px:,.2f}** ({chg:+.2f}% vs prior close). "
         f"Daily structure reads **{st}**; weekly bias **{wk}**. Quant Edge sits near **{qs:.0f}/100**."
     ]
     if turbo_desk:
@@ -988,30 +988,30 @@ def traders_note_markdown(
             )
         elif ar <= 92.0:
             parts.append(
-                f"**Alpha realization** (~**{ar:.0f}%**): the live edge looks **soft vs entry** — signal may be **rotting**; revisit size and thesis."
+                f"**Alpha realization** (~**{ar:.0f}%**): the live edge looks **soft vs entry**: signal may be **rotting**; revisit size and thesis."
             )
         else:
             parts.append(
-                f"**Alpha realization** ~**{ar:.0f}%** vs **qs_at_entry** — roughly **in line** with the score at track time."
+                f"**Alpha realization** ~**{ar:.0f}%** vs **qs_at_entry**: roughly **in line** with the score at track time."
             )
     if c.get("god_tier_unicorn"):
         hh = c.get("hurst_exponent")
-        hs = f"{float(hh):.2f}" if hh is not None and np.isfinite(float(hh)) else "—"
+        hs = f"{float(hh):.2f}" if hh is not None and np.isfinite(float(hh)) else "n/a"
         parts.append(
             # Plain-English rewrite: FFD→"Stationary Signal", Hurst→"Trend Persistence"
             # Model internals (Hurst H-value, FFD acronym) should never appear to end users.
-            "**Unicorn Setup ★ — All four institutional filters aligned:** "
+            "**Unicorn Setup ★: All four institutional filters aligned:** "
             "**Trend persistence is high** (momentum is self-reinforcing, not random), "
-            "**fundamentals gate is on** (strong free-cash-flow), and a **whale sweep is live** — "
+            "**fundamentals gate is on** (strong free-cash-flow), and a **whale sweep is live**: "
             f"the desk sees this confluence (persistence score **{hs}**) very rarely. "
-            "**Rare tape — not a forecast:** manage gap risk and headline risk before sizing up."
+            "**Rare tape: not a forecast:** manage gap risk and headline risk before sizing up."
         )
     elif c.get("fundamental_fcf_strong") and isinstance(c.get("fundamental_sieve"), dict):
         fs = c.get("fundamental_sieve") or {}
         fy = fs.get("fcf_yield_pct")
         fy_s = f"{float(fy):.2f}%" if fy is not None and np.isfinite(float(fy)) else "strong"
         parts.append(
-            f"**Fundamental sieve (cash / EV):** FCF yield proxy **{fy_s}** with **efficiency** tilt — you are not only trading prints; see scanner **fundamental_sieve** for detail."
+            f"**Fundamental sieve (cash / EV):** FCF yield proxy **{fy_s}** with **efficiency** tilt, you are not only trading prints; see scanner **fundamental_sieve** for detail."
         )
     if perfect_storm:
         rsv = c.get("rs_spy_ratio")
@@ -1019,8 +1019,8 @@ def traders_note_markdown(
         ad = c.get("absorption_detail") or {}
         rp = ad.get("last_return_pct")
         thr = ad.get("flat_threshold_pct")
-        rs_s = f"{float(rsv):.2f}" if rsv is not None and np.isfinite(float(rsv)) else "—"
-        vz_s = f"{float(vzv):+.1f}" if vzv is not None and np.isfinite(float(vzv)) else "—"
+        rs_s = f"{float(rsv):.2f}" if rsv is not None and np.isfinite(float(rsv)) else "n/a"
+        vz_s = f"{float(vzv):+.1f}" if vzv is not None and np.isfinite(float(vzv)) else "n/a"
         coil_s = f"≤{_COIL_BBW_PCTILE_MAX:.0%} BBW tile (COIL)"
         abs_s = (
             f"quiet close **{float(rp):+.2f}%** vs ≤**{float(thr):.2f}%** band"
@@ -1030,11 +1030,11 @@ def traders_note_markdown(
         rh = _recent_resistance_high(df, 20)
         res_s = f"**${rh:,.2f}** (20d high)" if rh is not None and np.isfinite(rh) else "**the nearest structural high**"
         parts.append(
-            f"**Unicorn alert — high-conviction stack:** **{tk}** is a **market leader** "
+            f"**Unicorn alert: high-conviction stack:** **{tk}** is a **market leader** "
             f"(**RS ≈ {rs_s}** vs SPY on the ~90d batch; **volume Z {vz_s}** whale) **and** shows **institutional absorption** "
-            f"(Iceberg: {abs_s}). **COIL** is live (**{coil_s}**) — often **compressed energy** while size trades "
+            f"(Iceberg: {abs_s}). **COIL** is live (**{coil_s}**), often **compressed energy** while size trades "
             "without marking price. **If price clears** "
-            f"{res_s}, the tape is set up for a **sharp resolution**; it is **not** a promise of direction — "
+            f"{res_s}, the tape is set up for a **sharp resolution**; it is **not** a promise of direction, "
             "confirm with your levels and **size** using the desk **conviction** tier."
         )
     elif squeeze:
@@ -1047,11 +1047,11 @@ def traders_note_markdown(
         if rsv is not None and vzv is not None and np.isfinite(float(rsv)) and np.isfinite(float(vzv)):
             parts.append(
                 f"**Market leader:** **RS vs SPY (~90d batch ratio) {float(rsv):.2f}** (>1 = outperformance) **and** "
-                f"**volume Z {float(vzv):+.1f}** (whale, >4σ vs 20d) — leadership on the global snapshot benchmark."
+                f"**volume Z {float(vzv):+.1f}** (whale, >4σ vs 20d), leadership on the global snapshot benchmark."
             )
         else:
             parts.append(
-                "**Market leader:** RS outperformance vs SPY on the batch benchmark plus whale volume — see momentum row."
+                "**Market leader:** RS outperformance vs SPY on the batch benchmark plus whale volume, see momentum row."
             )
     if not perfect_storm and c.get("absorption"):
         ad = c.get("absorption_detail") or {}
@@ -1062,16 +1062,16 @@ def traders_note_markdown(
             parts.append(
                 f"**Whale trap / absorption:** volume ~**{vz_a:.1f}σ** vs the prior 20 sessions, but the session closed only "
                 f"**{rp:+.2f}%** vs a **≤{thr:.2f}%** “quiet-close” band (ATR-scaled). "
-                "Large size may be changing hands without yet marking price — watch the next sessions for resolution."
+                "Large size may be changing hands without yet marking price, watch the next sessions for resolution."
             )
         else:
             parts.append(
-                "**Whale trap / absorption:** extreme volume with a muted daily close — watch for a volatility release."
+                "**Whale trap / absorption:** extreme volume with a muted daily close, watch for a volatility release."
             )
     elif not perfect_storm and vz is not None:
         if vz >= 4.0:
             parts.append(
-                f"Today's volume is roughly **{vz:.1f}σ** above its recent norm — watch for **institutional footprint**."
+                f"Today's volume is roughly **{vz:.1f}σ** above its recent norm, watch for **institutional footprint**."
             )
         elif vz >= 2.0:
             parts.append(f"Volume is elevated (**{vz:.1f}σ** vs recent sessions).")
@@ -1084,21 +1084,21 @@ def traders_note_markdown(
         if dp_n is not None and np.isfinite(float(dp_n)):
             parts.append(
                 f"Versus a **{_VWAP_ROLL_BARS}-bar** rolling VWAP (daily OHLCV proxy), spot is **{float(dp_n):+.2f}%** "
-                f"from VWAP with deviation **Z ≈ {float(wz_note):+.1f}** vs its own recent history — "
+                f"from VWAP with deviation **Z ≈ {float(wz_note):+.1f}** vs its own recent history, "
                 "pair with volume for an **urgency** read (not intraday session VWAP)."
             )
         else:
             parts.append(
-                f"**VWAP stretch:** deviation Z ≈ **{float(wz_note):+.1f}** vs recent **{_VWAP_ROLL_BARS}-bar** VWAP — "
+                f"**VWAP stretch:** deviation Z ≈ **{float(wz_note):+.1f}** vs recent **{_VWAP_ROLL_BARS}-bar** VWAP, "
                 "context for institutional footprint."
             )
     if stop_px and stop_px > 0:
         parts.append(
-            f"An **ATR-style risk anchor** (~1.5× 14d ATR below spot) sits near **${stop_px:,.2f}** — "
+            f"An **ATR-style risk anchor** (~1.5× 14d ATR below spot) sits near **${stop_px:,.2f}**: "
             "not a broker order; size your own risk."
         )
     else:
-        parts.append("ATR is thin or missing — define risk with your own stop rule.")
+        parts.append("ATR is thin or missing, define risk with your own stop rule.")
     return " ".join(parts)
 
 

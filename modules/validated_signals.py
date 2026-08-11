@@ -1,4 +1,4 @@
-"""Validated signals — evidence-backed strategy logic from the Aug 2026 research program.
+"""Validated signals: evidence-backed strategy logic from the Aug 2026 research program.
 
 Every function here corresponds to a backtested, adversarially-verified result.
 Nothing in this module is folklore. Provenance for each rule is documented in
@@ -9,7 +9,7 @@ Summary of evidence status:
                            positive in both data halves (86 sessions, 5m bars).
   Swing pullback (SMA20) : PROMOTED. n=413 trades / 18mo / 34 symbols,
                            +125.9 bps/trade (replicated v1's +127.6), PF 1.39,
-                           t=1.81, bootstrap 95% CI [+0.8, +271.8] — fully above 0.
+                           t=1.81, bootstrap 95% CI [+0.8, +271.8], fully above 0.
   Pink Diamond exit      : DISPROVEN as a sell signal. 1,022 fires -> +1.8% avg
                            forward 5d return. Use mechanical_exit() instead.
   Compression breakout   : lottery profile (3 trades = all profit). Not exposed
@@ -130,7 +130,7 @@ def swing_pullback_signal(daily: pd.DataFrame) -> dict | None:
       - Trigger: latest completed close back ABOVE SMA20 (the reclaim).
       - Entry: next open. Stop: min(low, 5 sessions) - 0.5 * ATR14.
       - Exits: 3R target OR next-open exit when a close < SMA20 OR 10-session
-        time exit — whichever comes first.
+        time exit: whichever comes first.
       - Caller responsibility: skip entries within ~3 sessions of earnings
         (earnings avoidance was NOT testable from OHLCV; treat as mandatory
         common sense, not backtested).
@@ -221,8 +221,8 @@ def mechanical_exit(
     stop = entry_price - atr_mult * float(atr14.iloc[entry_index])
     last = len(d) - 1
     # Audit finding: the old scan was `d["low"].iloc[entry_index : last + 1].min() <= stop`.
-    # Two defects. (1) It started at `entry_index` INCLUSIVE, so the entry bar's own low —
-    # printed before the position existed — could stop the trade out on day zero.
+    # Two defects. (1) It started at `entry_index` INCLUSIVE, so the entry bar's own low
+    # printed before the position existed: could stop the trade out on day zero.
     # (2) It never bounded the scan by the time exit, so once any later bar breached it
     # latched to "exit_stop" forever and reported a stop-out that happened *after* the
     # 15-session time exit had already closed the position. Walk forward instead and
@@ -248,11 +248,11 @@ def mechanical_exit(
 
 
 # ---------------------------------------------------------------------------
-# Diamonds v3 — rebuilt on evidence: Blue = a STATE to watch, Pink = TIGHTEN
+# Diamonds v3: rebuilt on evidence: Blue = a STATE to watch, Pink = TIGHTEN
 # ---------------------------------------------------------------------------
 
 def blue_diamond_rank(daily: pd.DataFrame) -> dict | None:
-    """Blue Diamond v3 — a watchlist RANKER, deliberately not a buy trigger.
+    """Blue Diamond v3: a watchlist RANKER, deliberately not a buy trigger.
 
     Evidence: the confluence score used as a direct entry produced regime beta
     (great in the 2025 melt-up, negative after). Used as a *ranking* of which
@@ -312,15 +312,15 @@ def blue_diamond_rank(daily: pd.DataFrame) -> dict | None:
         "setup_state": state,
         "next_step": next_step,
         "dist_above_sma20_atr": round(dist_sma20_atr, 2),
-        "note": "RANKER not trigger — entries come from validated triggers only",
+        "note": "RANKER not trigger, entries come from validated triggers only",
     }
 
 
 def pink_diamond_caution(daily: pd.DataFrame) -> dict | None:
-    """Pink Diamond v3 — a TIGHTEN signal, never a sell trigger.
+    """Pink Diamond v3: a TIGHTEN signal, never a sell trigger.
 
     Evidence: 1,022 historical pink fires were followed by POSITIVE average
-    forward returns (+1.8% 5d / +3.3% 10d) — selling on pink cut winners.
+    forward returns (+1.8% 5d / +3.3% 10d), selling on pink cut winners.
     But the pattern does mark extension/climax. The profitable response in
     testing was mechanical: stay in, RAISE the stop. See it -> you know
     YOUR STOP MOVES UP (and optionally take partial profits), nothing more.
@@ -363,7 +363,7 @@ def pink_diamond_caution(daily: pd.DataFrame) -> dict | None:
 
 
 # ---------------------------------------------------------------------------
-# Validation gate — the discipline that caught Blue Diamond v2's fake t=2.98
+# Validation gate: the discipline that caught Blue Diamond v2's fake t=2.98
 # ---------------------------------------------------------------------------
 
 def bootstrap_ci(returns, n_boot: int = 4000, seed: int = 42, alpha: float = 0.05):

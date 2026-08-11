@@ -74,5 +74,5 @@ def log_warn(context: str, error: Exception, *, ticker: str = "") -> None:
 
 
 # send_discord_webhook was removed in v24.0. Conviction hits are logged to
-# radar_hits.json and surfaced in the Radar History expander instead — the
+# radar_hits.json and surfaced in the Radar History expander instead, the
 # webhook path re-fired on every Streamlit rerun with no idempotency key.

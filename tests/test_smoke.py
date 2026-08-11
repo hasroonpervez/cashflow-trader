@@ -1,4 +1,4 @@
-"""Smoke tests — verify the app imports cleanly and build_context works."""
+"""Smoke tests: verify the app imports cleanly and build_context works."""
 from unittest.mock import MagicMock, patch
 
 import numpy as np

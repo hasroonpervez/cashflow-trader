@@ -26,7 +26,7 @@ _HMM_TOL = 0.15
 
 # (phrase, sentiment +1 bull / -1 bear, tier: forward-looking vs trailing)
 _NEWS_LEXICON = [
-    # Forward — higher Bayesian weight (guidance / outlook dominates mixed prints)
+    # Forward: higher Bayesian weight (guidance / outlook dominates mixed prints)
     ("raises full-year guidance", +1, "forward"),
     ("raises guidance", +1, "forward"),
     ("raised guidance", +1, "forward"),
@@ -54,7 +54,7 @@ _NEWS_LEXICON = [
     ("weak outlook", -1, "forward"),
     ("cautious outlook", -1, "forward"),
     ("disappointing guidance", -1, "forward"),
-    # Trailing — lower weight (backward-looking print)
+    # Trailing: lower weight (backward-looking print)
     ("missed earnings", -1, "trailing"),
     ("missed estimates", -1, "trailing"),
     ("misses estimates", -1, "trailing"),
@@ -68,7 +68,7 @@ _NEWS_LEXICON = [
     ("top line beat", +1, "trailing"),
     ("bottom line beat", +1, "trailing"),
     ("surprise profit", +1, "trailing"),
-    # Generic (medium tier — trailing-style weight)
+    # Generic (medium tier: trailing-style weight)
     ("upgrade", +1, "trailing"),
     ("downgrade", -1, "trailing"),
     ("bullish", +1, "trailing"),
@@ -93,14 +93,14 @@ def _regime_detection_cached(close_tuple: tuple, n_regimes: int = 3) -> dict:
     """HMM regime fit on a tuple-serialized close series (cacheable by st.cache_data).
 
     Called by QuantSentiment.regime_detection. Caching at 900 s avoids re-fitting a new
-    HMM on every call inside detect_diamonds (which iterates over 320 bars) — previously
+    HMM on every call inside detect_diamonds (which iterates over 320 bars), previously
     that caused O(n_bars × HMM_fit) latency on every quant-mode scan.
 
     3-STATE MODEL (default n_regimes=3):
-      State 0 → calm / low-vol (ideal for selling premium — theta decays cleanly)
+      State 0 → calm / low-vol (ideal for selling premium, theta decays cleanly)
       State 1 → medium-vol / transitional (reduce size, remain selective)
       State 2 → high-vol / stress (size down significantly; avoid new short premium)
-    States are sorted by mean vol ascending so state 0 is ALWAYS the calmest — this
+    States are sorted by mean vol ascending so state 0 is ALWAYS the calmest, this
     gives deterministic labeling regardless of random initialization or ticker.
     """
     from .ta import TA
@@ -140,11 +140,11 @@ def _regime_detection_cached(close_tuple: tuple, n_regimes: int = 3) -> dict:
     #
     # WHY 3 STATES:
     # A 2-state model (calm / high-vol) conflates "good uptrend + low vol" with
-    # "good uptrend + elevated vol" — two very different environments for options
+    # "good uptrend + elevated vol": two very different environments for options
     # premium sellers. A 3-state model separates:
-    #   • State 0: calm trending — low vol, clear directional drift
-    #   • State 1: transitional — moderate vol, signal quality degrades
-    #   • State 2: stress — high vol, choppy, option sellers at elevated risk
+    #   • State 0: calm trending, low vol, clear directional drift
+    #   • State 1: transitional, moderate vol, signal quality degrades
+    #   • State 2: stress, high vol, choppy, option sellers at elevated risk
     # The separation allows regime-conditional Kelly to apply a graduated haircut
     # rather than a binary switch.
     model = hmm.GaussianHMM(
@@ -163,7 +163,7 @@ def _regime_detection_cached(close_tuple: tuple, n_regimes: int = 3) -> dict:
         probabilities = model.predict_proba(X)
 
         # ── DETERMINISTIC STATE LABELING ────────────────────────────────────
-        # HMM does NOT guarantee consistent state indices across fits — without
+        # HMM does NOT guarantee consistent state indices across fits, without
         # sorting, state 0 could be the high-vol regime on one ticker and the
         # calm regime on another. We fix this by sorting states ascending by
         # their mean volatility feature (column 1 in our [returns, vol] matrix).
@@ -193,7 +193,7 @@ def _regime_detection_cached(close_tuple: tuple, n_regimes: int = 3) -> dict:
 class QuantSentiment:
     @staticmethod
     def regime_detection(df, n_regimes=3):
-        """HMM regime detection — delegates to the cached function to avoid re-fitting
+        """HMM regime detection: delegates to the cached function to avoid re-fitting
         on every call (critical: was previously uncached and called inside a 320-bar loop).
 
         Returns dict of state probabilities for the latest bar.
@@ -387,7 +387,7 @@ class QuantBacktest:
         """
         Fast, vectorized historical backtest using a MOMENTUM/RSI PROXY score.
 
-        ⚠️  PROXY DISCLAIMER — READ BEFORE INTERPRETING RESULTS:
+        ⚠️  PROXY DISCLAIMER: READ BEFORE INTERPRETING RESULTS:
         This function uses a simplified surrogate formula:
             Hist_Edge = clip(0.4 × SMA50_trend_score + 0.6 × RSI − vol_penalty, 0, 100)
         where SMA50_trend_score ∈ {60 (above SMA50), 40 (below)} and vol_penalty = −20

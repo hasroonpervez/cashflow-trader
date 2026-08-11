@@ -1,4 +1,4 @@
-"""Black–Scholes Greeks extensions (vanna, charm)."""
+"""Black-Scholes Greeks extensions (vanna, charm)."""
 from modules.options import bs_greeks
 
 

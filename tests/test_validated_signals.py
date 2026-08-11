@@ -1,4 +1,4 @@
-"""Tests for modules/validated_signals.py — pure pandas/numpy, no app deps."""
+"""Tests for modules/validated_signals.py, pure pandas/numpy, no app deps."""
 import numpy as np
 import pandas as pd
 import pytest

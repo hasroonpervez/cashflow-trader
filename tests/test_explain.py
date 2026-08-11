@@ -1,4 +1,4 @@
-"""Tests for modules/explain.py — the shared progressive-disclosure toolkit.
+"""Tests for modules/explain.py, the shared progressive-disclosure toolkit.
 
 Two jobs:
   1. Guard the TERMS registry: every entry fully populated, keys consistent,
@@ -6,7 +6,7 @@ Two jobs:
   2. Cover the pure helpers (lookup, tooltip, tone, formatters) with
      hand-checked expected values.
 
-Everything here runs WITHOUT a Streamlit runtime — that is the point of the
+Everything here runs WITHOUT a Streamlit runtime, that is the point of the
 module's import discipline, so this file asserts it explicitly.
 
 Run:  python -m pytest tests/test_explain.py -q
@@ -77,7 +77,7 @@ def test_every_field_is_a_non_empty_string():
 
 
 def test_short_gloss_fits_a_tooltip():
-    # "3-6 word gloss" — allow a little slack, but nothing sentence-length.
+    # "3-6 word gloss": allow a little slack, but nothing sentence-length.
     for key, t in TERMS.items():
         n = len(t.short.split())
         assert 2 <= n <= 8, f"{key}.short is {n} words: {t.short!r}"
@@ -318,7 +318,7 @@ def test_money_formats_with_thousands_and_sign_outside():
     assert money(1234.5) == "$1,234.50"
     assert money(-1234.5) == "-$1,234.50"
     assert money(0) == "$0.00"
-    # Python's format uses banker's rounding on .5 — assert on an unambiguous value.
+    # Python's format uses banker's rounding on .5, assert on an unambiguous value.
     assert money(1234.6, decimals=0) == "$1,235"
 
 
@@ -351,10 +351,10 @@ def test_signed_always_shows_the_sign():
 
 def test_formatters_return_a_dash_for_unusable_input():
     for fn in (money, pct, ratio, score, compact, signed):
-        assert fn(None) == "—"
-        assert fn(float("nan")) == "—"
-        assert fn(float("inf")) == "—"
-        assert fn("not a number") == "—"
+        assert fn(None) == "n/a"
+        assert fn(float("nan")) == "n/a"
+        assert fn(float("inf")) == "n/a"
+        assert fn("not a number") == "n/a"
 
 
 def test_formatters_accept_a_custom_dash():
@@ -363,7 +363,7 @@ def test_formatters_accept_a_custom_dash():
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  Import discipline — the module must work with no Streamlit runtime
+#  Import discipline: the module must work with no Streamlit runtime
 # ═══════════════════════════════════════════════════════════════════════
 
 def test_streamlit_is_not_imported_at_module_scope():

@@ -1,4 +1,4 @@
-"""Asymmetry engine — rank by PAYOFF, not by score points.
+"""Asymmetry engine: rank by PAYOFF, not by score points.
 
 Why this module exists
 ----------------------
@@ -14,17 +14,17 @@ right before.
 This module measures the thing the label claims:
 
   * **Expected value** over an explicit discrete outcome distribution
-    (``expected_value`` / ``ev_rank``) — no additive scores anywhere.
-  * **Convexity** — a KNOWN, bounded loss against a large upside, with an
+    (``expected_value`` / ``ev_rank``): no additive scores anywhere.
+  * **Convexity**: a KNOWN, bounded loss against a large upside, with an
     explicit flag when the downside is not actually bounded
     (``convexity_score``).
-  * **Cheap optionality** — the classic IV rank / IV percentile screen
+  * **Cheap optionality**: the classic IV rank / IV percentile screen
     (``iv_rank``, ``iv_percentile``, ``iv_rank_series``).
   * **The coiled-spring setup** that precedes violent moves: low IV rank +
     volatility compression + small float / high short interest + a catalyst
     window (``coiled_spring_score``, ``catalyst_window``).
   * **Position size** under a power-law payoff (``kelly_fraction_skewed``).
-  * **Honesty** — precision / recall / empirical base rates of the screen,
+  * **Honesty**: precision / recall / empirical base rates of the screen,
     gated through the same ``validated_signals.promotion_gate`` bar
     (CI>0, split-half, n>=100) that the research program uses
     (``base_rate_report``). A screen that has not been base-rated reports as
@@ -116,7 +116,7 @@ def _normalize_ohlc(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _slice_causal(df: pd.DataFrame, index: Optional[int]) -> pd.DataFrame:
-    """Return rows ``[0 .. index]`` positionally — the ONLY data a function may see.
+    """Return rows ``[0 .. index]`` positionally, the ONLY data a function may see.
 
     This is the structural anti-lookahead guarantee: every series function in
     this module calls ``_slice_causal`` first and computes second, so rows
@@ -151,7 +151,7 @@ def _clip01(x: float) -> float:
 
 
 # ---------------------------------------------------------------------------
-# 1. Expected value — the replacement for additive score points
+# 1. Expected value, the replacement for additive score points
 # ---------------------------------------------------------------------------
 
 @dataclass
@@ -223,7 +223,7 @@ def expected_value(outcomes, *, prob_tolerance: float = 1e-6) -> Optional[EVResu
     a 12%-probability 10-bagger has an enormous U/D and can still be
     negative-EV. Ranking by either one alone gets you hurt.
 
-    Probabilities must sum to 1 within ``prob_tolerance`` — they are NOT
+    Probabilities must sum to 1 within ``prob_tolerance``, they are NOT
     renormalized, because renormalizing silently invents a distribution the
     caller did not specify.
 
@@ -240,7 +240,7 @@ def expected_value(outcomes, *, prob_tolerance: float = 1e-6) -> Optional[EVResu
     if abs(total - 1.0) > prob_tolerance:
         raise ValueError(
             f"probabilities must sum to 1.0 (got {total:.6f}); "
-            "this function does not renormalize — fix the distribution"
+            "this function does not renormalize: fix the distribution"
         )
 
     up_mask = y > 0
@@ -282,7 +282,7 @@ def ev_rank(candidates, *, prob_tolerance: float = 1e-6) -> list[dict]:
 
     Sort key: EV descending, then asymmetry ratio descending, then name.
     Candidates whose distribution cannot be evaluated (empty) are appended
-    last with ``ev=None`` and flag ``unrankable`` — never silently dropped
+    last with ``ev=None`` and flag ``unrankable``: never silently dropped
     and never ranked as if they scored zero.
 
     This is the whole point of the module in one function: two names with the
@@ -328,7 +328,7 @@ def ev_rank(candidates, *, prob_tolerance: float = 1e-6) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# 2. Convexity — bounded KNOWN loss vs large upside
+# 2. Convexity, bounded KNOWN loss vs large upside
 # ---------------------------------------------------------------------------
 
 DEFAULT_ATR_EXPANSION = 3.0   # a range-expansion day/leg is ~3 ATR, not 1
@@ -378,11 +378,11 @@ def convexity_score(
         convexity_ratio   = upside_frac / bounded_loss_frac
 
     Upside source, in priority order:
-      1. ``upside_target``            — an explicit price level from the caller
+      1. ``upside_target``, an explicit price level from the caller
          (e.g. the implied move via ``Opt.calc_expected_move``, a measured
          move, a prior high).
       2. otherwise the SMALLER of the two structural estimates that are
-         available — ``atr * atr_expansion_mult`` and
+         available: ``atr * atr_expansion_mult`` and
          ``entry * prior_range_expansion_frac``. Taking the smaller is a
          deliberate honesty default: the optimistic estimate is still
          reported in ``components``, but the headline ratio does not get to
@@ -506,7 +506,7 @@ def convexity_score(
 
 
 # ---------------------------------------------------------------------------
-# 3. IV rank / IV percentile — the classic cheap-optionality screen
+# 3. IV rank / IV percentile, the classic cheap-optionality screen
 # ---------------------------------------------------------------------------
 
 IV_LOOKBACK = 252          # one trading year, the industry convention
@@ -546,7 +546,7 @@ def iv_rank(
     a volatility expansion pays twice (direction AND vega).
 
     ``iv_now`` defaults to the last observation of ``iv_history``. Only the
-    trailing ``lookback`` observations are used — the input is assumed to end
+    trailing ``lookback`` observations are used: the input is assumed to end
     at "now", so this is causal by construction.
 
     Degenerate cases return **None**, never 0.0 and never a ZeroDivisionError:
@@ -608,7 +608,7 @@ def iv_rank_series(
     lookback: int = IV_LOOKBACK,
     min_observations: int = IV_MIN_OBSERVATIONS,
 ) -> pd.Series:
-    """Vectorized rolling IV rank for a whole history — O(n), no python loop.
+    """Vectorized rolling IV rank for a whole history, O(n), no python loop.
 
     Uses pandas trailing ``rolling(lookback)`` min/max, so element ``i`` is
     computed from ``[i-lookback+1 .. i]`` only: causal by construction, and
@@ -659,7 +659,7 @@ def catalyst_window(days_to_event: Optional[float]) -> Optional[float]:
         event the premium is fully priced; the asymmetry lives in the ramp,
         where you can still buy the move before everyone else bids for it.
       * There is a deliberate DISCONTINUITY at d=0. That is not a modelling
-        artefact — the implied-vol crush after an event genuinely is a jump,
+        artefact: the implied-vol crush after an event genuinely is a jump,
         and smoothing it would misprice the single most predictable event in
         the options calendar.
       * After the event the multiplier starts at ``POST_FLOOR`` (0.6) and
@@ -689,7 +689,7 @@ def catalyst_component(days_to_event: Optional[float]) -> Optional[float]:
 
 
 # ---------------------------------------------------------------------------
-# 4. Coiled spring — the structural setup that precedes violent moves
+# 4. Coiled spring, the structural setup that precedes violent moves
 # ---------------------------------------------------------------------------
 
 SPRING_WEIGHTS = {
@@ -739,7 +739,7 @@ def coiled_spring_score(
       short_interest    = clip01( short_interest_pct / 20 )
       catalyst          = catalyst_component(days_to_event)
 
-    Aggregation — the part that matters
+    Aggregation: the part that matters
     -----------------------------------
         score      = 100 * sum_{present} w_i c_i / sum_{present} w_i
         confidence = sum_{present} w_i          (1.0 only when all are known)
@@ -834,7 +834,7 @@ def kelly_fraction_skewed(
     fraction_of_full: float = DEFAULT_KELLY_FRACTION,
     max_fraction: float = MAX_KELLY_FRACTION,
 ) -> Optional[KellyResult]:
-    """Kelly for a two-point ASYMMETRIC payoff — not the symmetric approximation.
+    """Kelly for a two-point ASYMMETRIC payoff: not the symmetric approximation.
 
     Parameters
     ----------
@@ -856,7 +856,7 @@ def kelly_fraction_skewed(
     symmetric "edge/odds" shortcut ``(p*b - q)/b`` is only correct for
     ``a = 1`` and quietly over-bets whenever the real loss is partial, which
     is exactly the case this module cares about. Note the shape at large
-    ``b``: ``f*`` converges to ``p`` — a 100x payoff does NOT justify a
+    ``b``: ``f*`` converges to ``p``, a 100x payoff does NOT justify a
     bigger bet than a 10x payoff at the same win probability. That is the
     result additive "10x potential" scores never encode.
 
@@ -872,7 +872,7 @@ def kelly_fraction_skewed(
        expiry), so the modelled ``a`` is optimistic.
     3. Kelly assumes infinite repetitions of an i.i.d. bet with no path
        dependence. Real accounts have margin calls, correlated positions and
-       a finite career — ruin is absorbing, and the log-utility argument
+       a finite career: ruin is absorbing, and the log-utility argument
        does not price that.
     Hence ``fraction_of_full=0.25`` (quarter Kelly, the standard practitioner
     haircut: ~94% of the growth at ~44% of the volatility under a correct
@@ -881,7 +881,7 @@ def kelly_fraction_skewed(
 
     Returns None if any input is missing. Raises ValueError on out-of-domain
     inputs. ``recommended_fraction`` is 0.0 whenever the edge is non-positive
-    — no edge means no bet, however large the payoff multiple.
+: no edge means no bet, however large the payoff multiple.
     """
     p = _finite(p_win)
     b = _finite(win_mult)
@@ -934,7 +934,7 @@ def kelly_fraction_skewed(
 
 
 # ---------------------------------------------------------------------------
-# 7. Base rates — the honesty layer
+# 7. Base rates, the honesty layer
 # ---------------------------------------------------------------------------
 
 # Fractional TOTAL return thresholds. +1.0 = doubled, +9.0 = 10-bagger.
@@ -974,7 +974,7 @@ def base_rate_report(
 
     Parameters
     ----------
-    flags           : boolean per historical candidate — did the screen fire?
+    flags           : boolean per historical candidate, did the screen fire?
     forward_returns : realized forward FRACTIONAL return for the same
                       candidate (``+9.0`` = 10-bagger, ``-1.0`` = wipeout).
 
@@ -991,7 +991,7 @@ def base_rate_report(
     Validation
     ----------
     The flagged subset's returns are pushed through
-    ``validated_signals.promotion_gate`` — the SAME bar as every other
+    ``validated_signals.promotion_gate``, the SAME bar as every other
     strategy in this codebase: n >= ``min_trades``, bootstrap 95% CI strictly
     above zero, and positive expectancy in BOTH chronological halves (the
     check that caught Blue Diamond v2's fake t=2.98).
@@ -1011,7 +1011,7 @@ def base_rate_report(
             screen_name=str(screen_name),
             validation_status=STATUS_UNVALIDATED,
             flags=["never-base-rated"],
-            note="No historical flags/returns supplied — this screen has never been measured.",
+            note="No historical flags/returns supplied: this screen has never been measured.",
         )
 
     f = np.asarray(list(flags)).astype(bool)
@@ -1087,7 +1087,7 @@ def base_rate_report(
 
 
 # ---------------------------------------------------------------------------
-# 8. The verdict — combiner that CANNOT be confident on partial data
+# 8. The verdict, combiner that CANNOT be confident on partial data
 # ---------------------------------------------------------------------------
 
 PILLAR_WEIGHTS = {"ev": 0.30, "convexity": 0.25, "spring": 0.20, "base_rate": 0.25}
@@ -1157,7 +1157,7 @@ def asymmetry_verdict(
             downside unbounded/unknown    -> <= 0.35
 
     ``is_confident`` additionally requires all four pillars, a ``validated``
-    base rate and a bounded downside as *preconditions*, not as arithmetic —
+    base rate and a bounded downside as *preconditions*, not as arithmetic
     so partial data cannot produce a confident verdict under any weighting.
     That invariant is asserted in
     ``test_verdict_partial_data_can_never_be_confident``.
@@ -1228,15 +1228,15 @@ def asymmetry_verdict(
 def _verdict_line(v: AsymmetryVerdict, cvx: Optional[ConvexityResult]) -> str:
     """One plain-English line. No jargon, no false confidence."""
     if v.ev is None:
-        return ("No expected value could be computed — supply an outcome distribution. "
+        return ("No expected value could be computed: supply an outcome distribution. "
                 "Ranking without one is just score points again.")
     if v.ev <= 0:
-        return (f"SKIP: expected value is {v.ev * 100:.0f}% — the payoff does not "
+        return (f"SKIP: expected value is {v.ev * 100:.0f}%, the payoff does not "
                 f"pay for the losses, however exciting the setup looks.")
     if cvx is not None and cvx.downside_bounded is False:
         why = ", ".join(x for x in cvx.flags if x in ("gap-risk", "no-liquid-stop")) or "unbounded"
         return (f"NOT ASYMMETRIC: the downside is not actually bounded ({why}) "
-                f"— you cannot rely on the stop, so treat the loss as total.")
+                f"you cannot rely on the stop, so treat the loss as total.")
     if v.validation_status == STATUS_UNVALIDATED:
         return (f"UNVALIDATED: +{v.ev * 100:.0f}% expected value on paper, but this "
                 f"screen has never been base-rated. Paper-trade it, do not size it.")
@@ -1246,7 +1246,7 @@ def _verdict_line(v: AsymmetryVerdict, cvx: Optional[ConvexityResult]) -> str:
     if not v.is_confident:
         gaps = ", ".join(f.split(":", 1)[1] for f in v.flags if f.startswith("missing-pillar"))
         return (f"PARTIAL: +{v.ev * 100:.0f}% expected value, but confidence is only "
-                f"{v.confidence:.0%} — missing {gaps or 'inputs'}.")
+                f"{v.confidence:.0%}, missing {gaps or 'inputs'}.")
     risk = f"{cvx.bounded_loss_frac * 100:.0f}%" if cvx and cvx.bounded_loss_frac else "the stop"
     up = f"{cvx.upside_frac * 100:.0f}%" if cvx and cvx.upside_frac else "the target"
     size = f", size ~{v.kelly_fraction:.1%} of bankroll" if v.kelly_fraction else ""
@@ -1256,7 +1256,7 @@ def _verdict_line(v: AsymmetryVerdict, cvx: Optional[ConvexityResult]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Price-series inputs — every one of these is causal by construction
+# Price-series inputs: every one of these is causal by construction
 # ---------------------------------------------------------------------------
 
 def atr_at(daily: pd.DataFrame, index: Optional[int] = None, *, period: int = 14) -> Optional[float]:
@@ -1328,7 +1328,7 @@ def realized_vol_compression(
 ) -> Optional[float]:
     """Volatility compression ratio = stdev(logret, fast) / stdev(logret, slow).
 
-    Below 1.0 means the name is quieter than its own baseline — the squeeze
+    Below 1.0 means the name is quieter than its own baseline, the squeeze
     that precedes range expansion. Feed it straight into
     ``coiled_spring_score(vol_compression_ratio=...)``.
 

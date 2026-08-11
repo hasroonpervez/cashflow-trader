@@ -62,7 +62,7 @@ def test_same_basis_is_comparable_and_untagged_is_ignored():
 # --------------------------------------------------------------------------
 
 def test_macro_defaults_are_absent_not_fabricated():
-    """Regression: these used to be VIX 20.0 / 10Y 4.5% — plausible, and undetectable."""
+    """Regression: these used to be VIX 20.0 / 10Y 4.5%, plausible, and undetectable."""
     from modules.data import _macro_defaults_tuple
 
     data, hist = _macro_defaults_tuple()
@@ -183,7 +183,7 @@ def _st(total=50, bullish=40):
 
 
 def test_missing_price_frame_flags_partial_data():
-    """35% of the composite (volume 0.20 + earliness 0.15) is unscored — say so."""
+    """35% of the composite (volume 0.20 + earliness 0.15) is unscored, say so."""
     from modules.sentiment_radar import build_row
 
     row = build_row(
@@ -224,7 +224,7 @@ def test_price_missing_row_scores_below_identical_row_with_price():
 
 
 # --------------------------------------------------------------------------
-# 5. Vanna sign — was positive, telling a short-call writer that an IV spike
+# 5. Vanna sign, was positive, telling a short-call writer that an IV spike
 #    reduces their delta when it increases it.  vanna = -phi(d1)*d2/sigma
 # --------------------------------------------------------------------------
 
@@ -280,7 +280,7 @@ def test_vanna_sign_flips_across_the_money():
 
 
 # --------------------------------------------------------------------------
-# 6. Tape pillar operator precedence — `a + b if c else d` binds as
+# 6. Tape pillar operator precedence, `a + b if c else d` binds as
 #    `(a + b) if c else d`, so a flat OBV threw away the MACD base entirely.
 # --------------------------------------------------------------------------
 

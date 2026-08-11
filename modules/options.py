@@ -1,5 +1,5 @@
 """
-Options analytics — Black-Scholes, Greeks, EV, Kelly, Volatility Skew,
+Options analytics: Black-Scholes, Greeks, EV, Kelly, Volatility Skew,
 Quant Edge Score, Gold Zone, GEX / gamma-flip engine, Confluence Points,
 Diamond Signals, Opt scanner.
 """
@@ -222,7 +222,7 @@ def bs_corrado_su(S, K, T, r, sigma, skew=0.0, kurt=3.0, option_type="call"):
 
 # Audit #1: hard ceiling on any single-name Kelly allocation. `Opt.calc_kelly_haircut`
 # can return 1.20 (a "true hedge" boost) and `pop_mult` reaches ~1.085 at PoP 100, so the
-# cap has to be applied to the *fully adjusted* number — never to the raw Merton fraction.
+# cap has to be applied to the *fully adjusted* number, never to the raw Merton fraction.
 CONTINUOUS_KELLY_MAX_ALLOCATION = 0.25
 
 
@@ -272,7 +272,7 @@ def continuous_kelly(
 
 
 # ═════════════════════════════════════════════════════════════════════════
-#  VOLATILITY SKEW — detects institutional hedging
+#  VOLATILITY SKEW: detects institutional hedging
 # ═════════════════════════════════════════════════════════════════════════
 
 def calc_vol_skew(price, calls_df, puts_df, otm_pct=0.10):
@@ -385,7 +385,7 @@ def _quant_edge_pillars(df, vix_val):
 
 
 def quant_edge_score(df, vix_val=None, options_data=None, use_quant=False):
-    """Composite 0–100 from five pillars (20% each in the retail core).
+    """Composite 0-100 from five pillars (20% each in the retail core).
 
     When ``use_quant`` is True, an FFD + HMM regime track is **blended** with that retail
     core (default 62% retail / 38% institutional) so toggling models does not swap the
@@ -517,7 +517,7 @@ def scan_watchlist_edge_rows(
 
 
 def weekly_trend_label(df_wk):
-    """Weekly bias — 4-signal voting: MACD line vs signal, price vs EMA-20,
+    """Weekly bias: 4-signal voting: MACD line vs signal, price vs EMA-20,
     RSI(14) regime, and OBV trend.  Requires ≥3/4 agreement for BULLISH/BEARISH;
     otherwise MIXED. Stronger than the previous 2-signal version which was prone
     to false BULLISH calls in chop above EMA with fading MACD."""
@@ -532,24 +532,24 @@ def weekly_trend_label(df_wk):
 
         price = safe_float(safe_last(close), 0.0)
 
-        # Signal 1 — MACD line vs signal line
+        # Signal 1: MACD line vs signal line
         ml, sl, _ = TA.macd(close, 12, 26, 9)
         macd_bull = safe_float(safe_last(ml), 0.0) > safe_float(safe_last(sl), 0.0)
 
-        # Signal 2 — Price vs EMA-20
+        # Signal 2: Price vs EMA-20
         e20 = safe_float(safe_last(TA.ema(close, 20)), 0.0)
         above_ema = price > e20 if e20 > 0 else False
 
-        # Signal 3 — RSI regime (>55 bull, <45 bear, else neutral → skip vote)
+        # Signal 3: RSI regime (>55 bull, <45 bear, else neutral → skip vote)
         rsi_v = safe_float(safe_last(TA.rsi(close, 14)), 50.0)
         if rsi_v > 55:
             rsi_bull = True
         elif rsi_v < 45:
             rsi_bull = False
         else:
-            rsi_bull = None  # neutral — no vote
+            rsi_bull = None  # neutral: no vote
 
-        # Signal 4 — OBV rising over last 8 bars
+        # Signal 4: OBV rising over last 8 bars
         if "Volume" in df_wk.columns and len(df_wk) >= 20:
             obv_s = TA.obv(df_wk.tail(20))
             obv_bull = safe_float(safe_last(obv_s), 0.0) > safe_float(obv_s.iloc[-8] if len(obv_s) >= 8 else obv_s.iloc[0], 0.0)
@@ -575,7 +575,7 @@ def weekly_trend_label(df_wk):
 
 
 # ═════════════════════════════════════════════════════════════════════════
-#  GOLD ZONE — dynamic confluence support/resistance
+#  GOLD ZONE: dynamic confluence support/resistance
 # ═════════════════════════════════════════════════════════════════════════
 
 @st.cache_data(ttl=120, show_spinner=False)
@@ -634,11 +634,11 @@ def calc_gold_zone(df, df_wk=None, gamma_flip_price=None):
 
 
 # ═════════════════════════════════════════════════════════════════════════
-#  CONFLUENCE POINTS — 0-to-9 scoring (Startup.io-inspired, enhanced)
+#  CONFLUENCE POINTS: 0-to-9 scoring (Startup.io-inspired, enhanced)
 # ═════════════════════════════════════════════════════════════════════════
 
 def _calc_confluence_points_core(df, df_wk=None, vix_val=None, gold_zone_price=None, rsi_period=14):
-    """Same scoring as the dashboard confluence meter — not cached.
+    """Same scoring as the dashboard confluence meter, not cached.
     Safe to call on ``df.iloc[:i+1]`` for point-in-time diamond detection.
     Pass ``gold_zone_price`` when the caller already computed Gold Zone on the same frame to avoid duplicate work."""
     score = 0
@@ -711,7 +711,7 @@ def calc_confluence_points(df, df_wk=None, vix_val=None, gold_zone_price=None, r
 
 
 # ═════════════════════════════════════════════════════════════════════════
-#  DIAMOND SIGNAL DETECTION — Blue (buy) & Pink (exit/take-profit)
+#  DIAMOND SIGNAL DETECTION: Blue (buy) & Pink (exit/take-profit)
 # ═════════════════════════════════════════════════════════════════════════
 
 def _blue_diamond_volume_gate(sub):
@@ -727,7 +727,7 @@ def _blue_diamond_volume_gate(sub):
 
 def _blue_diamond_institutional_ok(sub):
     """Filter manic blue entries: skip only true blow-offs (ATR in top ~1% of its window)
-    with weak participation. Normal trend days often sit near rolling ATR highs — those
+    with weak participation. Normal trend days often sit near rolling ATR highs, those
     were incorrectly blocked before, so blues never matched the chart while pinks could still fire."""
     if len(sub) < 22:
         return False
@@ -744,7 +744,7 @@ def _blue_diamond_institutional_ok(sub):
     atr_clean = atr.iloc[-win:].dropna()
     if atr_clean.empty:
         return True
-    # Rank of today's ATR in the window (1.0 = at/above everyone) — block only top-tier expansion + weak vol
+    # Rank of today's ATR in the window (1.0 = at/above everyone), block only top-tier expansion + weak vol
     rank = float((atr_clean <= ai).sum()) / len(atr_clean)
     if rank >= 0.99 and vol < 1.05 * vma:
         return False
@@ -833,8 +833,8 @@ def _causal_weekly_slice(df_wk, ts):
 
     Audit #4: ``detect_diamonds`` computed ``weekly_trend_label`` once from the complete
     weekly frame and then applied it as a per-bar gate, and passed the unsliced weekly frame
-    into the per-bar confluence call. Slicing with a plain ``.loc[:ts]`` is not enough — the
-    weekly bar that *contains* ``ts`` still carries that week's later sessions — so any label
+    into the per-bar confluence call. Slicing with a plain ``.loc[:ts]`` is not enough, the
+    weekly bar that *contains* ``ts`` still carries that week's later sessions, so any label
     inside the trailing 6 days of ``ts`` is dropped too.
 
     This repo produces weekly frames two ways, with OPPOSITE label conventions:
@@ -845,7 +845,7 @@ def _causal_weekly_slice(df_wk, ts):
                                            (Friday stamp; the bar closed ON that date)
 
     A flat ``ts - 6 days`` is exact for the first and over-truncates the second by a
-    full week — on a Monday-to-Wednesday ``ts`` it discards the most recent *already
+    full week: on a Monday-to-Wednesday ``ts`` it discards the most recent *already
     closed* week, leaving the gate's weekly bias up to ~12 days stale and able to
     disagree with the "Weekly Trend" label the dashboard renders. So derive each bar's
     actual close date from the label convention instead of assuming one.
@@ -1002,13 +1002,13 @@ def detect_diamonds(
         size_suggestion = 0
         quant_exit_price = 0.0
 
-        # HMM / quant sizing is expensive — run only when retail already says blue (was: every bar × O(n) HMM).
+        # HMM / quant sizing is expensive: run only when retail already says blue (was: every bar × O(n) HMM).
         if use_quant and is_blue_diamond:
             try:
                 from .sentiment import QuantSentiment
                 regime_probs = QuantSentiment.regime_detection(sub)
                 # 3-state model: state 0=calm, state 1=medium-vol, state 2=stress.
-                # For diamond confirmation we compute a "stress exposure" score —
+                # For diamond confirmation we compute a "stress exposure" score
                 # the weighted probability of NOT being in the calm state.
                 # Original 2-state gate: calm_prob < 0.75 → reject.
                 # 3-state equivalent: stress_exposure > 0.25 → reject.
@@ -1113,7 +1113,7 @@ def detect_diamonds(
             })
 
         # Pink: collapse or RSI exhaustion. Audit (medium): the weekly guard here read
-        # `if wk_bias in ("BEARISH", "MIXED", "UNKNOWN", "BULLISH")` — all four values
+        # `if wk_bias in ("BEARISH", "MIXED", "UNKNOWN", "BULLISH")`, all four values
         # `weekly_trend_label` can return, i.e. a tautology dressed as a filter. Removed
         # rather than tightened: pink is a de-risk flag and is deliberately weekly-agnostic
         # (it must fire inside extended BULLISH runs, which is the whole point of a fade).
@@ -1129,7 +1129,7 @@ def detect_diamonds(
 def _diamond_win_rate_core(df, diamonds, forward_bars, side="blue"):
     """Forward ``forward_bars`` outcome stats for a pre-filtered diamond list.
 
-    Audit #23: ``side`` selects which instrument is measured — ``"blue"`` (long entries),
+    Audit #23: ``side`` selects which instrument is measured, ``"blue"`` (long entries),
     ``"pink"`` (short / de-risk flags) or ``"all"`` (legacy blended read). Blue outcomes are
     scored long (win if price rose) and pink short (win if price fell); pooling them produced
     a single "win rate" that a trader necessarily misreads, e.g. 3 blue / 0 wins plus
@@ -1251,7 +1251,7 @@ def _bbw_series(close: pd.Series, p: int = 20, sd: float = 2.0) -> pd.Series:
 
 
 def _parse_yahoo_float_and_short(info: dict):
-    """Return (free_float_shares, short_interest_fraction 0–1) from yfinance ``info``; often incomplete."""
+    """Return (free_float_shares, short_interest_fraction 0-1) from yfinance ``info``; often incomplete."""
     if not isinstance(info, dict):
         return None, None
     fs = info.get("floatShares") or info.get("impliedSharesOutstanding")
@@ -1340,7 +1340,7 @@ def evaluate_asymmetric_convexity_sieve(
     return {"hit": hit, "gates": gates, "bbw_pctile": bbw_pctile, "vol_z": vol_z}
 
 
-# Audit #13: nine independent factors. Was ten — the tenth was a diamond/pre-diamond point
+# Audit #13: nine independent factors. Was ten, the tenth was a diamond/pre-diamond point
 # that re-entered `compute_explosion_score` through its own 30% and 15% terms.
 TEN_X_MAX_SCORE = 9
 
@@ -1430,14 +1430,14 @@ def score_10x_potential(df: pd.DataFrame, info: dict, *, spy_df: pd.DataFrame = 
 
     # Audit #13: these used to add +1 to the score. The same confluence event already enters
     # `compute_explosion_score` directly (Pre-Diamond 30% / Diamond presence 15%) *and* again
-    # through the 10x term, so one event was counted two or three times. The flags stay — they
-    # are useful context on the row — but they no longer earn a 10x point.
+    # through the 10x term, so one event was counted two or three times. The flags stay, they
+    # are useful context on the row: but they no longer earn a 10x point.
     if isinstance(latest_d, dict) and str(latest_d.get("type", "")).lower() == "blue":
         flags["blue_diamond"] = True
     elif isinstance(pre_diamond, dict) and bool(pre_diamond.get("is_pre_diamond")):
         flags["pre_diamond"] = str(pre_diamond.get("signal_strength") or "active")
 
-    # NOT placed in `flags` — renderers.py:2750 renders the Flags column as
+    # NOT placed in `flags`: renderers.py:2750 renders the Flags column as
     # ", ".join(sorted(flags.keys())), so a meta key there is displayed to the user
     # as though it were a matched factor. Import TEN_X_MAX_SCORE directly instead.
     return int(score), flags
@@ -1470,10 +1470,10 @@ def explosion_score_detail(scan_row: dict) -> dict:
         d_status = str(scan_row.get("d_status", ""))
         if "BLUE" in d_status:
             components["diamond"] = 15.0
-        # (audit #13: the old `elif "PINK" not in d_status: score += 0` was dead code — removed.)
+        # (audit #13: the old `elif "PINK" not in d_status: score += 0` was dead code, removed.)
 
         # Audit #13: two bugs here. (a) The unknown branch paid +5, so a ticker whose chain fetch
-        # failed — `gex_regime` defaults to "—" — collected half the GEX budget and outranked a
+        # failed: `gex_regime` defaults to "n/a": collected half the GEX budget and outranked a
         # measured name, biasing the radar toward illiquid tickers with no listed options.
         # Unknown now scores 0 and is reported via `gex_available`. (b) The sign was backwards for
         # an *explosion* score: STABLE means spot above the flip, dealers long gamma, hedging that
@@ -1544,11 +1544,11 @@ def _intraday_confirmation_check(ticker: str, *, rsi_cap: float = 70.0) -> dict:
             result["reason"] = "1h OBV declining (distribution)"
         else:
             result["confirmed"] = True
-            result["reason"] = f"1h RSI {rsi_val:.0f}, OBV rising — confirmed"
+            result["reason"] = f"1h RSI {rsi_val:.0f}, OBV rising, confirmed"
     except Exception as e:
         log_warn("intraday_confirmation_check", e, ticker=str(ticker))
         result["confirmed"] = True
-        result["reason"] = f"intraday check failed ({type(e).__name__}) — pass-through"
+        result["reason"] = f"intraday check failed ({type(e).__name__}), pass-through"
     return result
 
 
@@ -1583,7 +1583,7 @@ def scan_single_ticker(
         qs, _ = quant_edge_score(df)
 
         gamma_flip_sc = None
-        gex_regime = "—"
+        gex_regime = "n/a"
         c_s, p_s = pd.DataFrame(), pd.DataFrame()
         try:
             _, opt_exps_s = fetch_options(tkr)
@@ -1639,7 +1639,7 @@ def scan_single_ticker(
         struct, _, _ = TA.market_structure(df)
         wk_lbl, _ = weekly_trend_label(df_wk)
 
-        pre_diamond = {"is_pre_diamond": False, "signal_strength": "—"}
+        pre_diamond = {"is_pre_diamond": False, "signal_strength": "n/a"}
         try:
             rsi_p, _, _, _, _ = _hurst_adaptive_signal_periods(df["Close"])
             sc_now, _, _, _ = _calc_confluence_points_core(
@@ -1668,7 +1668,7 @@ def scan_single_ticker(
             )
         except Exception as e:
             log_warn("scan_single_ticker pre_diamond", e, ticker=str(tkr))
-            pre_diamond = {"is_pre_diamond": False, "signal_strength": "—"}
+            pre_diamond = {"is_pre_diamond": False, "signal_strength": "n/a"}
 
         if (
             pre_diamond.get("is_pre_diamond")
@@ -1721,7 +1721,7 @@ def scan_single_ticker(
             correlation_haircut=correlation_haircut,
             avg_mc_pop=scanner_avg_mc,
         )
-        # Audit (medium): these four discrete-Kelly inputs were built and then thrown away —
+        # Audit (medium): these four discrete-Kelly inputs were built and then thrown away
         # `use_quant=True` with `variance > 0` always took the continuous branch, so changing
         # `win_p_disc` from 5.0 to 94.0 left "Adj. Kelly %" bit-identical. The short put is a
         # binary, defined-credit payoff, so the discrete solve is the one that matches it;
@@ -1755,7 +1755,7 @@ def scan_single_ticker(
                 d_status = "🔷 BLUE" if latest_d["type"] == "blue" else "💎 PINK"
                 d_class = "badge-blue" if latest_d["type"] == "blue" else "badge-pink"
 
-        # ── SCANNER SUMMARY — SPECIFIC DRIVING SIGNAL ────────────────────────
+        # ── SCANNER SUMMARY: SPECIFIC DRIVING SIGNAL ────────────────────────
         # These strings used to be generic ("Strong bullish setup"). They now name
         # the HIGHEST-SCORING pillar from cp_breakdown so the scanner tells the
         # user WHY the score is what it is, not just what the verdict is.
@@ -1767,7 +1767,7 @@ def scan_single_ticker(
             # as returned by _calc_confluence_points_core. Keys: "Supertrend", "Ichimoku",
             # "ADX DI", "OBV", "Divergence", "Gold Zone", "Structure".
             # We find the active pillar with the highest point contribution so the summary
-            # names the specific technical reason for the score — not just the verdict.
+            # names the specific technical reason for the score, not just the verdict.
             _bd = cp_bd or {}
             _active = {k: v for k, v in _bd.items() if isinstance(v, dict) and int(v.get("pts", 0)) > 0}
             if _active:
@@ -1785,7 +1785,7 @@ def scan_single_ticker(
         elif cp_score >= 5:
             summary = f"Moderate bullish lean ({cp_score}/{cp_max} pillars).{_pillar_suffix} Watch for a second signal to confirm."
         elif cp_score >= 3:
-            summary = f"Mixed signals ({cp_score}/{cp_max} pillars). Neutral — neither side has clear edge."
+            summary = f"Mixed signals ({cp_score}/{cp_max} pillars). Neutral, neither side has clear edge."
         else:
             summary = f"Bearish pressure ({cp_score}/{cp_max} pillars). Defensive posture: avoid new longs, widen put strikes."
 
@@ -1796,7 +1796,7 @@ def scan_single_ticker(
         d_wr, _d_avg, d_n = _wr_sides["blue"]
         pink_wr, _pink_avg, pink_n = _wr_sides["pink"]
 
-        em_safety = "—"
+        em_safety = "n/a"
         try:
             iv_pct_em = np.asarray(float(sig_scan * 100.0), dtype=float)
             dte_em = np.asarray(max(1, int(np.rint(float(T_scan) * 365.25))), dtype=float)
@@ -1806,9 +1806,9 @@ def scan_single_ticker(
             em_safety = "SAFE" if k_put < (sp - em_move) else "MONITOR"
         except Exception as e:
             log_warn("scan_single_ticker em_safety", e, ticker=str(tkr))
-            em_safety = "—"
+            em_safety = "n/a"
 
-        flow_bias = "—"
+        flow_bias = "n/a"
         news_bias_score = None
         try:
             _dp_s = TA.get_dark_pool_proxy(df)
@@ -1838,7 +1838,7 @@ def scan_single_ticker(
         if parts:
             flow_bias = " · ".join(parts)
         elif news_bias_score is not None:
-            flow_bias = "—"
+            flow_bias = "n/a"
 
         skew_ratio = None
         try:
@@ -1872,7 +1872,7 @@ def scan_single_ticker(
         elif _fcf_ten:
             convexity_label = "💎 FCF 10x"
         else:
-            convexity_label = "—"
+            convexity_label = "n/a"
 
         return {
             "ticker": tkr,
@@ -1965,7 +1965,7 @@ def _stock_stop_price(df, price, atr_mult: float = 1.5):
 
 def _volatility_squeeze_gate(df, lookback: int = _SQUEEZE_LOOKBACK_BARS,
                              max_pctile: float = _SQUEEZE_MAX_PCTILE):
-    """``(is_squeezed, pctile)`` — latest ATR (or BBW) rank within the trailing ``lookback``.
+    """``(is_squeezed, pctile)``, latest ATR (or BBW) rank within the trailing ``lookback``.
 
     Audit #11: **fails closed**. When volatility cannot be measured the gate returns
     ``(False, None)`` rather than the old unconditional ``True``.
@@ -2006,9 +2006,9 @@ class Opt:
         """
         try:
             if confluence_series is None or len(confluence_series) < 3 or df is None or df.empty or 'Close' not in df.columns:
-                # "gates" on every return path — the success paths always carry it,
+                # "gates" on every return path: the success paths always carry it,
                 # so omitting it here made the contract shape-dependent.
-                return {"is_pre_diamond": False, "signal_strength": "—", "gates": {}}
+                return {"is_pre_diamond": False, "signal_strength": "n/a", "gates": {}}
 
             current_score = safe_float(safe_last(confluence_series), 0.0)
             prev_score = confluence_series.iloc[-2]
@@ -2019,7 +2019,7 @@ class Opt:
             # `if 'ATR' in df.columns … elif 'BBW' in df.columns …`. Neither column is ever
             # created in the production path (`fetch_stock` / `_ticker_daily_ohlcv_from_raw`
             # return raw OHLCV), so the gate was unconditionally True inside `all(conditions)`
-            # — a name at the 95th BBW percentile (maximum expansion) passed identically to one
+            #: a name at the 95th BBW percentile (maximum expansion) passed identically to one
             # at the 2nd, while the UI claimed "bottom 25% of 60-day ATR range". The gate now
             # computes ATR itself, and it **fails closed**: no measurable ATR ⇒ no pre-diamond.
             squeeze, squeeze_pctile = _volatility_squeeze_gate(df)
@@ -2069,10 +2069,10 @@ class Opt:
                     "support_proximity": round(support_dist, 1),
                     "gates": gates,
                 }
-            return {"is_pre_diamond": False, "signal_strength": "—", "gates": gates}
+            return {"is_pre_diamond": False, "signal_strength": "n/a", "gates": gates}
         except Exception as _e:
             log_warn("Opt.detect_pre_diamond", _e)
-            return {"is_pre_diamond": False, "signal_strength": "—", "gates": {}}
+            return {"is_pre_diamond": False, "signal_strength": "n/a", "gates": {}}
 
     @staticmethod
     def calc_gamma_exposure(opts_df, spot_price, rfr=0.045, T_years=None, hvn_prices=None):
@@ -2152,9 +2152,9 @@ class Opt:
         Audit #10: ``calc_gamma_exposure`` signs calls +1 and puts −1, so cumulating from the
         lowest strike upward starts negative (deep-OTM put OI) and turns positive above spot.
         That negative→positive crossing is the flip. The finder previously accepted only the
-        positive→negative direction, so on any normal put-skewed chain it returned ``None`` —
+        positive→negative direction, so on any normal put-skewed chain it returned ``None``
         killing the GEX regime label, the gold-zone fusion, the ±2/−3 diamond nudge and the
-        chart line — and on the rarer call-heavy chain it labelled STABLE/TURBULENT backwards.
+        chart line: and on the rarer call-heavy chain it labelled STABLE/TURBULENT backwards.
         Downstream semantics confirm this direction: ``price > gamma_flip`` ⇒ STABLE.
         """
         try:
@@ -2193,7 +2193,7 @@ class Opt:
     def predict_opex_pin(gex_series, theta_gamma_ratio=None, spot_price=None):
         """Predicted OpEx **pin**: blend spot with the **gamma wall** (strike of max |dealer GEX|).
 
-        Higher **Θ/Γ** (decay vs gamma) increases the magnetic weight on the wall — pins are more
+        Higher **Θ/Γ** (decay vs gamma) increases the magnetic weight on the wall, pins are more
         attractive when short premium dominates dealer convexity. Returns a single price or ``None``.
         """
         try:
@@ -2738,7 +2738,7 @@ class MonteCarloEngine:
         Vectorized GBM Monte Carlo Probability of Profit (PoP).
         Antithetic standard normals + fixed seed (42) for stable Streamlit reruns.
         Optional dividend yield in the drift; optional skew tilts shocks (Edgeworth-style,
-        complementary to Corrado–Su closed-form pricing elsewhere in this module).
+        complementary to Corrado-Su closed-form pricing elsewhere in this module).
         """
         if T <= 0 or sigma <= 0 or S <= 0:
             return 50.0
@@ -2782,7 +2782,7 @@ def _norm_cdf_vec(z):
 
 
 def _vectorized_theta_gamma(S, K_arr, T_y, r, sigma_arr, option_type):
-    """Black–Scholes per-day theta and gamma for 1D strike/IV arrays (calls or puts)."""
+    """Black-Scholes per-day theta and gamma for 1D strike/IV arrays (calls or puts)."""
     S = float(S)
     K_arr = np.asarray(K_arr, dtype=float)
     sigma_arr = np.maximum(np.asarray(sigma_arr, dtype=float), 0.001)

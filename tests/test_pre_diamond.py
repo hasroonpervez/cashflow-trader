@@ -1,4 +1,4 @@
-"""Tests for Opt.detect_pre_diamond — the killer Equity Radar feature."""
+"""Tests for Opt.detect_pre_diamond, the killer Equity Radar feature."""
 import numpy as np
 import pandas as pd
 
@@ -78,7 +78,7 @@ def test_pre_diamond_fires_on_ideal_setup():
     )
     assert result["is_pre_diamond"] is True
     assert "signal_strength" in result
-    assert result["signal_strength"] != "—"
+    assert result["signal_strength"] != "n/a"
 
 
 def test_pre_diamond_blocked_by_bearish_weekly():

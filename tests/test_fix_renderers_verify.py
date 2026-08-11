@@ -50,7 +50,7 @@ def test_watchlist_rank_writer_reads_a_key_that_actually_exists():
     `detect_pre_diamond` returns dicts keyed `is_pre_diamond` (options.py:1985/2039/2046),
     and the Tier-2 radar writer in the very same file reads `is_pre_diamond`. The
     watchlist-rank writer reads `"fired"`, which no producer in the repo ever sets, so
-    every persisted watchlist-rank row now records pre_diamond=False unconditionally —
+    every persisted watchlist-rank row now records pre_diamond=False unconditionally
     the mirror image of the hardcoded True the audit flagged, and still contradictory
     with the Tier-2 rows for the same ticker.
     """

@@ -1,5 +1,5 @@
 """
-Page section renderers — each function renders one section of the dashboard.
+Page section renderers: each function renders one section of the dashboard.
 All share a DashContext dataclass computed once in main().
 """
 import streamlit as st
@@ -126,7 +126,7 @@ class StructureScores:
 
 @dataclass
 class DashContext:
-    """All computed data for the current ticker — built once, passed to every section."""
+    """All computed data for the current ticker: built once, passed to every section."""
     ticker: str = ""
     cfg: dict = field(default_factory=dict)
     df: Any = None           # pd.DataFrame daily
@@ -254,7 +254,7 @@ def build_context(
     with st.spinner(f"Loading {ticker}..."):
         with make_script_ctx_pool(5) as pool:
             # ── fetch_earnings_date is ALWAYS submitted, regardless of defer_headlines_earnings.
-            # It's a lightweight yfinance .calendar call that returns a single date — far cheaper
+            # It's a lightweight yfinance .calendar call that returns a single date, far cheaper
             # than news scraping. Deferring it caused the Earnings Countdown to show a "deferred"
             # placeholder even for imminent earnings, hiding a critical risk warning.
             # fetch_news_headlines (multi-article scrape) remains deferred when the flag is set.
@@ -342,7 +342,7 @@ def build_context(
     ctx.gamma_flip = None
     # Audit finding #7: `_cf_opex_pin` was only ever *assigned* inside the chain branch
     # below, so when the chain was absent (first-pass deferral, empty Yahoo chain) the
-    # key silently kept the PREVIOUS ticker's pin — charted as "Pin $178" on a $12 stock
+    # key silently kept the PREVIOUS ticker's pin: charted as "Pin $178" on a $12 stock
     # and persisted into the ledger as `dist_pin_pct_at_entry`. Clear it up front, on the
     # same line as `gamma_flip`, so "no chain" reads as "no pin" rather than "last pin".
     st.session_state["_cf_opex_pin"] = None

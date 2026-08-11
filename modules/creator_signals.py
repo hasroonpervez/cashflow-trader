@@ -1,20 +1,20 @@
 """
-Elite Creator Signals — high-conviction stock calls from financial creators.
+Elite Creator Signals: high-conviction stock calls from financial creators.
 
 Answers ONE question: *which ticker are respected independent creators calling
 right now, before the crowd?* This is deliberately different from
 ``modules.sentiment_radar``, which measures **aggregate** retail buzz. Here we
-track a **named, hand-curated roster** — a handful of people whose calls are
-worth reading — and we require agreement between them before we call anything
+track a **named, hand-curated roster**: a handful of people whose calls are
+worth reading: and we require agreement between them before we call anything
 a signal.
 
 Free data sources only (no API keys, no quotas, no paid tiers; the X/Twitter
 API is deliberately not used because it is no longer free):
 
-  * YouTube  — per-channel Atom feed, public and key-less:
+  * YouTube: per-channel Atom feed, public and key-less:
                https://www.youtube.com/feeds/videos.xml?channel_id={UC...}
-  * RSS      — any Substack / WordPress / blog feed: {domain}/feed
-  * Reddit   — public JSON for a *named author*'s submissions, and per-sub
+  * RSS: any Substack / WordPress / blog feed: {domain}/feed
+  * Reddit: public JSON for a *named author*'s submissions, and per-sub
                DD-flair search:
                https://www.reddit.com/user/{u}/submitted.json?limit=50
                https://www.reddit.com/r/{sub}/search.json?q=flair:DD&...
@@ -23,32 +23,32 @@ API is deliberately not used because it is no longer free):
 Signal math (every formula unit-tested in tests/test_creator_signals.py)
 --------------------------------------------------------------------------
 
-1. Ticker extraction — ``extract_tickers(text)``
+1. Ticker extraction, ``extract_tickers(text)``
    Two confidence tiers, because they are NOT equally trustworthy:
-     * ``cashtag`` ($TSLA)     confidence 1.00 — the author explicitly marked
+     * ``cashtag`` ($TSLA)     confidence 1.00, the author explicitly marked
                                it as a ticker. Trusted; the English stopword
                                list is NOT applied (so ``$PM``, ``$IT``,
                                ``$ALL``, ``$DD`` all survive), only the
                                non-equity blocklist (currencies, crypto).
-     * ``bare`` (TSLA)         confidence 0.60 — inferred. Must be 2-5 chars
+     * ``bare`` (TSLA)         confidence 0.60, inferred. Must be 2-5 chars
                                and must NOT be in ``TICKER_STOPWORDS``.
    The stopword list is the anti-hallucination guard. Without it, "THE NEW CEO
    OF AI" yields four fake tickers. The cost is real: bare ``PM``/``IT``/``ON``
-   are dropped even though they are genuine tickers — we accept false
+   are dropped even though they are genuine tickers, we accept false
    negatives to eliminate false positives, and the cashtag path recovers them.
 
-2. Roundup rejection — ``filter_roundup(hits)``
+2. Roundup rejection, ``filter_roundup(hits)``
    An item mentioning more than ``MAX_TICKERS_PER_ITEM`` distinct tickers is a
    "top 40 stocks for 2026" listicle, not a conviction call. It contributes
    NOTHING rather than diluting every ticker it names.
 
-3. Recency decay — ``mention_weight(age_days)``
+3. Recency decay, ``mention_weight(age_days)``
      w = 0.5 ** (age_days / MENTION_HALF_LIFE_DAYS)      (half-life 7 days)
    0d -> 1.00, 7d -> 0.50, 14d -> 0.25. An undated item is scored as if it
-   were ``UNDATED_AGE_DAYS`` old and the row is flagged ``undated-evidence`` —
+   were ``UNDATED_AGE_DAYS`` old and the row is flagged ``undated-evidence``
    we never pretend an unknown date is "today".
 
-4. Consensus — ``creator_consensus(mentions_by_source)``   **the integrity rule**
+4. Consensus, ``creator_consensus(mentions_by_source)``   **the integrity rule**
    Per source s (a *creator*, not a *post*):
      conv_s = min(PER_SOURCE_CONVICTION_CAP,
                   max over that source's mentions of confidence * w(age)
@@ -58,7 +58,7 @@ Signal math (every formula unit-tested in tests/test_creator_signals.py)
    The per-source term is built on the creator's *best single* mention, not a sum.
    A sum lets volume defeat the time decay: six 7-day-old posts (0.5 each -> 3.0,
    capped to 1.0) would otherwise score identically to one post today. Repetition
-   earns a small, saturating REPEAT_BONUS instead — it can never substitute for
+   earns a small, saturating REPEAT_BONUS instead, it can never substitute for
    recency, and it can never reach a second creator's worth of evidence.
      conviction = clip01( sum_s(conv_s * weight_s) / CONVICTION_SATURATION )
      breadth    = clip01( (n_sources - 1) / (BREADTH_SATURATION - 1) )
@@ -70,12 +70,12 @@ Signal math (every formula unit-tested in tests/test_creator_signals.py)
    A ticker called by ONE creator is a **lead, not a signal**: it earns zero
    breadth AND is flagged ``single-source`` with the score capped at
    ``SINGLE_SOURCE_CAP`` (mirrors sentiment_radar's ``THIN_CONFIRM_CAP``).
-   Independence is by creator id — two feeds from the same person count once.
+   Independence is by creator id: two feeds from the same person count once.
 
-5. Direction — ``infer_direction(text)``
+5. Direction, ``infer_direction(text)``
    Keyword lexicon over the title/summary. Returns ``"bullish"``/``"bearish"``,
    or **None** when the lexicon is silent or tied. Never ``0``, never
-   ``"neutral"`` — an undeterminable direction is missing data, and the caller
+   ``"neutral"``: an undeterminable direction is missing data, and the caller
    must be able to tell the difference. Direction is reported but deliberately
    NOT scored: a high-conviction short call is just as much a signal.
 
@@ -84,7 +84,7 @@ Signal math (every formula unit-tested in tests/test_creator_signals.py)
    scan is flagged ``partial-data`` with the score capped at
    ``PARTIAL_DATA_CAP``. We flag every row, not just some, because a source
    that did not answer might have been the second creator that would have
-   confirmed — or contradicted — any ticker on the board. A missing source is
+   confirmed: or contradicted: any ticker on the board. A missing source is
    never silently scored as agreement, and never silently scored as zero.
 
 Everything above ``# --- I/O ---`` is pure and Streamlit-free, so the whole
@@ -139,7 +139,7 @@ PARTIAL_DATA_CAP = 70.0          # cap when any source failed this scan
 
 WEIGHTS = {
     "conviction": 0.55,   # how hard, how recently, how many creators called it
-    "breadth": 0.30,      # how many INDEPENDENT creators — the integrity term
+    "breadth": 0.30,      # how many INDEPENDENT creators, the integrity term
     "freshness": 0.15,    # how fresh the newest call is
 }
 
@@ -172,13 +172,13 @@ class CreatorSource:
 
 
 # --- USER-EDITABLE ROSTER --------------------------------------------------
-# Swap these for the creators *you* actually respect — the whole point of this
+# Swap these for the creators *you* actually respect, the whole point of this
 # module is that it tracks a curated shortlist, not the internet.
 #
 # NOTE ON YOUTUBE: the RSS endpoint needs a channel's opaque ``UC...`` id,
 # which cannot be derived from an @handle offline, so none are shipped as
 # defaults rather than shipping guesses that would 404. To add one: open the
-# channel page, view source, search ``"channelId":"UC`` — or use
+# channel page, view source, search ``"channelId":"UC``, or use
 # ``youtube_feed_url(<id>)`` to check the feed by hand first. Then append
 #     CreatorSource("youtube", "UCxxxxxxxxxxxxxxxxxxxxxx", "Their Name", 1.0)
 DEFAULT_CREATORS: list[CreatorSource] = [
@@ -187,7 +187,7 @@ DEFAULT_CREATORS: list[CreatorSource] = [
     CreatorSource("rss", "www.netinterest.co", "Net Interest", 1.0),
     CreatorSource("rss", "www.thediff.co", "The Diff", 1.0),
     CreatorSource("rss", "alphaarchitect.com/feed/", "Alpha Architect", 0.8),
-    # DD-flaired posts only — the long-form corner of each sub, not the memes.
+    # DD-flaired posts only: the long-form corner of each sub, not the memes.
     CreatorSource("reddit_dd", "SecurityAnalysis", "r/SecurityAnalysis DD", 1.1),
     CreatorSource("reddit_dd", "ValueInvesting", "r/ValueInvesting DD", 1.0),
     CreatorSource("reddit_dd", "stocks", "r/stocks DD", 0.8),
@@ -199,7 +199,7 @@ DEFAULT_CREATORS: list[CreatorSource] = [
 # ---------------------------------------------------------------------------
 
 # Uppercase English words, internet-speak and finance jargon that are NOT
-# tickers. Applied to BARE words only — cashtags bypass this list entirely.
+# tickers. Applied to BARE words only, cashtags bypass this list entirely.
 TICKER_STOPWORDS: frozenset[str] = frozenset("""
 A I AN AS AT BE BY DO GO IF IN IS IT MY NO OF OK ON OR SO TO UP US WE HE ME
 AM PM AH ID OH EX RE VS
@@ -278,12 +278,12 @@ def extract_tickers(text: Optional[str]) -> list[TickerHit]:
     """Tickers mentioned in ``text``, cashtags first, deduped by symbol.
 
     Cashtags ($TSLA) are returned at confidence 1.0 and skip the English
-    stopword list — the ``$`` is the author explicitly saying "this is a
+    stopword list: the ``$`` is the author explicitly saying "this is a
     ticker". Bare uppercase words are returned at confidence 0.6, must be 2-5
     characters, and must survive ``TICKER_STOPWORDS``.
 
     When a symbol appears both ways, the cashtag (higher confidence) wins.
-    Returns ``[]`` for empty/None text — never a guess.
+    Returns ``[]`` for empty/None text: never a guess.
     """
     if not text:
         return []
@@ -323,7 +323,7 @@ def filter_roundup(hits: Sequence[TickerHit],
 def infer_direction(text: Optional[str]) -> Optional[str]:
     """``"bullish"`` / ``"bearish"`` / ``None``.
 
-    ``None`` means *undeterminable* — no lexicon hits, or an exact tie. It is
+    ``None`` means *undeterminable*: no lexicon hits, or an exact tie. It is
     deliberately not ``"neutral"`` and not ``0``: the caller must be able to
     distinguish "the creator was balanced" from "we could not tell".
     """
@@ -438,7 +438,7 @@ def creator_consensus(
       ``partial-data``      caller reported a failed fetch this scan
                             -> score capped at ``PARTIAL_DATA_CAP``
       ``undated-evidence``  at least one item had no usable timestamp
-      ``bare-mentions-only``no cashtag anywhere — inferred tickers only
+      ``bare-mentions-only``no cashtag anywhere: inferred tickers only
       ``no-evidence``       nothing contributed (score stays 0)
     """
     res = ConsensusResult()
@@ -458,7 +458,7 @@ def creator_consensus(
         best = 0.0
         for m in items:
             conf = clip01(safe_float(m.confidence, 0.0))
-            # Best single mention — a sum here would let volume out-vote the decay.
+            # Best single mention: a sum here would let volume out-vote the decay.
             best = max(best, conf * mention_weight(m.age_days))
             if m.tier == TIER_CASHTAG:
                 saw_cashtag = True
@@ -536,7 +536,7 @@ def build_creator_rows(
 
     ``failed_source_ids`` is the list of creators whose fetch failed. Any
     failure flags **every** row ``partial-data`` and caps it: a source that did
-    not answer could have been the confirming — or contradicting — second
+    not answer could have been the confirming: or contradicting, second
     voice for any ticker on this board. Failures never quietly score 0.
 
     Ranking: score desc, then ticker asc for a stable, reproducible board.
@@ -581,22 +581,22 @@ def build_creator_rows(
 
 
 def verdict_for_row(r: CreatorRow) -> str:
-    """One plain-English line — what to actually do with this row."""
+    """One plain-English line: what to actually do with this row."""
     if "no-evidence" in r.flags:
         return "❄️ Nothing here"
     if "single-source" in r.flags:
-        return "🔍 One creator only — a lead, not a signal. Wait for a second voice."
+        return "🔍 One creator only: a lead, not a signal. Wait for a second voice."
     if "partial-data" in r.flags and r.score < 50:
-        return "⚠️ A source didn't answer — score is capped, re-scan later"
+        return "⚠️ A source didn't answer: score is capped, re-scan later"
     side = "" if r.direction is None else (" (bullish)" if r.direction == "bullish"
                                            else " (bearish)")
     if r.score >= 75:
-        return f"🔥 Multiple respected creators, fresh calls{side} — research today"
+        return f"🔥 Multiple respected creators, fresh calls{side}, research today"
     if r.score >= 55:
-        return f"👀 Real cross-creator agreement{side} — put on watch"
+        return f"👀 Real cross-creator agreement{side}: put on watch"
     if r.score >= 35:
-        return f"🌤️ Some agreement, going stale{side} — low priority"
-    return "💤 Faint chatter — ignore"
+        return f"🌤️ Some agreement, going stale{side}, low priority"
+    return "💤 Faint chatter: ignore"
 
 
 # ---------------------------------------------------------------------------
@@ -638,7 +638,7 @@ def clear_cache() -> None:
 
 
 def _get_text(url: str, timeout: float = HTTP_TIMEOUT) -> Optional[str]:
-    """GET a URL as text, TTL-cached. ``None`` on ANY failure — never a guess.
+    """GET a URL as text, TTL-cached. ``None`` on ANY failure, never a guess.
 
     Failures are deliberately not cached, so a transient blip does not poison
     the next five minutes of scans.
@@ -739,7 +739,7 @@ def parse_feed(xml_text: Optional[str],
 
     Namespace-agnostic: matches on element local-names, so YouTube's Atom +
     media extensions and plain RSS both work through one code path.
-    Returns ``None`` when the payload is not parseable XML — an EMPTY feed is
+    Returns ``None`` when the payload is not parseable XML, an EMPTY feed is
     a valid, distinguishable result (``[]``), not a failure.
     """
     if not xml_text:
@@ -854,7 +854,7 @@ def collect_mentions(
     tests (and dry runs) never touch the network.
 
     Efficiency & integrity:
-      * sources deduped by resolved URL — the same feed listed twice is fetched
+      * sources deduped by resolved URL: the same feed listed twice is fetched
         and counted once, which also protects the independence test;
       * at most ``max_items_per_source`` items parsed per source;
       * items older than ``max_age_days`` dropped (history, not signal);
@@ -936,7 +936,7 @@ def scan_creators(
 
 
 # ---------------------------------------------------------------------------
-# Streamlit tab — imported inside the function so the logic above stays
+# Streamlit tab: imported inside the function so the logic above stays
 # headless-importable (``from modules.creator_signals import *`` needs no UI).
 # ---------------------------------------------------------------------------
 
@@ -947,7 +947,7 @@ def render_creator_signals_tab(sources: Optional[Sequence[CreatorSource]] = None
         _render_creator_signals_tab(sources)
     except Exception as exc:
         st.error("🎙️ Creator Signals hit an unexpected error this scan. "
-                 "Your other tabs are unaffected — try again in a minute.")
+                 "Your other tabs are unaffected: try again in a minute.")
         with st.expander("Technical details"):
             st.code(repr(exc))
 
@@ -969,7 +969,7 @@ def _render_creator_signals_tab(sources: Optional[Sequence[CreatorSource]] = Non
     if not st.button("🎙️ Scan Creators", type="primary", key="cs_scan"):
         cached = st.session_state.get("cs_results")
         if cached is None:
-            st.caption("Press **Scan Creators** — takes ~10-20s.")
+            st.caption("Press **Scan Creators**: takes ~10-20s.")
             return
         rows, health = cached["rows"], cached["health"]
     else:
@@ -980,7 +980,7 @@ def _render_creator_signals_tab(sources: Optional[Sequence[CreatorSource]] = Non
     down = [name for name, ok in (health or {}).items() if not ok]
     if down:
         st.info("These feeds didn't answer this scan: " + ", ".join(down) +
-                ". Every row below is flagged `partial-data` and score-capped — "
+                ". Every row below is flagged `partial-data` and score-capped, "
                 "missing evidence is never scored as agreement.")
     else:
         st.caption("✅ Every configured creator feed answered this scan.")
@@ -1009,6 +1009,6 @@ def _render_creator_signals_tab(sources: Optional[Sequence[CreatorSource]] = Non
                      f"{SINGLE_SOURCE_CAP:.0f}) + 15% freshness."),
             "Direction": st.column_config.TextColumn(
                 "Direction",
-                help="'unclear' means the wording didn't state a side — it is "
+                help="'unclear' means the wording didn't state a side, it is "
                      "NOT the same as neutral."),
         })

@@ -1,4 +1,4 @@
-"""Tab renderers and equity desk — extracted from app.main() (v22 refactor)."""
+"""Tab renderers and equity desk: extracted from app.main() (v22 refactor)."""
 from __future__ import annotations
 
 import html as _html_mod
@@ -95,14 +95,14 @@ def classify_vol_skew(skew_pct: Optional[float]) -> Optional[dict]:
     """Single source of truth for the put/call IV skew verdict on the Cash Flow tab.
 
     AUDIT (medium, ``renderers.py:1224 / 1643 / 1765``): the same tab rendered three
-    mutually inconsistent skew readouts — the ±10/±3 tiered card, a one-sided
+    mutually inconsistent skew readouts: the ±10/±3 tiered card, a one-sided
     ``> 10 / > 5`` tile that painted *every* call-skew reading green "Balanced", and
     ``calc_skew_regime``'s median-ratio bands at 1.25/1.08/0.85. A trader could read
     "Heavy Call Skew", "Balanced" and "Put Fear" for the same chain in one screen.
     All three now render this one classification off one ``calc_vol_skew`` reading.
 
     ``skew_pct`` is put IV minus call IV in IV points (positive = puts richer).
-    Returns ``None`` when the skew is unavailable — the callers print an explicit
+    Returns ``None`` when the skew is unavailable: the callers print an explicit
     "insufficient IV data" state rather than defaulting to a fake "Balanced".
     """
     try:
@@ -117,9 +117,9 @@ def classify_vol_skew(skew_pct: Optional[float]) -> Optional[dict]:
             "color": "#f59e0b",
             "icon": "🔥",
             "label": "Heavy Put Skew",
-            "short": "Puts heavily bid — prime edge is selling cash-secured puts.",
+            "short": "Puts heavily bid, prime edge is selling cash-secured puts.",
             "guide": (
-                "Puts are <strong>heavily bid</strong> — smart money is paying up "
+                "Puts are <strong>heavily bid</strong>: smart money is paying up "
                 "for downside protection. Put premium is very expensive right now. "
                 "<strong>Prime edge: sell cash-secured puts</strong> and collect that "
                 "rich premium while the crowd hedges."
@@ -131,9 +131,9 @@ def classify_vol_skew(skew_pct: Optional[float]) -> Optional[dict]:
             "color": "#f59e0b",
             "icon": "⚡",
             "label": "Elevated Put Skew",
-            "short": "Moderate put bid — slight edge to cash-secured puts.",
+            "short": "Moderate put bid, slight edge to cash-secured puts.",
             "guide": (
-                "Moderate put premium elevation — bearish hedging is active. "
+                "Moderate put premium elevation: bearish hedging is active. "
                 "<strong>Slight edge to selling cash-secured puts.</strong> "
                 "Both strategies are viable; use Signal tab to confirm direction."
             ),
@@ -144,9 +144,9 @@ def classify_vol_skew(skew_pct: Optional[float]) -> Optional[dict]:
             "color": "#06b6d4",
             "icon": "🚀",
             "label": "Heavy Call Skew",
-            "short": "Calls heavily bid — prime edge is selling covered calls.",
+            "short": "Calls heavily bid, prime edge is selling covered calls.",
             "guide": (
-                "Calls are <strong>heavily bid</strong> — upside speculation is "
+                "Calls are <strong>heavily bid</strong>: upside speculation is "
                 "elevated. Call premium is very expensive right now. "
                 "<strong>Prime edge: sell covered calls</strong> and collect that "
                 "inflated call premium while the crowd chases."
@@ -158,9 +158,9 @@ def classify_vol_skew(skew_pct: Optional[float]) -> Optional[dict]:
             "color": "#06b6d4",
             "icon": "📈",
             "label": "Elevated Call Skew",
-            "short": "Calls bid above average — slight edge to covered calls.",
+            "short": "Calls bid above average, slight edge to covered calls.",
             "guide": (
-                "Calls are bid above average — bullish speculation is active. "
+                "Calls are bid above average: bullish speculation is active. "
                 "<strong>Slight edge to selling covered calls.</strong> "
                 "Either strategy is viable; use Signal tab to confirm direction."
             ),
@@ -170,9 +170,9 @@ def classify_vol_skew(skew_pct: Optional[float]) -> Optional[dict]:
         "color": "#10b981",
         "icon": "⚖️",
         "label": "Balanced Skew",
-        "short": "Put and call premium roughly equal — no hedging bias.",
+        "short": "Put and call premium roughly equal, no hedging bias.",
         "guide": (
-            "Put and call premium are roughly equal — no institutional hedging "
+            "Put and call premium are roughly equal: no institutional hedging "
             "bias detected. Both covered calls and cash-secured puts offer fair "
             "premium. Let your directional view (Signal tab) decide."
         ),
@@ -185,7 +185,7 @@ def expected_value_dollars(credit_100, max_loss, pop_pct) -> Optional[float]:
     AUDIT #24: the covered-call line under the "EXPECTED VALUE" card used
     ``pop_cc = min(85, max(50, 100 - otm_pct * 5))`` and ``max_loss = premium * 3``.
     Both were invented. With ``max_loss = 3P``, ``calc_ev`` collapses to
-    ``P * (4 * pop - 3)``, which is zero exactly at ``otm_pct == 5.0`` — so the whole
+    ``P * (4 * pop - 3)``, which is zero exactly at ``otm_pct == 5.0``, so the whole
     dollar figure was a monotone restatement of "is this strike more than 5% OTM",
     dressed up as expected value under the footer "Positive means edge."
 
@@ -213,7 +213,7 @@ def compound_cumulative_return_pct(ret_pct) -> pd.Series:
 
     AUDIT (medium, ``renderers.py:2138`` with the axis labelled "Cumulative return (%)"
     at ``2190``): the covered-call simulator plotted ``ret_pct.cumsum()``. Percentages
-    of a moving base do not add — 12×(+8%) and 4×(−20%) sums to +16% where the
+    of a moving base do not add: 12×(+8%) and 4×(−20%) sums to +16% where the
     compounded truth is +3.1%, and because losses compound harder than gains the
     drawdowns were understated asymmetrically. Index and length are preserved (NaNs
     are skipped exactly as ``cumsum`` did) so the curve stays aligned with entry dates.
@@ -253,7 +253,7 @@ def render_equity_setup_desk(scanner_results, selectbox_key: str, prefer_ticker=
     if selectbox_key not in st.session_state or st.session_state.get(selectbox_key) not in tickers:
         st.session_state[selectbox_key] = pick
     selected_ticker = st.selectbox(
-        "Equity desk — focus ticker",
+        "Equity desk: focus ticker",
         tickers,
         key=selectbox_key,
         help="Drill into breakout, risk, and support using the last scan payload.",
@@ -263,13 +263,13 @@ def render_equity_setup_desk(scanner_results, selectbox_key: str, prefer_ticker=
         st.warning("Select a ticker from the Equity Radar scanner above to view the setup.")
         return
     pre_diamond = ticker_data.get("pre_diamond_status") or {}
-    signal = pre_diamond.get("signal_strength", "—")
-    stop_loss = ticker_data.get("stock_stop_price", "—")
+    signal = pre_diamond.get("signal_strength", "n/a")
+    stop_loss = ticker_data.get("stock_stop_price", "n/a")
     price = float(ticker_data.get("price") or 0)
-    qs_raw = ticker_data.get("qs", "—")
-    cp_score = ticker_data.get("cp_score", "—")
-    cp_max = ticker_data.get("cp_max", "—")
-    confluence_disp = f"{cp_score}/{cp_max}" if isinstance(cp_score, (int, float)) and isinstance(cp_max, (int, float)) else "—"
+    qs_raw = ticker_data.get("qs", "n/a")
+    cp_score = ticker_data.get("cp_score", "n/a")
+    cp_max = ticker_data.get("cp_max", "n/a")
+    confluence_disp = f"{cp_score}/{cp_max}" if isinstance(cp_score, (int, float)) and isinstance(cp_max, (int, float)) else "n/a"
     st.markdown(f"## 🎯 Equity Setup: {_html_mod.escape(str(selected_ticker))}")
     st.info(f"**Current Signal:** {signal}")
     eq_tab1, eq_tab2 = st.tabs(["🚀 Breakout Metrics", "🛡️ Risk & Support"])
@@ -289,7 +289,7 @@ def render_equity_setup_desk(scanner_results, selectbox_key: str, prefer_ticker=
                 st.metric(
                     "Confluence Score",
                     confluence_disp,
-                    help="Pre-diamond targets the 5–6 band; 7+ is Blue Diamond territory on the options path.",
+                    help="Pre-diamond targets the 5-6 band; 7+ is Blue Diamond territory on the options path.",
                 )
         with col3:
             with st.container(border=True):
@@ -300,7 +300,7 @@ def render_equity_setup_desk(scanner_results, selectbox_key: str, prefer_ticker=
                 )
         qe_disp = f"{float(qs_raw):.0f}/100" if isinstance(qs_raw, (int, float)) else str(qs_raw)
         with st.container(border=True):
-            st.metric("Edge Score", qe_disp, help="Overall signal strength 0–100 across Trend, Momentum, Volume, Volatility, and Structure pillars.")
+            st.metric("Edge Score", qe_disp, help="Overall signal strength 0-100 across Trend, Momentum, Volume, Volatility, and Structure pillars.")
     with eq_tab2:
         st.markdown("### Trade Management")
         r_col1, r_col2, r_col3 = st.columns(3)
@@ -308,7 +308,7 @@ def render_equity_setup_desk(scanner_results, selectbox_key: str, prefer_ticker=
             with st.container(border=True):
                 st.metric(
                     "Suggested Entry",
-                    f"${price:,.2f}" if price else "—",
+                    f"${price:,.2f}" if price else "n/a",
                     help="Spot from the scan bar.",
                 )
         with r_col2:
@@ -319,9 +319,9 @@ def render_equity_setup_desk(scanner_results, selectbox_key: str, prefer_ticker=
                     sl_txt,
                     help="Scan uses price − 1.5× ATR when ATR is available; else a 5% floor.",
                 )
-        sup = pre_diamond.get("support_proximity", "—")
+        sup = pre_diamond.get("support_proximity", "n/a")
         sup_txt = f"{float(sup):.1f}%" if isinstance(sup, (int, float)) else sup
-        if sup_txt != "—" and not str(sup_txt).endswith("%"):
+        if sup_txt != "n/a" and not str(sup_txt).endswith("%"):
             sup_txt = f"{sup_txt}%"
         with r_col3:
             with st.container(border=True):
@@ -331,7 +331,7 @@ def render_equity_setup_desk(scanner_results, selectbox_key: str, prefer_ticker=
                     help="Proximity to Shadow Low or Gold Zone floor when pre-diamond is active.",
                 )
         gz = ticker_data.get("gold_zone")
-        rr_txt = "—"
+        rr_txt = "n/a"
         try:
             if (
                 isinstance(stop_loss, (int, float))
@@ -342,9 +342,9 @@ def render_equity_setup_desk(scanner_results, selectbox_key: str, prefer_ticker=
             ):
                 risk_px = max(price - float(stop_loss), 1e-9)
                 reward_px = max(float(gz) - price, 0.0)
-                rr_txt = f"{reward_px / risk_px:.2f} : 1" if risk_px else "—"
+                rr_txt = f"{reward_px / risk_px:.2f} : 1" if risk_px else "n/a"
         except (TypeError, ValueError):
-            rr_txt = "—"
+            rr_txt = "n/a"
         with st.container(border=True):
             st.metric(
                 "Risk / Reward (to Gold Zone)",
@@ -356,7 +356,7 @@ def render_equity_setup_desk(scanner_results, selectbox_key: str, prefer_ticker=
     if isinstance(_cvx, dict) and _cvx.get("gates"):
         with st.expander("🧪 Asymmetric Convexity sieve (diagnostics)", expanded=False):
             st.caption(
-                "All five gates must pass for **💎 10x Sieve**. Missing Yahoo **float/short** or chain **IV** usually fails a gate — not a verdict on the stock."
+                "All five gates must pass for **💎 10x Sieve**. Missing Yahoo **float/short** or chain **IV** usually fails a gate, not a verdict on the stock."
             )
             _g = _cvx["gates"]
             for label, key in (
@@ -371,7 +371,7 @@ def render_equity_setup_desk(scanner_results, selectbox_key: str, prefer_ticker=
 
     st.divider()
     st.markdown("### 📊 Structure visualizer")
-    st.caption("Last **60** daily closes — context for volatility coil / drift (Yahoo daily bars).")
+    st.caption("Last **60** daily closes, context for volatility coil / drift (Yahoo daily bars).")
     try:
         from modules.data import fetch_stock as _eq_fetch
 
@@ -623,7 +623,7 @@ def render_setup_tab(chart_mood: str, d: DeskLocals) -> None:
                     _rp_calm   = float(inst_breakdown.get("regime_prob_calm")   or 0.0)
                     _rp_medium = float(inst_breakdown.get("regime_prob_medium") or 0.0)
                     _rp_stress = float(inst_breakdown.get("regime_prob_stress") or 0.0)
-                    # ── DIAGNOSTIC LABELS — user-facing names, no model jargon ─────
+                    # ── DIAGNOSTIC LABELS: user-facing names, no model jargon ─────
                     # "Market Regime" replaces "HMM" (user doesn't need to know it's a HMM).
                     # "Stationary Signal" replaces "FFD residual" (FFD is an internal name).
                     # "Institutional Track" replaces "Inst. track" for clarity.
@@ -637,8 +637,8 @@ def render_setup_tab(chart_mood: str, d: DeskLocals) -> None:
                             "Higher = model is in a choppy/high-vol state. The desk auto-reduces position size when this rises."
                         ),
                     )
-                    i2.metric("Stationary Signal", f"{_ffd:.4f}", help="A momentum-memory signal derived by making prices stationary — it captures trend persistence without the drift noise of raw returns.")
-                    i3.metric("Core Edge (5 pillars)", f"{_rc:.1f}", help="Average of Trend, Momentum, Volume, Volatility, and Structure scores — the base edge before institutional blending.")
+                    i2.metric("Stationary Signal", f"{_ffd:.4f}", help="A momentum-memory signal derived by making prices stationary, it captures trend persistence without the drift noise of raw returns.")
+                    i3.metric("Core Edge (5 pillars)", f"{_rc:.1f}", help="Average of Trend, Momentum, Volume, Volatility, and Structure scores, the base edge before institutional blending.")
                     i4.metric("Institutional Track", f"{_ins:.1f}", help="The blended institutional signal before it fuses with the core edge. Driven by Stationary Signal + Market Regime.")
                     st.markdown("##### Retail: five pillars (20% each)")
                     _pillars = {k: retail_breakdown.get(k) for k in ("trend", "momentum", "volume", "volatility", "structure") if k in retail_breakdown}
@@ -654,7 +654,7 @@ def render_setup_tab(chart_mood: str, d: DeskLocals) -> None:
                 else:
                     st.warning(
                         "**Quant engine matched Retail.** The advanced HMM model needs at least 50 bars of history "
-                        "to warm up — both scores are using the standard five-factor model below."
+                        "to warm up: both scores are using the standard five-factor model below."
                     )
                     pc1, pc2 = st.columns(2)
                     _dims = ("trend", "momentum", "volume", "volatility", "structure")
@@ -1158,7 +1158,7 @@ def render_cashflow_tab(cfg: dict, d: DeskLocals) -> None:
         # richest ATM IV across the listed expiries. Below 30 the premium is thin,
         # so selling it carries full assignment risk for a small credit.
         #
-        # AUDIT #12: this used to call compute_iv_rank_proxy(ticker, df) — the
+        # AUDIT #12: this used to call compute_iv_rank_proxy(ticker, df), the
         # function takes three required positionals (sym, spot, ref_iv_pct), so the
         # TypeError was swallowed by a bare `except` that pinned _ivr_val at 50.0.
         # The warning below was therefore unreachable on every single render. The
@@ -1176,7 +1176,7 @@ def render_cashflow_tab(cfg: dict, d: DeskLocals) -> None:
             _ivr_val = None
         if _ivr_val is not None and _ivr_val < 30:
             st.warning(
-                f"⚠️ **IV Rank is low ({_ivr_val:.0f}/100)** — the reference IV sits near the cheap end of the listed expiry range. "
+                f"⚠️ **IV Rank is low ({_ivr_val:.0f}/100)**: the reference IV sits near the cheap end of the listed expiry range. "
                 "Selling premium in a low-IV environment means collecting thin credits while carrying full assignment or loss risk. "
                 "**Desk rule:** wait for IVR ≥ 30 before opening new short-premium positions, "
                 "or size down to 50% of your normal contract count."
@@ -1184,11 +1184,11 @@ def render_cashflow_tab(cfg: dict, d: DeskLocals) -> None:
 
         # ── WEEKLY BIAS CHECK ─────────────────────────────────────────────────
         # If the weekly timeframe shows BEARISH structure, short puts are fighting
-        # the dominant trend — the most dangerous combination in options selling.
+        # the dominant trend: the most dangerous combination in options selling.
         # This fires as an explicit desk override, not just a label.
         if wk_label == "BEARISH":
             st.warning(
-                "⚠️ **Weekly trend is BEARISH** — selling naked puts is fighting the dominant timeframe. "
+                "⚠️ **Weekly trend is BEARISH**: selling naked puts is fighting the dominant timeframe. "
                 "Prefer bear call spreads (defined-risk) over cash-secured puts. "
                 "If you must sell puts, stay ≥ 10% OTM and use a 21-DTE or shorter cycle."
             )
@@ -1248,18 +1248,18 @@ def render_cashflow_tab(cfg: dict, d: DeskLocals) -> None:
                 if _ts_near > _ts_far + 2:
                     _ts_shape_label = "📈 Backwardation"
                     _ts_shape_color = "#f59e0b"
-                    _ts_shape_tip   = "Near-term vol is elevated — market sees an event risk ahead (earnings, macro)."
+                    _ts_shape_tip   = "Near-term vol is elevated: market sees an event risk ahead (earnings, macro)."
                 elif _ts_far > _ts_near + 2:
                     _ts_shape_label = "📉 Contango"
                     _ts_shape_color = "#10b981"
-                    _ts_shape_tip   = "Far-month vol is higher — near-term looks calm. Better environment for premium sellers."
+                    _ts_shape_tip   = "Far-month vol is higher: near-term looks calm. Better environment for premium sellers."
                 else:
                     _ts_shape_label = "➡️ Flat"
                     _ts_shape_color = "#94a3b8"
-                    _ts_shape_tip   = "Vol is priced evenly across expirations — no strong near/far bias."
+                    _ts_shape_tip   = "Vol is priced evenly across expirations, no strong near/far bias."
 
                 with st.expander(
-                    f"📊 IV Term Structure — {_ts_shape_label}  (near {_ts_near:.0f}% → far {_ts_far:.0f}%)",
+                    f"📊 IV Term Structure: {_ts_shape_label}  (near {_ts_near:.0f}% → far {_ts_far:.0f}%)",
                     expanded=False,
                 ):
                     st.caption(f"**{_ts_shape_label}:** {_ts_shape_tip}")
@@ -1320,7 +1320,7 @@ def render_cashflow_tab(cfg: dict, d: DeskLocals) -> None:
                 log_warn("cashflow tab options dataframe concat", _e, ticker=str(ticker))
                 opts_df = pd.DataFrame()
             if not calls.empty or not puts.empty:
-                with st.expander("Full option chain — MC PoP % (every strike)", expanded=False):
+                with st.expander("Full option chain, MC PoP % (every strike)", expanded=False):
                     try:
                         _chain_mc = build_chain_mc_dataframe(price, calls, puts, dte, rfr)
                         if _chain_mc is not None and not _chain_mc.empty:
@@ -1347,7 +1347,7 @@ def render_cashflow_tab(cfg: dict, d: DeskLocals) -> None:
                                     "MC PoP %": st.column_config.NumberColumn(
                                         "MC PoP %",
                                         format="%.1f%%",
-                                        help="10k antithetic simulations — v22.0 Predictive Analytics",
+                                        help="10k antithetic simulations: v22.0 Predictive Analytics",
                                     ),
                                 },
                             )
@@ -1364,7 +1364,7 @@ def render_cashflow_tab(cfg: dict, d: DeskLocals) -> None:
                 # Positive skew  = put IV > call IV  → puts are expensive → sell CSPs
                 # Negative skew  = call IV > put IV  → calls are expensive → sell CCs
                 # This is the single most important structural edge-selector for premium sellers.
-                # AUDIT (medium): one calc_vol_skew reading, one classification —
+                # AUDIT (medium): one calc_vol_skew reading, one classification
                 # this card, the Greeks-row VOL SKEW tile and the skew-surface badge
                 # all read _skew_verdict so the tab can no longer contradict itself.
                 _skew_v, _skew_p_iv, _skew_c_iv = calc_vol_skew(price, calls, puts)
@@ -1375,15 +1375,15 @@ def render_cashflow_tab(cfg: dict, d: DeskLocals) -> None:
                     _skew_label = _skew_verdict["label"]
                     _skew_guide = _skew_verdict["guide"]
                     # Format display values
-                    _put_iv_txt  = f"{_skew_p_iv:.1f}%" if _skew_p_iv is not None else "—"
-                    _call_iv_txt = f"{_skew_c_iv:.1f}%" if _skew_c_iv is not None else "—"
+                    _put_iv_txt  = f"{_skew_p_iv:.1f}%" if _skew_p_iv is not None else "n/a"
+                    _call_iv_txt = f"{_skew_c_iv:.1f}%" if _skew_c_iv is not None else "n/a"
                     _skew_txt    = f"{_skew_verdict['skew']:+.1f}%"
                     st.markdown(
                         f"""<div style="background:rgba(15,23,42,.75);border:1.5px solid {_skew_color};
                                         border-radius:10px;padding:12px 16px;margin:6px 0 14px 0">
                           <div style="font-size:.68rem;font-weight:700;color:{_skew_color};
                                       letter-spacing:.09em;margin-bottom:8px">
-                            {_skew_icon} VOL SKEW SIGNAL — STRATEGY EDGE
+                            {_skew_icon} VOL SKEW SIGNAL: STRATEGY EDGE
                           </div>
                           <div style="display:flex;gap:28px;flex-wrap:wrap;margin-bottom:8px">
                             <div>
@@ -1500,7 +1500,7 @@ def render_cashflow_tab(cfg: dict, d: DeskLocals) -> None:
                                 st.rerun()
                             else:
                                 st.error(
-                                    "Tracked in this session only — the trade journal could not be written to disk "
+                                    "Tracked in this session only: the trade journal could not be written to disk "
                                     "(read-only host?). This row will not survive a refresh."
                                 )
                         if st.checkbox("All CC strikes", key="exp_5"):
@@ -1612,7 +1612,7 @@ def render_cashflow_tab(cfg: dict, d: DeskLocals) -> None:
                                 }
                             )
                             # AUDIT (medium): same discarded-False bug as the CC Track
-                            # Trade site above — a failed disk write must be visible.
+                            # Trade site above: a failed disk write must be visible.
                             _jrnl_ok = journal_add_entry(
                                 {
                                     "ticker": str(ticker).upper(),
@@ -1632,7 +1632,7 @@ def render_cashflow_tab(cfg: dict, d: DeskLocals) -> None:
                                 st.rerun()
                             else:
                                 st.error(
-                                    "Tracked in this session only — the trade journal could not be written to disk "
+                                    "Tracked in this session only: the trade journal could not be written to disk "
                                     "(read-only host?). This row will not survive a refresh."
                                 )
                         if st.checkbox("All CSP strikes", key="exp_6"):
@@ -1763,7 +1763,7 @@ def render_cashflow_tab(cfg: dict, d: DeskLocals) -> None:
                     st.caption("Visualizing the 'Smile': Higher IV on puts indicates the market is pricing in heavy downside fear.")
                     try:
                         # AUDIT (medium): this badge used to run calc_skew_regime's
-                        # median IV-ratio bands (1.25/1.08/0.85) — a third, separately
+                        # median IV-ratio bands (1.25/1.08/0.85), a third, separately
                         # calibrated verdict that routinely disagreed with the Vol Skew
                         # card above and the Greeks-row tile below on the same chain.
                         # The chart still plots the full smile; only the headline
@@ -1781,7 +1781,7 @@ def render_cashflow_tab(cfg: dict, d: DeskLocals) -> None:
                                 unsafe_allow_html=True,
                             )
                         else:
-                            st.caption("Skew verdict unavailable — no usable 10% OTM put/call IV pair in this snapshot.")
+                            st.caption("Skew verdict unavailable, no usable 10% OTM put/call IV pair in this snapshot.")
                         skew_fig = build_skew_chart(opts_df, price)
                         if skew_fig:
                             st.plotly_chart(skew_fig, use_container_width=True, config=_PLOTLY_UI_CONFIG)
@@ -1820,7 +1820,7 @@ def render_cashflow_tab(cfg: dict, d: DeskLocals) -> None:
                                 {(
                                     f"Historical probability of profit: <strong style='color:#10b981'>{d_wr:.0f}%</strong> ({d_n} signals backtested)."
                                     if d_n and int(d_n) > 0 else
-                                    "No historical win rate yet — this ticker has no completed blue-diamond signals to score against."
+                                    "No historical win rate yet: this ticker has no completed blue-diamond signals to score against."
                                 )}
                             </div>
                             <div style='color:#e2e8f0;font-size:.9rem;line-height:1.8'>""", unsafe_allow_html=True)
@@ -1842,7 +1842,7 @@ def render_cashflow_tab(cfg: dict, d: DeskLocals) -> None:
                             # AUDIT #22: the old copy claimed "a strong track record".
                             # RESEARCH_UPGRADE.md:14 measured the opposite when Blue is
                             # used as an entry: t=2.98 full sample but NEGATIVE in the
-                            # second half of all 12 configurations — i.e. regime beta.
+                            # second half of all 12 configurations: i.e. regime beta.
                             "It describes trend health, not a tested entry: our own backtest found Blue confluence used as an entry "
                             "was negative out of sample in every configuration tried, so treat it as a state to watch rather than a green light. "
                             "Covered Calls collect premium while riding the trend. "
@@ -1897,14 +1897,14 @@ def render_cashflow_tab(cfg: dict, d: DeskLocals) -> None:
                         _cc_mc_pop = safe_float(b0.get("mc_pop"), None)
                         _cc_pop_txt = f"MC PoP {_cc_mc_pop:.0f}%" if _cc_mc_pop is not None else "MC PoP unavailable"
                         ev_lines.append(
-                            f"CC ${b0['strike']:.0f}: <strong style='color:#94a3b8'>—</strong> "
+                            f"CC ${b0['strike']:.0f}: <strong style='color:#94a3b8'>-</strong> "
                             f"<span style='color:#64748b'>({_cc_pop_txt}; no defined max loss to price against)</span>"
                         )
                     if ps:
                         b0 = ps[0]
                         ev_ps = expected_value_dollars(b0["credit_100"], b0.get("max_loss"), b0.get("pop"))
                         if ev_ps is None:
-                            ev_lines.append("Put Spread: <strong style='color:#94a3b8'>—</strong> <span style='color:#64748b'>(missing max loss or POP)</span>")
+                            ev_lines.append("Put Spread: <strong style='color:#94a3b8'>-</strong> <span style='color:#64748b'>(missing max loss or POP)</span>")
                         else:
                             ec = "#10b981" if ev_ps > 0 else "#ef4444"
                             ev_lines.append(f"Put Spread: <strong style='color:{ec}'>${ev_ps:+.0f}</strong> (POP {float(b0['pop']):.0f}%)")
@@ -1915,9 +1915,9 @@ def render_cashflow_tab(cfg: dict, d: DeskLocals) -> None:
                     # painted every negative (call-skew) reading green "Balanced".
                     # Now shares the tab's single skew classification.
                     if _skew_verdict is not None:
-                        _p_iv_tile = f"{_skew_p_iv:.1f}%" if _skew_p_iv is not None else "—"
-                        _c_iv_tile = f"{_skew_c_iv:.1f}%" if _skew_c_iv is not None else "—"
-                        st.markdown(f"<div class='tc'><div style='font-size:.7rem;color:#64748b;text-transform:uppercase'>VOL SKEW</div><div class='mono' style='font-size:1.3rem;color:{_skew_verdict['color']};margin-top:8px'>{_skew_verdict['skew']:+.1f}%</div><div style='color:#94a3b8;font-size:.85rem;margin-top:4px'>Put IV: {_p_iv_tile} | Call IV: {_c_iv_tile}</div><div style='color:#64748b;font-size:.75rem;margin-top:6px'>{safe_html(_skew_verdict['label'])} — {safe_html(_skew_verdict['short'])}</div></div>", unsafe_allow_html=True)
+                        _p_iv_tile = f"{_skew_p_iv:.1f}%" if _skew_p_iv is not None else "n/a"
+                        _c_iv_tile = f"{_skew_c_iv:.1f}%" if _skew_c_iv is not None else "n/a"
+                        st.markdown(f"<div class='tc'><div style='font-size:.7rem;color:#64748b;text-transform:uppercase'>VOL SKEW</div><div class='mono' style='font-size:1.3rem;color:{_skew_verdict['color']};margin-top:8px'>{_skew_verdict['skew']:+.1f}%</div><div style='color:#94a3b8;font-size:.85rem;margin-top:4px'>Put IV: {_p_iv_tile} | Call IV: {_c_iv_tile}</div><div style='color:#64748b;font-size:.75rem;margin-top:6px'>{safe_html(_skew_verdict['label'])}, {safe_html(_skew_verdict['short'])}</div></div>", unsafe_allow_html=True)
                     else:
                         st.markdown("<div class='tc'><div style='font-size:.7rem;color:#64748b'>VOL SKEW</div><div style='color:#94a3b8;margin-top:8px'>Insufficient IV data</div></div>", unsafe_allow_html=True)
 
@@ -2088,7 +2088,7 @@ def render_intel_tab(d: DeskLocals) -> None:
 
         # ── REGIME-CONDITIONAL KELLY MULTIPLIER ──────────────────────────────
         # When the HMM detects a high-volatility / choppy regime, signal reliability
-        # degrades — the very indicators the Kelly formula trusts become noisier.
+        # degrades: the very indicators the Kelly formula trusts become noisier.
         # Standard practice on institutional desks: downscale Kelly by the degree of
         # "bad regime" probability so position sizes contract automatically in chop.
         #
@@ -2099,7 +2099,7 @@ def render_intel_tab(d: DeskLocals) -> None:
         #
         # Formula: multiplier = max(0.5, 1.0 − 0.5 × regime_prob_high_vol)
         # This effectively acts as an automatic second half-Kelly when in full high-vol
-        # regime — consistent with how the prop desk would manually size down in VIX spikes.
+        # regime: consistent with how the prop desk would manually size down in VIX spikes.
         _regime_kelly_mult = 1.0
         _regime_hmm_note = ""
         if use_quant_models and isinstance(qb, dict):
@@ -2259,7 +2259,7 @@ def render_intel_tab(d: DeskLocals) -> None:
     # point-in-time replay of the actual desk signals. These numbers are for color only.
     st.warning(
         "**Simulator uses a simplified momentum proxy, not the live desk formula.** "
-        "Premiums are modeled from historical volatility — illustrative, not a promise. "
+        "Premiums are modeled from historical volatility, illustrative, not a promise. "
         "Treat the run as a dress rehearsal; live fills will differ. "
         "For signal-accurate replay, use the Walk-Forward Backtest in the Quant Edge section."
     )
@@ -2273,7 +2273,7 @@ def render_intel_tab(d: DeskLocals) -> None:
         tp = br["premium"].sum() * 1
         # ── CC SIM METRICS + MISSED UPSIDE ──────────────────────────────────
         # "Missed Upside" shows the total gain capped by selling calls on
-        # winning trades — the hidden cost of covered calls on strong movers.
+        # winning trades: the hidden cost of covered calls on strong movers.
         # If premium collected > missed upside the strategy added value;
         # if missed_upside >> premium you sold the ceiling for too cheap.
         _missed_up_total = float(br.get("missed_upside", pd.Series([0.0])).sum()) if "missed_upside" in br.columns else 0.0
@@ -2381,7 +2381,7 @@ def render_intel_tab(d: DeskLocals) -> None:
                 if not _tw.empty:
                     st.warning(
                         f"**{len(_tw)} ticker(s) reporting THIS WEEK:** {', '.join(_tw['Ticker'])}. "
-                        "Pause new premium sales — IV crush risk."
+                        "Pause new premium sales: IV crush risk."
                     )
                 if not _nw.empty:
                     st.info(
@@ -2400,14 +2400,14 @@ def render_intel_tab(d: DeskLocals) -> None:
                 for _, _r in _hm.iterrows():
                     _c = _colors.get(_r["Urgency"], "#475569")
                     _days_label = (
-                        f"{int(_r['Days'])}d" if _r["Days"] is not None and pd.notna(_r["Days"]) else "—"
+                        f"{int(_r['Days'])}d" if _r["Days"] is not None and pd.notna(_r["Days"]) else "n/a"
                     )
                     _cells.append(
                         f"<div style='display:inline-flex;flex-direction:column;align-items:center;"
                         f"padding:8px 12px;margin:3px;border-radius:10px;"
                         f"border:1px solid {_c}40;background:{_c}18;min-width:72px'>"
                         f"<span style='font-size:.72rem;font-weight:800;color:{_c}'>{safe_html(_r['Ticker'])}</span>"
-                        f"<span style='font-size:.62rem;color:#94a3b8;margin-top:2px'>{safe_html(str(_r['Date'] or '—'))}</span>"
+                        f"<span style='font-size:.62rem;color:#94a3b8;margin-top:2px'>{safe_html(str(_r['Date'] or 'n/a'))}</span>"
                         f"<span style='font-size:.58rem;font-weight:700;color:{_c}'>{_days_label}</span>"
                         f"</div>"
                     )
@@ -2443,7 +2443,7 @@ def render_intel_tab(d: DeskLocals) -> None:
             and (_now_ts - _last_scan_ts) >= auto_scan_interval
         )
         # AUDIT (medium): the copy used to read "Auto refresh every 300s · next in Ns",
-        # which describes a timer. There is none — no `run_every`, no `st_autorefresh`
+        # which describes a timer. There is none, no `run_every`, no `st_autorefresh`
         # anywhere in the repo. The staleness check only fires when some *other*
         # interaction reruns the page, and then it blocks that interaction for tens of
         # seconds. Rather than bolt a background timer onto a scan that already stalls
@@ -2458,13 +2458,13 @@ def render_intel_tab(d: DeskLocals) -> None:
                 _auto_status.caption("Results are stale; rescanning now...")
             else:
                 _auto_status.caption(
-                    f"Last scan {_age}s ago (trigger: {_mode}). Results go stale at {auto_scan_interval}s — "
+                    f"Last scan {_age}s ago (trigger: {_mode}). Results go stale at {auto_scan_interval}s, "
                     "there is no background timer, so the rescan runs on your next interaction with this page "
                     "after that, or press Scan Watchlist now."
                 )
         else:
             _auto_status.caption(
-                f"Rescan armed at {auto_scan_interval}s of staleness, but only after your first manual scan — "
+                f"Rescan armed at {auto_scan_interval}s of staleness, but only after your first manual scan, "
                 "and only on a page interaction, not on a timer."
             )
         _manual_scan = st.button("Scan Watchlist", key="run_scanner")
@@ -2616,15 +2616,15 @@ def render_intel_tab(d: DeskLocals) -> None:
                                 "PoP": (
                                     f"{float(r.get('diamond_pop', 0)):.0f}%"
                                     if int(r.get("diamond_n") or 0) > 0
-                                    else "—"
+                                    else "n/a"
                                 ),
-                                "EM Safety": r.get("EM Safety", "—"),
-                                "GEX Regime": r.get("GEX Regime", "—"),
-                                "Flow / Bias": r.get("Flow / Bias", "—"),
+                                "EM Safety": r.get("EM Safety", "n/a"),
+                                "GEX Regime": r.get("GEX Regime", "n/a"),
+                                "Flow / Bias": r.get("Flow / Bias", "n/a"),
                                 "Gold Zone Dist %": float(r["dist_gz"]),
                                 "Daily": r["struct"],
                                 "10x Potential": _ten_x_badge(r.get("10x Potential", 0)),
-                                "10x Convexity": r.get("10x Convexity", "—"),
+                                "10x Convexity": r.get("10x Convexity", "n/a"),
                                 "Summary": r["summary"],
                             }
                             for r in scanner_results
@@ -2683,7 +2683,7 @@ def render_intel_tab(d: DeskLocals) -> None:
                 # AUDIT #22: this list is a WATCHLIST RANKER, not a buy trigger.
                 # RESEARCH_UPGRADE.md:14 records the repo's own finding on Blue
                 # confluence used as an entry: "regime beta | t=2.98 full sample,
-                # NEGATIVE second half, all 12 configs" — the full-sample t-stat is
+                # NEGATIVE second half, all 12 configs", the full-sample t-stat is
                 # regime exposure, and the edge inverted out of sample. The research
                 # module's conclusion was `blue_diamond_rank()` = "watchlist ranker,
                 # not trigger". The screen is kept because ordering candidates by
@@ -2698,11 +2698,11 @@ def render_intel_tab(d: DeskLocals) -> None:
                         for r in _conviction[:8]
                     )
                     _more = f" +{len(_conviction) - 8} more" if len(_conviction) > 8 else ""
-                    st.info(f"🔷 WATCHLIST RANK — Blue Diamond + 10x score ≥ 5: {_tickers}{_more}")
+                    st.info(f"🔷 WATCHLIST RANK, Blue Diamond + 10x score ≥ 5: {_tickers}{_more}")
                     st.caption(
                         "**This is a ranking, not an entry.** Our own research (`RESEARCH_UPGRADE.md`) tested Blue "
                         "confluence as an entry signal across 12 configurations: t = 2.98 on the full sample, but "
-                        "**negative in the second half of every configuration** — the full-sample number is regime "
+                        "**negative in the second half of every configuration**: the full-sample number is regime "
                         "beta, not an edge. Treat these names as candidates to watch and wait for a validated entry "
                         "(the SMA20-reclaim close, `swing_pullback_signal`), not as a buy list."
                     )
@@ -2710,7 +2710,7 @@ def render_intel_tab(d: DeskLocals) -> None:
                     # Persist each conviction ONCE per ticker per day.
                     #
                     # This block reads back from the cached scanner bundle, and
-                    # render_intel_tab is an @st.fragment — so any widget in the tab
+                    # render_intel_tab is an @st.fragment, so any widget in the tab
                     # (expander, checkbox, selectbox) used to re-enter here and append
                     # duplicate rows. Because save_radar_hits truncates to the last 200
                     # entries, ~67 reruns silently evicted the entire genuine hit history
@@ -2730,7 +2730,7 @@ def render_intel_tab(d: DeskLocals) -> None:
                                 # AUDIT #22: logged as a ranking, not a conviction buy.
                                 "source": "scanner_watchlist_rank",
                                 "explosion_score": None,
-                                # Derived, not assumed — the Tier-2 writer computes this
+                                # Derived, not assumed, the Tier-2 writer computes this
                                 # properly, so hardcoding True produced contradictory
                                 # rows for the same ticker in the persisted log.
                                 "pre_diamond": bool((r.get("pre_diamond_status") or {}).get("is_pre_diamond", False)),
@@ -2750,10 +2750,10 @@ def render_intel_tab(d: DeskLocals) -> None:
                                 {
                                     "Ticker": r.get("ticker"),
                                     "10x Score": int(r.get("10x Potential", 0) or 0),
-                                    "Diamond": r.get("d_status", "—"),
-                                    "Flags": ", ".join(sorted((r.get("10x Flags") or {}).keys())) or "—",
-                                    "Flow / Bias": r.get("Flow / Bias", "—"),
-                                    "Summary": r.get("summary", "—"),
+                                    "Diamond": r.get("d_status", "n/a"),
+                                    "Flags": ", ".join(sorted((r.get("10x Flags") or {}).keys())) or "n/a",
+                                    "Flow / Bias": r.get("Flow / Bias", "n/a"),
+                                    "Summary": r.get("summary", "n/a"),
                                 }
                                 for r in _ten_rows
                             ]
@@ -2842,7 +2842,7 @@ def render_intel_tab(d: DeskLocals) -> None:
                             <div style='text-align:center;min-width:90px'>
                                 <div style='font-size:.65rem;color:#64748b;text-transform:uppercase'>Adj. Kelly</div>
                                 <div class='mono' style='font-size:.82rem;color:#93c5fd;font-weight:700'>{r.get('Adj. Kelly %', 0.0):.1f}%</div>
-                                <div style='font-size:.58rem;color:#64748b;margin-top:3px;line-height:1.25'>MC PoP {float(r.get('scanner_mc_pop') or 0):.1f}% · HVN {('—' if r.get('hvn_floor') is None else f"${float(r['hvn_floor']):,.0f}")} · R×{float(r.get('risk_multiplier') or 1):.2f}</div>
+                                <div style='font-size:.58rem;color:#64748b;margin-top:3px;line-height:1.25'>MC PoP {float(r.get('scanner_mc_pop') or 0):.1f}% · HVN {('n/a' if r.get('hvn_floor') is None else f"${float(r['hvn_floor']):,.0f}")} · R×{float(r.get('risk_multiplier') or 1):.2f}</div>
                             </div>
                             <div style='text-align:center;min-width:100px'>
                                 <div style='font-size:.65rem;color:#64748b;text-transform:uppercase'>Confluence</div>
@@ -2859,19 +2859,19 @@ def render_intel_tab(d: DeskLocals) -> None:
                             </div>
                             <div style='text-align:center;min-width:88px'>
                                 <div style='font-size:.65rem;color:#64748b;text-transform:uppercase'>10x Sieve</div>
-                                <div class='mono' style='font-size:.78rem;color:#a78bfa;font-weight:700;line-height:1.25'>{_html_mod.escape(str(r.get("10x Convexity") or "—"))}</div>
+                                <div class='mono' style='font-size:.78rem;color:#a78bfa;font-weight:700;line-height:1.25'>{_html_mod.escape(str(r.get("10x Convexity") or "n/a"))}</div>
                             </div>
                             <div style='text-align:center;min-width:100px'>
                                 <div style='font-size:.65rem;color:#64748b;text-transform:uppercase'>GEX Regime</div>
-                                <div class='mono' style='font-size:.72rem;color:#e2e8f0;font-weight:700;line-height:1.25'>{_html_mod.escape(str(r.get("GEX Regime") or "—"))}</div>
+                                <div class='mono' style='font-size:.72rem;color:#e2e8f0;font-weight:700;line-height:1.25'>{_html_mod.escape(str(r.get("GEX Regime") or "n/a"))}</div>
                             </div>
                             <div style='text-align:center;min-width:120px'>
                                 <div style='font-size:.65rem;color:#64748b;text-transform:uppercase'>Flow / Bias</div>
-                                <div class='mono' style='font-size:.7rem;color:#e2e8f0;font-weight:700;line-height:1.25'>{_html_mod.escape(str(r.get("Flow / Bias") or "—"))}</div>
+                                <div class='mono' style='font-size:.7rem;color:#e2e8f0;font-weight:700;line-height:1.25'>{_html_mod.escape(str(r.get("Flow / Bias") or "n/a"))}</div>
                             </div>
                             <div style='text-align:center;min-width:72px'>
                                 <div style='font-size:.65rem;color:#64748b;text-transform:uppercase'>PoP</div>
-                                <div class='mono' style='font-size:.82rem;color:#c4b5fd;font-weight:700'>{(f"{float(r.get('diamond_pop', 0)):.0f}%" if int(r.get("diamond_n") or 0) > 0 else "—")}</div>
+                                <div class='mono' style='font-size:.82rem;color:#c4b5fd;font-weight:700'>{(f"{float(r.get('diamond_pop', 0)):.0f}%" if int(r.get("diamond_n") or 0) > 0 else "n/a")}</div>
                                 <div style='font-size:.62rem;color:#64748b;margin-top:2px'>Diamond win</div>
                             </div>
                             <div style='text-align:center;min-width:90px'>
@@ -2931,7 +2931,7 @@ def render_intel_tab(d: DeskLocals) -> None:
                         equity_rows = []
                         for r in scanner_results:
                             pre = r.get("pre_diamond_status", {"is_pre_diamond": False})
-                            signal = pre.get("signal_strength", "—") if pre.get("is_pre_diamond") else "—"
+                            signal = pre.get("signal_strength", "n/a") if pre.get("is_pre_diamond") else "n/a"
                             price = float(r.get("price") or 0)
                             shares = (
                                 _alloc_by_tkr.get(r["ticker"], 0)
@@ -2939,14 +2939,14 @@ def render_intel_tab(d: DeskLocals) -> None:
                                 else 0
                             )
                             equity_rows.append({
-                                "Ticker": r.get("ticker", "—"),
+                                "Ticker": r.get("ticker", "n/a"),
                                 "Signal": signal,
-                                "Price": round(price, 2) if price else "—",
+                                "Price": round(price, 2) if price else "n/a",
                                 "Suggested Shares": shares,
-                                "Stop Loss": r.get("stock_stop_price", "—"),
+                                "Stop Loss": r.get("stock_stop_price", "n/a"),
                                 "QE Score": r.get("qs", 0),
-                                "Support Proximity (%)": pre.get("support_proximity", "—"),
-                                "10x Sieve": r.get("10x Convexity", "—"),
+                                "Support Proximity (%)": pre.get("support_proximity", "n/a"),
+                                "10x Sieve": r.get("10x Convexity", "n/a"),
                             })
 
                         breakout_count = sum(1 for row in equity_rows if "🔥" in str(row.get("Signal", "")))
@@ -3028,7 +3028,7 @@ def render_intel_tab(d: DeskLocals) -> None:
                     except Exception as _e:
                         log_warn("equity radar table fallback", _e, ticker=str(ticker))
                         st.caption(
-                            "Equity Radar temporarily unavailable — showing Options Yield table instead."
+                            "Equity Radar temporarily unavailable: showing Options Yield table instead."
                         )
                         _render_scanner_options_data_table()
             else:
@@ -3127,7 +3127,7 @@ def render_intel_tab(d: DeskLocals) -> None:
         st.markdown('<div id="guide" style="position:relative;top:-80px"></div>', unsafe_allow_html=True)
         _section(
             "Quick Reference Guide",
-            "Plain language glossary for every signal on this desk — including v22 **Shadow move**, **OpEx pin**, **Sentinel Ledger**, **Market Explosion Radar**, and **regime calibration**. Keep it open during live markets.",
+            "Plain language glossary for every signal on this desk, including v22 **Shadow move**, **OpEx pin**, **Sentinel Ledger**, **Market Explosion Radar**, and **regime calibration**. Keep it open during live markets.",
             tip_plain="Mirrors the high-level story in **README.md** (repo root). Reach for this when a label feels fuzzy; clarity beats impulse every session.",
         )
         edu = [
@@ -3149,12 +3149,12 @@ def render_intel_tab(d: DeskLocals) -> None:
             ("Expected Value", "EV is your long run profit per trade. Multiply win rate by gain, then subtract loss rate times loss. Positive EV means a real edge. Negative EV means pass."),
             ("Gann Square of 9", "These are natural support and resistance levels calculated from mathematical spirals. Stocks tend to stop or bounce at these prices. Use them to pick smarter strike prices for your options."),
             ("Edge Score", "Your overall signal strength from 0 to 100. It checks five things: Trend, Momentum, Volume, Volatility, and Structure. Above 70 means prime conditions to sell options. Below 40 means wait for a better setup."),
-            ("Shadow Move (purple band)", "The <strong>Shadow</strong> is built from days when volume Z-score says <strong>whale</strong> activity (Z &gt; 2). We sort those closes by price and capture the middle <strong>70% of whale volume</strong> — that price range is shaded <strong>purple</strong> on the chart. Compare it to the gold <strong>Expected Move (1σ)</strong> rails: if the shadow is <strong>narrower</strong> than IV implies, vol may be rich; if <strong>wider</strong>, a larger move than options price may be brewing."),
-            ("Shadow breakout (regime calibration)", "When <strong>spot steps outside</strong> the purple Shadow band but <strong>still sits inside</strong> the IV <strong>1σ Expected Move</strong>, the chart tab shows a <strong>purple calibration banner</strong>. Whale prints already led price <strong>past</strong> the liquidity cluster while options vol has <strong>not</strong> fully caught up — watch for institutional-led <strong>trend continuation or reversal</strong> before retail reprices risk."),
-            ("Predicted OpEx pin", "A <strong>pink dotted</strong> line estimates where price may <strong>pin</strong> into expiry: we find the strongest dealer <strong>gamma wall</strong> (|GEX| near spot when it matters), then blend toward spot using your desk <strong>Θ/Γ</strong> — high decay efficiency makes the wall more <strong>magnetic</strong>. It is a positioning heuristic, not a settlement promise."),
+            ("Shadow Move (purple band)", "The <strong>Shadow</strong> is built from days when volume Z-score says <strong>whale</strong> activity (Z &gt; 2). We sort those closes by price and capture the middle <strong>70% of whale volume</strong>, that price range is shaded <strong>purple</strong> on the chart. Compare it to the gold <strong>Expected Move (1σ)</strong> rails: if the shadow is <strong>narrower</strong> than IV implies, vol may be rich; if <strong>wider</strong>, a larger move than options price may be brewing."),
+            ("Shadow breakout (regime calibration)", "When <strong>spot steps outside</strong> the purple Shadow band but <strong>still sits inside</strong> the IV <strong>1σ Expected Move</strong>, the chart tab shows a <strong>purple calibration banner</strong>. Whale prints already led price <strong>past</strong> the liquidity cluster while options vol has <strong>not</strong> fully caught up, watch for institutional-led <strong>trend continuation or reversal</strong> before retail reprices risk."),
+            ("Predicted OpEx pin", "A <strong>pink dotted</strong> line estimates where price may <strong>pin</strong> into expiry: we find the strongest dealer <strong>gamma wall</strong> (|GEX| near spot when it matters), then blend toward spot using your desk <strong>Θ/Γ</strong>, high decay efficiency makes the wall more <strong>magnetic</strong>. It is a positioning heuristic, not a settlement promise."),
             ("News bias (Bayesian-style)", "Headlines are scored with a <strong>weighted lexicon</strong>: <strong>forward</strong> phrases (guidance, outlook, forecast) count more than <strong>trailing</strong> words (beat, miss). A line like <em>missed earnings but raised guidance</em> tilts <strong>bullish</strong> because forward guidance outweighs the backward print. Empty or neutral text scores zero."),
             ("My Positions & Edge realization", "Use <strong>Track Trade</strong> on the optimal CC or CSP row to log a leg for this session. The ledger shows model <strong>Δ</strong>, <strong>Θ/day</strong>, and unrealized P&amp;L vs entry premium. <strong>Edge realization %</strong> compares today’s <strong>Edge Score</strong> to the score stored at track time for the <strong>active ticker</strong> (capped at 150%)."),
-            ("Pin maturity — Golden zone", "For rows tracked with v22+ snapshots: inside <strong>14 DTE</strong>, if <strong>|Dist. to pin %|</strong> has <strong>shrunk</strong> versus entry and your desk <strong>Θ/day</strong> has <strong>grown</strong> versus entry, the ledger shows <strong>✨ Golden zone</strong> — the window where pin gravity and daily decay often peak together. Older rows without snapshots show a dash."),
+            ("Pin maturity: Golden zone", "For rows tracked with v22+ snapshots: inside <strong>14 DTE</strong>, if <strong>|Dist. to pin %|</strong> has <strong>shrunk</strong> versus entry and your desk <strong>Θ/day</strong> has <strong>grown</strong> versus entry, the ledger shows <strong>✨ Golden zone</strong>, the window where pin gravity and daily decay often peak together. Older rows without snapshots show a dash."),
             ("Market Scanner", "The Scanner checks your entire watchlist in seconds. It calculates Confluence Points, Diamond Status, Gold Zone distance, and Edge Score for every ticker. Sort by confluence to find the strongest setups across all your stocks. Tickers with 7+ confluence and a Blue Diamond are your best opportunities."),
             ("Market Explosion Radar", "Use the <strong>Radar</strong> tab for a two-tier hunt: <strong>Tier 1</strong> quickly filters a broad universe for squeeze/trend/relative-strength setups, then <strong>Tier 2</strong> runs deep per-ticker diagnostics (pre-diamond + 10x + GEX). Highest-scoring hits are saved to <strong>radar_hits.json</strong> so you can review signal quality over time."),
             ("Header shortcuts (Strategies/Risk/Scanner/News/Guide)", "Top nav links jump to sections inside Streamlit tabs. If you click <strong>Strategies</strong>, <strong>Risk</strong>, <strong>Scanner</strong>, <strong>News</strong>, or <strong>Guide</strong>, the app first activates the correct tab and then scrolls to that anchor. <strong>Guide</strong> also opens the Quick Reference expander automatically."),
@@ -3171,7 +3171,7 @@ def render_intel_tab(d: DeskLocals) -> None:
 
 @st.fragment
 def render_radar_tab(d: DeskLocals) -> None:
-    """Market Explosion Radar — broad scan for hidden pre-breakout setups."""
+    """Market Explosion Radar: broad scan for hidden pre-breakout setups."""
     try:
         ticker = d.ticker
         _ = ticker
@@ -3263,7 +3263,7 @@ def render_radar_tab(d: DeskLocals) -> None:
                             (r.get("pre_diamond_status") or {}).get("is_pre_diamond")
                         ),
                         "signal": str(
-                            (r.get("pre_diamond_status") or {}).get("signal_strength", "—")
+                            (r.get("pre_diamond_status") or {}).get("signal_strength", "n/a")
                         ),
                         "10x_score": r.get("10x Potential"),
                         "qs": r.get("qs"),
@@ -3276,16 +3276,16 @@ def render_radar_tab(d: DeskLocals) -> None:
             for r in deep_results[:10]:
                 pre = r.get("pre_diamond_status") or {}
                 is_pre = pre.get("is_pre_diamond", False)
-                signal = pre.get("signal_strength", "—")
+                signal = pre.get("signal_strength", "n/a")
                 tenx = int(r.get("10x Potential", 0) or 0)
                 exp_score = r.get("explosion_score", 0)
                 tkr = safe_html(r["ticker"])
                 price = safe_float(r.get("price"), 0)
                 qs_v = safe_float(r.get("qs"), 0)
                 conf = int(r.get("cp_score", 0) or 0)
-                struct = safe_html(str(r.get("struct", "—")))
-                gex = safe_html(str(r.get("GEX Regime", "—")))
-                d_status = safe_html(str(r.get("d_status", "—")))
+                struct = safe_html(str(r.get("struct", "n/a")))
+                gex = safe_html(str(r.get("GEX Regime", "n/a")))
+                d_status = safe_html(str(r.get("d_status", "n/a")))
 
                 if exp_score >= 60:
                     border_color = "#10b981"
@@ -3455,8 +3455,8 @@ def render_ledger_tab(d: DeskLocals) -> None:
     _section(
         "📊 Sentinel Ledger",
         "Session-based simulated trade log: track desk strikes, then read portfolio-level Greeks and mark-to-model P&L.",
-        tip_plain="**Pin maturity ✨ Golden zone** (≤14 DTE): |Dist. to pin %| shrinking vs entry while desk Θ/day rises vs entry — pin magnet strengthens into expiry. "
-        "New **Track Trade** rows snapshot dist-to-pin and Θ/day at entry. On the chart tab, **Shadow breakout** flags spot outside the purple whale band but inside IV 1σ — early regime read.",
+        tip_plain="**Pin maturity ✨ Golden zone** (≤14 DTE): |Dist. to pin %| shrinking vs entry while desk Θ/day rises vs entry, pin magnet strengthens into expiry. "
+        "New **Track Trade** rows snapshot dist-to-pin and Θ/day at entry. On the chart tab, **Shadow breakout** flags spot outside the purple whale band but inside IV 1σ, early regime read.",
     )
     _led = st.session_state.get("_cf_ledger") or []
     if not _led:
@@ -3495,9 +3495,9 @@ def render_ledger_tab(d: DeskLocals) -> None:
     # when to close/roll before theta decay accelerates toward dangerous levels.
     # The three standard desk rules:
     #   • 21 DTE ("21-days rule"): close/roll ALL short options at 21 DTE regardless
-    #     of profit — gamma risk explodes inside 3 weeks; most of the theta has been
-    #     captured already (50–70% of premium in the first half of the cycle).
-    #   • 50% profit: close the trade at 50% of max profit whenever reached — this
+    #     of profit: gamma risk explodes inside 3 weeks; most of the theta has been
+    #     captured already (50-70% of premium in the first half of the cycle).
+    #   • 50% profit: close the trade at 50% of max profit whenever reached, this
     #     avoids the "last mile" risk of holding through a reversal for a small gain.
     #   • 80% profit: hard exit for high-theta trades where 80% capture represents
     #     strong execution; especially important near earnings or macro events.
@@ -3542,7 +3542,7 @@ def render_ledger_tab(d: DeskLocals) -> None:
                     _roll_alerts.append({
                         "level": "error",
                         "msg": (
-                            f"🚨 **{_tkr} {_leg} ${_strike:.0f} — {_current_dte} DTE (≤21 DTE roll threshold)**  "
+                            f"🚨 **{_tkr} {_leg} ${_strike:.0f}, {_current_dte} DTE (≤21 DTE roll threshold)**  "
                             f"Close or roll now. Gamma risk accelerates sharply inside 3 weeks. "
                             f"Most of your theta has been captured. Staying risks a sudden assignment or gap."
                         ),
@@ -3550,7 +3550,7 @@ def render_ledger_tab(d: DeskLocals) -> None:
 
                 # ── Check 50% / 80% profit capture thresholds ────────────────────
                 # Premium sellers' desk rule: don't ride a winner all the way to zero.
-                # At 50% profit the risk/reward tilts against you — you keep 50% of
+                # At 50% profit the risk/reward tilts against you, you keep 50% of
                 # max gain but still carry 100% of the downside tail risk.
                 # At 80% capture it's a hard desk exit: the remaining edge is tiny
                 # relative to the gamma and event risk of holding.
@@ -3585,7 +3585,7 @@ def render_ledger_tab(d: DeskLocals) -> None:
                                 _roll_alerts.append({
                                     "level": "error",
                                     "msg": (
-                                        f"💰 **{_tkr} {_leg} ${_strike:.0f} — {_profit_pct:.0f}% profit captured (≥80% hard exit)**  "
+                                        f"💰 **{_tkr} {_leg} ${_strike:.0f}, {_profit_pct:.0f}% profit captured (≥80% hard exit)**  "
                                         f"Entry: ${_prem_entry:,.0f} | Est. current mark: ${_current_prem_100:,.0f}.  "
                                         f"Buy this position back NOW. The remaining edge ({100-_profit_pct:.0f}%) "
                                         f"is tiny vs the tail risk of holding through a reversal or event."
@@ -3595,10 +3595,10 @@ def render_ledger_tab(d: DeskLocals) -> None:
                                 _roll_alerts.append({
                                     "level": "warning",
                                     "msg": (
-                                        f"🎯 **{_tkr} {_leg} ${_strike:.0f} — {_profit_pct:.0f}% profit captured (≥50% close rule)**  "
+                                        f"🎯 **{_tkr} {_leg} ${_strike:.0f}, {_profit_pct:.0f}% profit captured (≥50% close rule)**  "
                                         f"Entry: ${_prem_entry:,.0f} | Est. current mark: ${_current_prem_100:,.0f}.  "
                                         f"Consider closing. You've banked half the premium "
-                                        f"while still carrying full downside risk — desk rule says take it."
+                                        f"while still carrying full downside risk: desk rule says take it."
                                     ),
                                 })
                     except Exception as _pe:
@@ -3635,7 +3635,7 @@ def render_ledger_tab(d: DeskLocals) -> None:
         _var95 = _m.get("var_95_1d")
         st.metric(
             "VaR 95% (1d, delta-corr)",
-            f"${_var95:,.2f}" if _var95 is not None else "—",
+            f"${_var95:,.2f}" if _var95 is not None else "n/a",
             help="Approximate 1-day 95% VaR using delta-dollar exposures, 20d realized vol, and cached watchlist correlation matrix.",
         )
     with m5:
@@ -3644,7 +3644,7 @@ def render_ledger_tab(d: DeskLocals) -> None:
         _er = _v22.get("avg_edge_realization")
         st.metric(
             "Edge realization (avg, active tickers)",
-            f"{_er:.1f}%" if _er is not None else "—",
+            f"{_er:.1f}%" if _er is not None else "n/a",
             help="Current Quant Edge vs **qs_at_entry** for ledger rows on the active symbol (capped at 150%).",
         )
     if st.button("Clear Sentinel Ledger", key="cf_ledger_clear"):
@@ -3666,13 +3666,13 @@ def render_ledger_tab(d: DeskLocals) -> None:
             _jrows.append(
                 {
                     "#": _ji + 1,
-                    "Ticker": _je.get("ticker", "—"),
-                    "Type": str(_je.get("option_type", "—")).upper(),
+                    "Ticker": _je.get("ticker", "n/a"),
+                    "Type": str(_je.get("option_type", "n/a")).upper(),
                     "Strike": f"${float(_je.get('strike', 0)):.0f}",
                     "Premium": f"${float(_je.get('premium_100', 0)):.0f}",
-                    "Entry": _je.get("entry_date", "—"),
+                    "Entry": _je.get("entry_date", "n/a"),
                     "Status": "✅ Closed" if _jstatus == "closed" else "🟢 Open",
-                    "P&L": f"${float(_je.get('realized_pnl', 0)):.2f}" if _jstatus == "closed" else "—",
+                    "P&L": f"${float(_je.get('realized_pnl', 0)):.2f}" if _jstatus == "closed" else "n/a",
                 }
             )
         st.dataframe(pd.DataFrame(_jrows), use_container_width=True, hide_index=True)

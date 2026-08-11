@@ -1,5 +1,5 @@
 """
-Data layer — yfinance fetchers with retry/backoff, caching, macro dashboard.
+Data layer: yfinance fetchers with retry/backoff, caching, macro dashboard.
 """
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ _RADAR_UNIVERSE = "SOUN,BBAI,BIGC,BRZE,DT,GTLB,PATH,ESTC,CFLT,IOT,S,MNDY,DUOL,TO
 _RS_SPY_LOOKBACK_SESSIONS = 90
 
 # yfinance 0.2+ requires curl_cffi sessions for Yahoo (TLS fingerprinting). One shared
-# session for all Tickers, ``yf.download``, and direct JSON calls — connection reuse and
+# session for all Tickers, ``yf.download``, and direct JSON calls, connection reuse and
 # consistent cookies. Community Cloud empty bars + “possibly delisted” are usually
 # throttling on shared egress, not actual delistings.
 #
@@ -44,7 +44,7 @@ _FETCH_INFO_RL_LOCK = threading.Lock()
 # --- Price-adjustment basis -------------------------------------------------
 # Yahoo ``history()`` / ``download(auto_adjust=True)`` return split- AND dividend-adjusted
 # prices. Alpha Vantage's free ``TIME_SERIES_DAILY`` returns raw as-traded prices. Mixing
-# the two silently injects a fake gap at any split — fatal on the small-cap / reverse-split
+# the two silently injects a fake gap at any split, fatal on the small-cap / reverse-split
 # names this app scans. Every frame is tagged so consumers can check before comparing.
 PRICE_BASIS_ADJUSTED = "adjusted"
 PRICE_BASIS_UNADJUSTED = "unadjusted"
@@ -61,7 +61,7 @@ def price_basis(df: Optional[pd.DataFrame]) -> Optional[str]:
 def bases_comparable(*frames: Optional[pd.DataFrame]) -> bool:
     """True when every tagged frame shares one basis (relative-strength safety check).
 
-    Untagged frames are ignored rather than assumed — absence of a tag is not evidence.
+    Untagged frames are ignored rather than assumed, absence of a tag is not evidence.
     Two frames with *different* known bases are never comparable.
     """
     seen = {b for b in (price_basis(f) for f in frames) if b is not None}
@@ -153,7 +153,7 @@ def _bind_yfdata_session() -> None:
 
 
 def _patch_yfinance_data_layer_timeout() -> None:
-    """Cap ``YfData`` HTTP timeouts and bind singleton. Never raises — import must not fail."""
+    """Cap ``YfData`` HTTP timeouts and bind singleton. Never raises, import must not fail."""
     try:
         from yfinance.data import YfData
     except Exception as e:
@@ -196,17 +196,17 @@ def _patch_yfinance_data_layer_timeout() -> None:
 
 _patch_yfinance_data_layer_timeout()
 
-# Yahoo JSON API (same family yfinance uses) — fallback when Ticker.options is transiently empty.
+# Yahoo JSON API (same family yfinance uses): fallback when Ticker.options is transiently empty.
 _YAHOO_OPTIONS_HEADERS = {
     "User-Agent": _YAHOO_BROWSER_UA,
     "Accept": "application/json",
 }
 
 # ─────────────────────────────────────────────────────────────────────────
-# RETRY WRAPPER — handles yfinance throttling gracefully
+# RETRY WRAPPER: handles yfinance throttling gracefully
 # ─────────────────────────────────────────────────────────────────────────
 def _is_yahoo_timeout_error(exc: BaseException) -> bool:
-    """True for curl tar-pit / read timeouts — do not burn extra retries + sleeps."""
+    """True for curl tar-pit / read timeouts: do not burn extra retries + sleeps."""
     if type(exc).__name__ == "Timeout":
         return True
     msg = str(exc)
@@ -361,7 +361,7 @@ _PLOTLY_UI_CONFIG = {
     "scrollZoom": False,
 }
 
-# Dashboard theme — transparent canvases, faint grids, premium palette (blues / green / red)
+# Dashboard theme: transparent canvases, faint grids, premium palette (blues / green / red)
 _PLOTLY_PAPER_BG = "rgba(0,0,0,0)"
 _PLOTLY_PLOT_BG = "rgba(0,0,0,0)"
 _PLOTLY_GRID = "rgba(128,128,128,0.2)"
@@ -554,7 +554,7 @@ def _fetch_stock_alphavantage(sym: str, period: str, interval: str) -> Optional[
     basis = PRICE_BASIS_ADJUSTED
     ts = _query("TIME_SERIES_DAILY_ADJUSTED")
     if ts is None:
-        # Premium-only on the free tier — fall back to raw bars, but never silently.
+        # Premium-only on the free tier: fall back to raw bars, but never silently.
         ts = _query("TIME_SERIES_DAILY")
         basis = PRICE_BASIS_UNADJUSTED
         if ts is not None:
@@ -620,7 +620,7 @@ def _fetch_stock_alphavantage(sym: str, period: str, interval: str) -> Optional[
     df = df.tail(max(60, min(n, len(df))))
     if df.empty:
         return None
-    # Tag AFTER slicing — attrs must survive onto the frame the caller actually receives.
+    # Tag AFTER slicing: attrs must survive onto the frame the caller actually receives.
     df.attrs["price_basis"] = basis
     df.attrs["source"] = "alphavantage"
     return df
@@ -628,7 +628,7 @@ def _fetch_stock_alphavantage(sym: str, period: str, interval: str) -> Optional[
 
 @st.cache_data(ttl=300)
 def fetch_stock(ticker, period="1y", interval="1d"):
-    """Yahoo daily/intraday bars; never raises — returns ``None`` on any failure."""
+    """Yahoo daily/intraday bars; never raises, returns ``None`` on any failure."""
     try:
         sym = str(ticker).upper().strip()
         if not sym:
@@ -686,8 +686,8 @@ _MACRO_TICKER_TO_LABEL = {
 def _macro_unavailable(label: str) -> dict:
     """Placeholder for a macro series we could not fetch.
 
-    ``price=None`` (never a plausible-looking number) so the UI renders "—" and every
-    VIX-conditional branch — all of which guard with ``if vix_val and ...`` — correctly
+    ``price=None`` (never a plausible-looking number) so the UI renders "n/a" and every
+    VIX-conditional branch: all of which guard with ``if vix_val and ...``, correctly
     treats the value as absent. Previously this returned VIX 20.0 / 10Y 4.5%, which are
     indistinguishable from live data and sat exactly on the VIX_ELEVATED boundary.
     """
@@ -932,7 +932,7 @@ def active_ticker_frames_from_panel(
 
 
 class GlobalMarketSnapshot(NamedTuple):
-    """One ``yf.download`` for watchlist ∪ macro ∪ risk ∪ active — desk, risk matrix, and scanner panel."""
+    """One ``yf.download`` for watchlist ∪ macro ∪ risk ∪ active, desk, risk matrix, and scanner panel."""
 
     desk: DeskMarketSnapshot
     risk_closes_df: pd.DataFrame
@@ -1019,7 +1019,7 @@ def fetch_global_market_bundle(watch_syms: tuple, active_ticker: str) -> GlobalM
 
     ad, aw, am = active_ticker_frames_from_panel(raw, act)
     # Desk consensus only needs the active symbol (see render_pre_tabs). Scanner rows call
-    # evaluate_fundamental_sieve per ticker — avoid N× fundamental hits here (Cloud health-check timeout).
+    # evaluate_fundamental_sieve per ticker: avoid N× fundamental hits here (Cloud health-check timeout).
     sieve_map: dict = {}
     try:
         sieve_map[str(act).upper().strip()] = evaluate_fundamental_sieve(act)
@@ -1066,7 +1066,7 @@ def radar_broad_filter(universe_csv: str, spy_closes: pd.Series = None) -> list[
             return []
 
         # Audit (medium, RS): the old inline block took ``.tail(90)`` of the stock and of a
-        # separately-fetched SPY independently — two unaligned windows whose endpoints need not
+        # separately-fetched SPY independently: two unaligned windows whose endpoints need not
         # even be the same dates. Reuse the inner-joined implementation instead of duplicating it.
         rs_map = rs_spy_ratio_map_from_close_matrix(
             _close_matrix_with_spy(close, spy_closes),
@@ -1286,7 +1286,7 @@ def fetch_info(ticker):
     """Yahoo quote summary fields, with Alpha Vantage gap-fill for cash/EV/EBITDA; never raises.
 
     Audit (medium, rate-limits): the cooldown check used to live *inside* the 300s-TTL cached
-    body, where it only ever ran on a cache miss — provably inert for the whole TTL. It now
+    body, where it only ever ran on a cache miss, provably inert for the whole TTL. It now
     runs outside the cache, and the fetch itself raises rather than returning ``{}`` so a
     transient 429 is not stored as a durable answer for the next five minutes.
     """
@@ -1319,7 +1319,7 @@ fetch_info.clear = _fetch_info_cached.clear
 def fundamental_sieve_from_inputs(fcf, ev, ebitda_yoy, asset_yoy) -> Optional[dict]:
     """Pure sieve math: FCF yield vs EV plus EBITDA/asset efficiency. ``None`` when inputs are missing.
 
-    Audit #25 — the efficiency ratio divides two **signed** YoY terms, so EBITDA −50% over
+    Audit #25: the efficiency ratio divides two **signed** YoY terms, so EBITDA −50% over
     assets −10% used to read **+5.0**, indistinguishable from genuine growth: "EBITDA collapsing
     faster than the balance sheet shrinks" scored identically to "EBITDA growing faster than
     assets", and a melting ice cube clears the >10% FCF-yield leg easily on a small EV. The
@@ -1472,7 +1472,7 @@ def compute_iv_rank_proxy(sym: str, spot: float, ref_iv_pct: float):
 
     Yahoo does not expose a true 52-week ATM IV series per equity; this **term-structure proxy**
     compares your reference IV (e.g. prop-desk strike) to the cheapest vs richest ATM IV across
-    listed expirations. Returns ``dict`` with ``rank`` (0–100), ``lo``, ``hi``, or ``None``."""
+    listed expirations. Returns ``dict`` with ``rank`` (0-100), ``lo``, ``hi``, or ``None``."""
     if ref_iv_pct is None or spot is None or spot <= 0:
         return None
     try:
@@ -1547,8 +1547,8 @@ def fetch_news(ticker):
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_news_headlines(symbol: str):
-    """Latest 5–8 Yahoo headlines for NLP bias (3600 s TTL to protect rate limits).
-    Uses shared _parse_news_items parser — previously this function duplicated
+    """Latest 5-8 Yahoo headlines for NLP bias (3600 s TTL to protect rate limits).
+    Uses shared _parse_news_items parser: previously this function duplicated
     all parsing logic from fetch_news."""
     try:
         sym = str(symbol).upper().strip()
@@ -1566,7 +1566,7 @@ def post_earnings_vol_crush_pct_from_dates(
 ) -> Optional[float]:
     """Pure: mean % change in short-window **realized** vol after vs before past earnings.
 
-    Audit #17 — yfinance builds ``earnings_dates`` with a **tz-aware** index in both of its
+    Audit #17: yfinance builds ``earnings_dates`` with a **tz-aware** index in both of its
     construction branches, while the old code compared it against a naive
     ``pd.Timestamp.now().normalize()``. That raised ``TypeError: Cannot compare tz-naive and
     tz-aware timestamps``, the caller's blanket ``except`` swallowed it, and the function
@@ -1747,7 +1747,7 @@ def _coerce_earnings_to_yyyy_mm_dd(raw) -> str | None:
 
 
 def _earnings_next_from_yahoo_quotesummary(symbol: str) -> str | None:
-    """Yahoo v10 quoteSummary calendarEvents — works when yfinance ``calendar`` is empty (common on Cloud)."""
+    """Yahoo v10 quoteSummary calendarEvents: works when yfinance ``calendar`` is empty (common on Cloud)."""
     sym = str(symbol).upper().strip()
     if not sym:
         return None
@@ -1886,7 +1886,7 @@ def _earnings_from_yfinance_earnings_dates(symbol: str) -> str | None:
 
 
 def _resolve_next_earnings_yyyy_mm_dd(symbol: str) -> str | None:
-    """Merge all sources (HTTP first, then yfinance paths). Uncached — wrap with ``fetch_earnings_date``."""
+    """Merge all sources (HTTP first, then yfinance paths). Uncached, wrap with ``fetch_earnings_date``."""
     sym = str(symbol).upper().strip()
     if not sym:
         return None
@@ -1923,7 +1923,7 @@ def _resolve_next_earnings_yyyy_mm_dd(symbol: str) -> str | None:
 
 @st.cache_data(ttl=600)
 def fetch_earnings_date(ticker):
-    """Next earnings date as YYYY-MM-DD — multi-source (Yahoo quoteSummary, calendar, earnings_dates, .info)."""
+    """Next earnings date as YYYY-MM-DD: multi-source (Yahoo quoteSummary, calendar, earnings_dates, .info)."""
     return _resolve_next_earnings_yyyy_mm_dd(str(ticker).upper().strip())
 
 

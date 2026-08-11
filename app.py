@@ -242,11 +242,11 @@ def main():
     if _defer_options_fetch:
         # Audit finding: the deferred first pass computes Quant Edge, Gold Zone,
         # confluence and diamonds WITHOUT the options chain, flips `_cf_first_pass_done`
-        # and stops — so the numbers silently changed on the next unrelated click and the
+        # and stops: so the numbers silently changed on the next unrelated click and the
         # user had no way to know the first set was partial. Say so, and (below, at the
         # end of main) hydrate immediately instead of waiting for a stray interaction.
         st.info(
-            "⏳ **Fast first render** — the options chain has not loaded yet. Quant Edge, Gold Zone, "
+            "⏳ **Fast first render**: the options chain has not loaded yet. Quant Edge, Gold Zone, "
             "confluence and diamonds on this pass are computed **without** options data and will "
             "refresh in a moment."
         )
@@ -255,7 +255,7 @@ def main():
         st.error(
             f"**Price data unavailable** for `{_sym_e}`. "
             "Yahoo Finance often **rate-limits** shared servers (Streamlit Community Cloud shares IPs), "
-            "so liquid names like this can still fail—it is usually throttling, not a bad symbol.\n\n"
+            "so liquid names like this can still fail-it is usually throttling, not a bad symbol.\n\n"
             "**Try:** another ticker from the watchlist tape; **⋯ → Reboot app** in Streamlit Cloud for a fresh IP; "
             "or clear the cached fetch below and retry (otherwise a miss can stay cached up to **5 minutes**)."
         )

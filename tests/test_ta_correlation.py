@@ -1,4 +1,4 @@
-"""TA.get_correlation_matrix — inner join, Pearson, shape."""
+"""TA.get_correlation_matrix, inner join, Pearson, shape."""
 from __future__ import annotations
 
 import numpy as np

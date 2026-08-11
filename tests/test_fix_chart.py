@@ -39,14 +39,14 @@ def _ohlcv(closes, volumes=None):
 
 
 def _up_then_down(n=120):
-    """Rally into a peak, then sell off below the start — swing low postdates the high."""
+    """Rally into a peak, then sell off below the start, swing low postdates the high."""
     up = np.linspace(130.0, 160.0, n // 2)
     down = np.linspace(160.0, 100.0, n - n // 2)
     return np.concatenate([up, down])
 
 
 def _down_then_up(n=120):
-    """Sell off into a trough, then rally past the old high — swing high postdates the low."""
+    """Sell off into a trough, then rally past the old high, swing high postdates the low."""
     down = np.linspace(130.0, 100.0, n // 2)
     up = np.linspace(100.0, 160.0, n - n // 2)
     return np.concatenate([down, up])

@@ -1,4 +1,4 @@
-"""Tests for modules/dossier.py — the Deep AI Analysis provider chain.
+"""Tests for modules/dossier.py, the Deep AI Analysis provider chain.
 
 Contract under test:
   * numbers only ever come from the deterministic layer (facts), never the LLM
@@ -79,7 +79,7 @@ INFO = {
 
 
 def synthetic_bars(n: int = 300, start: float = 100.0, step: float = 0.2) -> dict:
-    """Duck-typed OHLC 'frame' (dict of columns) — collect_facts never needs pandas."""
+    """Duck-typed OHLC 'frame' (dict of columns): collect_facts never needs pandas."""
     closes = [start + step * i for i in range(n)]
     return {
         "High": [c * 1.01 for c in closes],
@@ -226,7 +226,7 @@ def test_cli_argv_carries_only_the_validated_symbol(cli_present, spy_run, tmp_pa
 
 
 # ---------------------------------------------------------------------------
-# deterministic layer — real numbers, real sources
+# deterministic layer: real numbers, real sources
 # ---------------------------------------------------------------------------
 
 def test_facts_carry_values_and_sources():
@@ -314,7 +314,7 @@ def test_deterministic_dossier_shape():
 
 
 # ---------------------------------------------------------------------------
-# figure scrubbing — the LLM is never the source of a number
+# figure scrubbing: the LLM is never the source of a number
 # ---------------------------------------------------------------------------
 
 def test_strip_figures_removes_every_numeric_token():
@@ -364,7 +364,7 @@ def test_narrative_payload_rejects_junk():
 
 
 # ---------------------------------------------------------------------------
-# CLI provider — present / absent / timeout / garbage / error
+# CLI provider: present / absent / timeout / garbage / error
 # ---------------------------------------------------------------------------
 
 def test_cli_present_attaches_narrative_without_touching_facts(cli_present, spy_run, tmp_path):
@@ -515,7 +515,7 @@ def test_llm_numbers_never_become_facts(cli_present, monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# cache — hit / miss / expiry / atomicity
+# cache: hit / miss / expiry / atomicity
 # ---------------------------------------------------------------------------
 
 def test_cache_roundtrip_miss_then_hit(tmp_path):
@@ -591,7 +591,7 @@ def test_dossier_to_dict_from_dict_roundtrip():
 
 
 # ---------------------------------------------------------------------------
-# corrupt cache — QUARANTINE, never destroy (the load_journal bug, not repeated)
+# corrupt cache: QUARANTINE, never destroy (the load_journal bug, not repeated)
 # ---------------------------------------------------------------------------
 
 def test_corrupt_cache_is_quarantined_not_deleted(tmp_path):
@@ -641,7 +641,7 @@ def test_quarantine_never_collides(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# resilience — get_dossier must never raise
+# resilience: get_dossier must never raise
 # ---------------------------------------------------------------------------
 
 def test_get_dossier_never_raises_when_fact_layer_explodes(cli_absent, no_run, tmp_path, monkeypatch):

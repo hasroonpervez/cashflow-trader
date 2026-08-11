@@ -1,5 +1,5 @@
 """
-Technical Analysis engine — TA class with all indicators.
+Technical Analysis engine: TA class with all indicators.
 EMA, SMA, RSI, MACD, Bollinger, ATR, Stoch, VWAP, Ichimoku, Supertrend,
 ADX, CCI, OBV, Volume Profile, Divergences, Fibonacci, Gann, S/R, FVG,
 Market Structure, Hurst exponent.
@@ -67,8 +67,8 @@ class TA:
         Tickers with fewer than ``max_lags + 15`` valid closes cannot be fractionally
         differenced and are excluded. AUDIT (medium, ta.py:74): that exclusion used to be
         silent, so a short-history name simply vanished from the correlation matrix and
-        every downstream overlap/haircut lookup returned "no correlation" — i.e. **full
-        size** — for exactly the names we know least about. The dropped names are now
+        every downstream overlap/haircut lookup returned "no correlation", i.e. **full
+        size**: for exactly the names we know least about. The dropped names are now
         logged and published on ``.attrs['ffd_dropped_insufficient']`` so callers can tell
         "measured as uncorrelated" apart from "never measured".
         """
@@ -141,7 +141,7 @@ class TA:
 
     @staticmethod
     def rsi(s, p=14):
-        """Wilder's RSI — EWM with com=p-1 (α=1/p), matching TradingView/Bloomberg.
+        """Wilder's RSI: EWM with com=p-1 (α=1/p), matching TradingView/Bloomberg.
         Previous implementation used simple rolling mean which gives systematically
         different (incorrect) RSI values, distorting all signal logic downstream."""
         delta = pd.to_numeric(s, errors="coerce").diff()
@@ -177,7 +177,7 @@ class TA:
 
     @staticmethod
     def atr(df, p=14):
-        """Wilder's ATR — RMA (EWM with α=1/p) of True Range, matching TradingView/Bloomberg.
+        """Wilder's ATR: RMA (EWM with α=1/p) of True Range, matching TradingView/Bloomberg.
 
         AUDIT (medium, ta.py:145): the previous implementation was ``TR.rolling(p).mean()``,
         a *simple* moving average. That diverges from every charting platform by +2.33% on
@@ -219,7 +219,7 @@ class TA:
 
     @staticmethod
     def supertrend(df, period=10, mult=3.0):
-        """Supertrend — FIXED: uses numpy arrays to avoid pandas chained indexing warnings."""
+        """Supertrend: FIXED: uses numpy arrays to avoid pandas chained indexing warnings."""
         atr_v = TA.atr(df, period).values
         hl2 = ((df["High"] + df["Low"]) / 2).values
         close = df["Close"].values
@@ -424,9 +424,9 @@ class TA:
 
         AUDIT #26: the baseline used to include the bar being scored
         (``vol.rolling(w)`` with ``ddof=0``), which algebraically caps z at exactly
-        √(w−1) — 3.0000 at w=10, 5.3852 at w=30, 6.2450 at w=40. ``detect_diamonds``
+        √(w−1): 3.0000 at w=10, 5.3852 at w=30, 6.2450 at w=40. ``detect_diamonds``
         grades ``zlv > 3.0`` for its 2-point whale tier (``options.py:909``), so that tier
-        was provably unreachable in the choppy regime that selects w=10 — the exact regime
+        was provably unreachable in the choppy regime that selects w=10, the exact regime
         where an institutional print matters most. Scoring the current bar against a
         baseline that excludes it (``vol.shift(1)``) is the correct anomaly-z construction
         and removes the ceiling entirely: a 20× print now reads ~19σ at any window.
@@ -515,9 +515,9 @@ class TA:
             "n_whale_bars": int(len(whale)),
         }
 
-    # AUDIT #27 — measured null distribution of the Anis-Lloyd-corrected R/S estimator.
+    # AUDIT #27: measured null distribution of the Anis-Lloyd-corrected R/S estimator.
     # 4,000 pure Gaussian random walks per n ∈ {60, 100, 150, 251, 500, 1000}: the corrected
-    # estimate is centred on 0.500 (raw was 0.524 — that bias is what made 26% of pure noise
+    # estimate is centred on 0.500 (raw was 0.524, that bias is what made 26% of pure noise
     # read as "trending") and its dispersion is well described by SE(H) ≈ 0.23 / ln(n)
     # (measured sd·ln(n) = 0.225, 0.229, 0.229, 0.222, 0.221, 0.214).
     _HURST_RS_SE_COEF = 0.23
@@ -558,7 +558,7 @@ class TA:
 
         Returns ``{'h', 'stderr', 'n', 'edge', 'significant', 'regime'}`` where ``regime`` is
         ``'TRENDING'`` / ``'MEAN_REVERTING'`` / ``'RANDOM_WALK'`` and ``significant`` is False
-        whenever the ±2·SE interval spans a decision threshold. Read ``h`` for display only —
+        whenever the ±2·SE interval spans a decision threshold. Read ``h`` for display only
         branch on ``regime``/``significant``, never on ``h`` alone (AUDIT #27).
         """
         try:
@@ -626,7 +626,7 @@ class TA:
         """Anis-Lloyd-corrected R/S Hurst on the last ``window`` closes. ``Optional[float]``.
 
         AUDIT #27: the previous version was raw ``log(R/S)/log(n)``, which carries the
-        Anis-Lloyd small-sample bias — measured mean 0.524 (sd 0.042) on 400 *pure random
+        Anis-Lloyd small-sample bias: measured mean 0.524 (sd 0.042) on 400 *pure random
         walks* of 251 returns, so **26.2% of pure noise was labelled trending** by the
         ``> 0.55`` cutoff its own docstring published. The docstring's "SE ≈ 0.09 at 252
         bars" was wrong in both directions.
@@ -634,7 +634,7 @@ class TA:
         Two changes: the estimate is bias-corrected (null now centred on 0.500), and with
         ``require_significance`` (the default) a number is returned **only** when it clears
         ±2·SE of the measured null *and* the 0.45/0.55 cutoffs its callers use. Otherwise
-        ``None`` — never a confident regime label built on noise. Every caller already
+        ``None``: never a confident regime label built on noise. Every caller already
         handles ``None`` as "no regime read" (``signal_desk.py:594``, ``options.py:1216``,
         ``data.py:995``), so a ``None`` here degrades to the random-walk prior rather than
         to a fabricated verdict. Pass ``require_significance=False`` to display the raw
@@ -651,8 +651,8 @@ class TA:
     def hurst(series):
         """Hurst exponent, float-returning, with the random-walk prior of 0.5 as the default.
 
-        AUDIT #27: this used to be a *second, different* estimator — aggregated-variance
-        slope/2 — with only 5 usable lags at n=251. Measured on pure Gaussian random walks
+        AUDIT #27: this used to be a *second, different* estimator, aggregated-variance
+        slope/2: with only 5 usable lags at n=251. Measured on pure Gaussian random walks
         it returned mean 0.472 with sd 0.105, labelling **64% of pure noise** as either
         trending or mean-reverting, and it disagreed with ``calculate_hurst_exponent`` by
         ~0.05 in mean on identical data while sharing the same 0.55/0.45 cutoffs. Keeping
@@ -661,7 +661,7 @@ class TA:
         variance-ratio method is simply too noisy to use at n=252.
 
         Stays float-returning (rather than Optional) because ``options.py:781`` does
-        ``float(TA.hurst(close))`` and ``renderers.py:421`` formats it unconditionally —
+        ``float(TA.hurst(close))`` and ``renderers.py:421`` formats it unconditionally
         0.5 is the honest "no measurable regime" answer for both.
         """
         try:
@@ -683,16 +683,16 @@ class TA:
         a DataFrame with a ``Close`` column. Series are aligned with ``join='inner'`` on
         dates so mismatched lengths do not skew pairwise samples.
 
-        AUDIT (medium, ta.py:566): the "90-day" matrix was built from **39 observations** —
+        AUDIT (medium, ta.py:566): the "90-day" matrix was built from **39 observations**
         ``tail(90)`` was taken *before* the FFD convolution burned 50 lags, and the final
         ``diff()`` cost one more. Pearson SE at n=39 is ≈0.167 against knife-edge cutoffs at
         0.75 (``options.py:963``), 0.80 (``options.py:2079``) and 0.6/0.8
-        (``options.py:2387``) — a true ρ of 0.55 crosses 0.75 roughly one time in eight.
+        (``options.py:2387``), a true ρ of 0.55 crosses 0.75 roughly one time in eight.
         Two fixes: retain ``lookback_days + max_lags + 1`` closes so ``lookback_days``
         innovations actually survive the transform, and return an **empty** frame when
-        fewer than ``min_obs`` survive anyway. Empty is the existing "unknown" signal —
+        fewer than ``min_obs`` survive anyway. Empty is the existing "unknown" signal
         every caller already treats an empty/None matrix as "apply no correlation penalty"
-        — so a matrix too thin to trust can no longer trigger a penalty. The realised
+: so a matrix too thin to trust can no longer trigger a penalty. The realised
         observation count is published on ``.attrs['n_obs']``.
         """
         if not price_history_dict:

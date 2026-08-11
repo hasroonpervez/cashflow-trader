@@ -1,6 +1,6 @@
-# Research Upgrade — Validated Signals (Aug 2026)
+# Research Upgrade: Validated Signals (Aug 2026)
 
-Surgical, additive upgrade from the Aug 2026 research program (backtest rounds 1–3
+Surgical, additive upgrade from the Aug 2026 research program (backtest rounds 1-3
 + 20-agent adversarially-verified quant lab). **No existing file was modified.**
 New files: `modules/validated_signals.py`, `tests/test_validated_signals.py` (12 tests, all passing).
 
@@ -15,11 +15,11 @@ New files: `modules/validated_signals.py`, `tests/test_validated_signals.py` (12
 | Gap-chasing loses | all configs negative; gaps fade | gap-skip built into `orb30_signal()` |
 | Compression ≠ direction | ~44% upward resolution both timeframes | compression intentionally NOT exposed as a signal |
 | Old `TA.vwap` invalid intraday | cumulative from first bar, never resets | `session_vwap()` (session-anchored) |
-| Full-sample t-stats lie | the Blue Diamond v2 autopsy | `promotion_gate()` — CI>0 + split-half + n≥100 |
+| Full-sample t-stats lie | the Blue Diamond v2 autopsy | `promotion_gate()`, CI>0 + split-half + n≥100 |
 
 ## The Diamonds v3 mental model
 - **Blue Diamond = a state, not a trade.** `blue_diamond_rank()` scores trend health
-  0–6 and reports `setup_state`. When you see `in_pullback` on a high score, you
+  0-6 and reports `setup_state`. When you see `in_pullback` on a high score, you
   KNOW what to wait for: the reclaim close (`swing_pullback_signal` fires it).
 - **Pink Diamond = tighten, never sell.** `pink_diamond_caution()` returns
   caution 0/1/2 with an explicit new stop level. Winners are left to run; the
@@ -36,13 +36,13 @@ from modules.validated_signals import (
 # 3. Position view: show pink_diamond_caution(df_daily)["action"] for holdings
 # 4. Any new strategy idea: require promotion_gate(returns)["pass"] before trusting it
 ```
-Existing `detect_diamonds` UI can stay for continuity — recommend relabeling pink
+Existing `detect_diamonds` UI can stay for continuity, recommend relabeling pink
 as "caution flag" per `PINK_DIAMOND_STATUS`.
 
 ## Verified against real data before delivery
 - ORB fired 4 of the last 10 real TSLA sessions (expected ~half).
 - Blue ranker on the real 34-name universe (2026-08-04 close): ANET/BMNR/SEPN
-  scored 5/6 `in_pullback` — a live, actionable watchlist.
+  scored 5/6 `in_pullback`: a live, actionable watchlist.
 - `promotion_gate` reproduced the round-3 swing result exactly on the real 413
   trades: pass=True, CI [0.8, 271.8], halves +189.9/+62.2 bps.
 

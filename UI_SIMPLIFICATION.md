@@ -23,7 +23,7 @@ without Streamlit). Nothing else was modified.
 | Measure | Count |
 |---|---|
 | Top-level tabs | **6** (`app.py:328-337`) |
-| Nested tab bars | **2** — `renderers.py:142` (2 tabs), `renderers.py:2893` (3 tabs) |
+| Nested tab bars | **2**: `renderers.py:142` (2 tabs), `renderers.py:2893` (3 tabs) |
 | Total tab surfaces a user can land on | **11** |
 | Sticky-nav jump links (a second, parallel navigation) | **10** (`css.py:1086-1095`) |
 | Always-on controls above the first tab | **~14** (watchlist editor, Mission Control's 8, tape, overlay toggles) |
@@ -36,7 +36,7 @@ without Streamlit). Nothing else was modified.
 | `st.rerun()` calls | **14** |
 | Glossary entries, hidden 3 clicks deep | **27** (`renderers.py:2981-3009`) |
 
-### Numbers per screen — the density ranking
+### Numbers per screen: the density ranking
 
 | Screen | Formatted numbers | Lines of render code |
 |---|---:|---:|
@@ -55,26 +55,26 @@ Reference point: a well-designed dashboard screen carries **5-9** numbers. Cash 
 
 ## 2. The five worst-complexity screens
 
-### 1. Cash Flow tab — `renderers.py:916-1801` (885 lines, 85 numbers)
+### 1. Cash Flow tab, `renderers.py:916-1801` (885 lines, 85 numbers)
 
 The single densest screen. In one scroll it shows: weekly-bias warning, an expiration
 selectbox, an IV term-structure table (Expiry / DTE / ATM strike / ATM IV × 3 rows), a
 full option chain with **Θ/Γ** and **MC PoP %** columns, a vol-skew card, covered-call and
 cash-secured-put tables (strike, bid, ask, mid, IV, volume, OI, OTM %, premium yield,
-annualised yield, premium/100, breakeven, delta, Θ/Γ, MC PoP — **16 columns each**),
+annualised yield, premium/100, breakeven, delta, Θ/Γ, MC PoP, **16 columns each**),
 Kelly sizing, and EV.
 
 To act on this screen you must already know what delta 0.16 means, what Θ/Γ 2.0 implies,
 and why annualised yield is a ranking device rather than a return. `renderers.py:1199-1203`
 literally renders a column header of `Θ/Γ` with the help text *"Theta / Gamma (vectorized
-chain greeks)"* — which explains the jargon using more jargon.
+chain greeks)"*: which explains the jargon using more jargon.
 
 **Worst single offence:** `renderers.py:1204-1208`, the MC PoP column, whose help text is
-*"10k antithetic simulations — v22.0 Predictive Analytics"*. That sentence tells a normal
+*"10k antithetic simulations: v22.0 Predictive Analytics"*. That sentence tells a normal
 person nothing. The number it labels is the single most decision-relevant figure on the
 screen: *the chance this trade makes money*.
 
-### 2. Scanner & Intel tab — `renderers.py:1801-3021` (1220 lines, 70 numbers)
+### 2. Scanner & Intel tab, `renderers.py:1801-3021` (1220 lines, 70 numbers)
 
 Four unrelated jobs in one tab: the watchlist scanner, the quant diagnostics panel, a
 backtest, and a news/macro/earnings section with **its own 3-tab bar** (`renderers.py:2893`).
@@ -83,10 +83,10 @@ inside the third sub-tab, inside the third top-level tab. A user who does not kn
 "GEX" means will not find the answer.
 
 The scanner emits per-row: confluence, diamond status, Gold Zone distance, Edge Score,
-GEX regime, 10x potential, MC PoP, HVN floor, risk multiplier — nine figures per ticker,
+GEX regime, 10x potential, MC PoP, HVN floor, risk multiplier, nine figures per ticker,
 before you have chosen anything.
 
-### 3. Everything above the tabs — `render_pre_tabs.py:207-1402` (47 numbers)
+### 3. Everything above the tabs, `render_pre_tabs.py:207-1402` (47 numbers)
 
 The user meets, in order, before any tab: a watchlist editor, **Mission Control** with
 8 controls (`render_pre_tabs.py:228-368`: ticker, strategy segmented control, turbo toggle,
@@ -96,33 +96,33 @@ expander, a 4-column glance row, a two-column execution strip, and the technical
 
 Mission Control asks eight configuration questions before answering one user question. Most
 users will change the ticker and nothing else. **"Trading Hemisphere"** (`render_pre_tabs.py:313`)
-is a mode switch whose name explains nothing; its help text — *"premium harvesting (Options)
-and Delta-One breakout hunting (Equity)"* — introduces "Delta-One", a term defined nowhere
+is a mode switch whose name explains nothing; its help text, *"premium harvesting (Options)
+and Delta-One breakout hunting (Equity)"*: introduces "Delta-One", a term defined nowhere
 in the app.
 
-### 4. Signals tab — `renderers.py:321-916` (595 lines, 51 numbers)
+### 4. Signals tab, `renderers.py:321-916` (595 lines, 51 numbers)
 
 Opens with **Hurst Exponent (R/S)** rendered as `0.487 = RANDOM WALK` in a raw metric card
 (`renderers.py:428-430`). This is the first analytical number a user sees after the chart,
 and "Hurst Exponent (R/S)" is arguably the most obscure label in the entire app. The
-`_explain()` card immediately below it does a genuinely good job of translating it — which
+`_explain()` card immediately below it does a genuinely good job of translating it, which
 proves the content exists and is merely in the wrong order: **jargon first, plain English
 second**. Invert that and this screen improves without deleting anything.
 
 Also here: the quant diagnostics with `regime_prob_calm / medium / stress`, `ffd_last`,
-`inst_signal`, `retail_core` — raw dict keys surfaced to the UI.
+`inst_signal`, `retail_core`, raw dict keys surfaced to the UI.
 
-### 5. My Positions / ledger — `renderers.py:3225-3559` (9 `st.metric`, 22 numbers)
+### 5. My Positions / ledger, `renderers.py:3225-3559` (9 `st.metric`, 22 numbers)
 
 Row-level metrics are Δ, Θ/day, unrealized P&L, "Dist. to pin %", "Pin maturity", "Edge
 realization %", and a **1-day 95% VaR**. Three of those are inventions of this app
 (`Pin maturity`, `Edge realization`, `Golden zone`), so no outside knowledge can rescue the
-user — and their only definitions live in the glossary in a different tab
+user: and their only definitions live in the glossary in a different tab
 (`renderers.py:3004-3005`).
 
 ---
 
-## 3. Jargon audit — what appears on screen with no translation attached
+## 3. Jargon audit, what appears on screen with no translation attached
 
 Counted across `renderers.py`, `render_pre_tabs.py`, `ui_helpers.py`:
 
@@ -155,7 +155,7 @@ Counted across `renderers.py`, `render_pre_tabs.py`, `ui_helpers.py`:
 inventions (Gold Zone, Blue/Pink Diamond, Pre-Diamond Coil, Edge Score, Confluence Points,
 Explosion Score, 10x Potential, Shadow Move, Attention Stage, Edge Realization, Crowd
 Conviction). Every definition was read out of the implementation, not a textbook, and each
-`formula` field cites the exact function — `tests/test_explain.py` asserts that citation
+`formula` field cites the exact function: `tests/test_explain.py` asserts that citation
 exists and that the quoted constants (`0.62/0.38` Edge blend, `1.35` Gold Zone POC weight,
 `0.16` delta target, `10000` MC paths, `1.96` Wilson z, FFD `d=0.4`) still match the source.
 
@@ -169,9 +169,9 @@ different ways**, so the user never learns where to look:
 | # | Mechanism | Where | Uses | Trigger |
 |---|---|---|---|---|
 | 1 | Native `help=` tooltip | widgets, `st.column_config` | 72 | hover the `?` |
-| 2 | `_explain(title, body, mood)` — coloured HTML card, always visible | `ui_helpers.py:554-565` | 26 | none, always on |
-| 3 | `_section(..., tip_plain=...)` — custom `.cf-tip` HTML span | `ui_helpers.py:567-574`, CSS `css.py:442-461` | 10 | hover a custom `i` |
-| 4 | Quick Reference Guide — 27 HTML `edu-card`s in an expander | `renderers.py:2974-3016` | 1 | Intel → scroll → expand |
+| 2 | `_explain(title, body, mood)`, coloured HTML card, always visible | `ui_helpers.py:554-565` | 26 | none, always on |
+| 3 | `_section(..., tip_plain=...)`, custom `.cf-tip` HTML span | `ui_helpers.py:567-574`, CSS `css.py:442-461` | 10 | hover a custom `i` |
+| 4 | Quick Reference Guide: 27 HTML `edu-card`s in an expander | `renderers.py:2974-3016` | 1 | Intel → scroll → expand |
 
 **Recommendation: keep #1 and #4, retire #2 and #3 into `explain.py`.**
 
@@ -195,18 +195,18 @@ different ways**, so the user never learns where to look:
 
 | # | Problem | Location | Cost |
 |---|---|---|---|
-| S1 | **3 sequential `fetch_options` calls on the render path** to build the IV term-structure table — the tab cannot paint until Yahoo answers three times | `renderers.py:1071-1099` | 3 network round-trips per cold Cash Flow render |
+| S1 | **3 sequential `fetch_options` calls on the render path** to build the IV term-structure table, the tab cannot paint until Yahoo answers three times | `renderers.py:1071-1099` | 3 network round-trips per cold Cash Flow render |
 | S2 | **Serial per-ticker loop** building the scanner's close-price map, while `options.py:450 scan_watchlist_edge_rows` does the same job with an 8-worker thread pool | `renderers.py:2332-2345` | O(n) round-trips; a 20-name watchlist is 20 sequential fetches |
-| S3 | **`TA.hurst(df["Close"])` recomputed on every rerun**, uncached, on the render path — and `TA.hurst` is the slower variance-ratio estimator, not the cached one | `renderers.py:421` | full recompute on every widget interaction in the Signals fragment |
+| S3 | **`TA.hurst(df["Close"])` recomputed on every rerun**, uncached, on the render path, and `TA.hurst` is the slower variance-ratio estimator, not the cached one | `renderers.py:421` | full recompute on every widget interaction in the Signals fragment |
 | S4 | **`fetch_options` on the main render path** for the selected expiry | `renderers.py:1160` | blocking; cached 300 s, so only cold, but it blocks paint |
 | S5 | **`fetch_earnings_calendar_display` on the render path** | `renderers.py:2922` | blocking |
-| S6 | **Ledger metrics fetch per symbol inside an aggregation function** — `_spot()` and `_realized_vol_20()` each call `fetch_stock` per ticker, twice (3mo and 6mo windows) | `ui_helpers.py:136-170` | 2 fetches × positions, on the render path |
+| S6 | **Ledger metrics fetch per symbol inside an aggregation function**: `_spot()` and `_realized_vol_20()` each call `fetch_stock` per ticker, twice (3mo and 6mo windows) | `ui_helpers.py:136-170` | 2 fetches × positions, on the render path |
 | S7 | **14 `st.rerun()` calls**, several immediately after a config write; a rerun discards in-flight widget state and re-executes the whole script including the 1119-line CSS injection | `renderers.py:317, 1391, 1515, 1794, 2961, 3199, 3216, 3500, 3552, 3557`; `render_pre_tabs.py:186, 490, 497`; `app.py:260` | full page rebuild per click |
 | S8 | **Two forever-running `setInterval` loops** injected into the page: one at 400 ms (re-asserting the hamburger + sidebar observer) and one at 1500 ms (re-hiding the Streamlit header) | `css.py:1076-1077` | continuous main-thread work for the life of the tab |
-| S9 | **Sticky-nav tab switching is a retry loop of DOM clicks** — up to 30 retries at 120 ms, then a fixed 620 ms wait, then up to 50 scroll retries at 110 ms | `css.py:932-1001` | a nav click can take >1 s and can silently fail |
+| S9 | **Sticky-nav tab switching is a retry loop of DOM clicks**: up to 30 retries at 120 ms, then a fixed 620 ms wait, then up to 50 scroll retries at 110 ms | `css.py:932-1001` | a nav click can take >1 s and can silently fail |
 | S10 | **CSS + navbar re-injected before every widget on every rerun** | `app.py:190` → `css.py:1078` | ~40 KB of markdown per rerun |
 
-**The good news:** the caching discipline is otherwise strong — 17 `@st.cache_data`
+**The good news:** the caching discipline is otherwise strong, 17 `@st.cache_data`
 decorators in `data.py` with sensible TTLs, `@st.fragment` on all five tab renderers plus
 the chart and watchlist editor, a deferred-first-pass options flag
 (`config.py`, `defer_options_first_pass`), and a health-probe short-circuit before expensive
@@ -225,7 +225,7 @@ independent fetches. S1 and S2 should both become that pattern.
 | Theta/gamma | **`Θ/Γ`** (raw glyph as a column header), **"Theta / Gamma"**, **"Θ/Γ Ratio"**, `theta_gamma_ratio` | `renderers.py:1199`; `ui_helpers.py:373-398` |
 | Yield | **"Ann. Yield"**, `ann_yield`, "annualized", `prem_yield` with no display name | `options.py:2161`; `ui_helpers.py:1456` |
 | Confluence | **"Confluence Points"**, **"Confluence"**, **"7/9"**, **"cp"** | `renderers.py:2985`; `ui_helpers.py:413-442` |
-| A third 0-100 dial | **"unified probability"** — blends Edge + confluence + RS into *another* 0-100 number | `signal_desk.py:350-367` |
+| A third 0-100 dial | **"unified probability"**: blends Edge + confluence + RS into *another* 0-100 number | `signal_desk.py:350-367` |
 
 Formatting is equally scattered: **8 distinct numeric format specs** across the three UI
 files, 287 sites in total (99×`:.0f`, 73×`:.2f`, 48×`:.1f`, 39×`:,.0f`, 17×`:,.2f`, plus `:.3f/.4f/.5f`), so the
@@ -246,7 +246,7 @@ require a new hex literal.
 ## 7. Dead weight
 
 `modules/creator_signals.py` (1000 lines), `modules/asymmetry.py` (1356), and
-`modules/dossier.py` (1416) are **untracked and referenced by no UI path** — 3,772 lines
+`modules/dossier.py` (1416) are **untracked and referenced by no UI path**: 3,772 lines
 that cannot be reached from `app.py`. They cost nothing at runtime but they make the
 codebase look twice as complicated as the shipped app actually is. Decide: wire them in or
 delete them.
@@ -261,7 +261,7 @@ delete them.
 |---|---|---|---|
 | 1 | **Today** | *What should I do with this stock right now?* | Signals tab, the execution strip, the glance row, the chart |
 | 2 | **Income** | *If I sell an option here, which one and what do I earn?* | Cash Flow tab (trimmed to the recommended trade + one table) |
-| 3 | **Find** | *Which of my tickers, or the wider market, is worth looking at?* | Scanner, Market Radar, Sentiment Radar — three scanners that answer one question |
+| 3 | **Find** | *Which of my tickers, or the wider market, is worth looking at?* | Scanner, Market Radar, Sentiment Radar, three scanners that answer one question |
 | 4 | **Mine** | *What am I holding and how is it doing?* | My Positions / ledger |
 
 Everything else becomes progressive disclosure rather than a destination:
@@ -300,7 +300,7 @@ what to do or what it means. No card ships without one.**
 from modules import explain
 
 explain.verdict_line(
-    "Sell the $185 call expiring Feb 21 — you collect $210 and keep the shares "
+    "Sell the $185 call expiring Feb 21: you collect $210 and keep the shares "
     "unless the stock rises 6%.",
     tone="good",
 )
@@ -315,13 +315,13 @@ Three enforceable sub-rules:
 
 1. **The verdict comes before the numbers, not after.** Today the Signals tab renders the
    Hurst *number* at `renderers.py:428` and the plain-English explanation at `:432`. Swap them.
-2. **If you cannot write the sentence, the card does not know what it is telling the user** —
+2. **If you cannot write the sentence, the card does not know what it is telling the user**
    that is a signal to cut the card, not to write vaguer copy.
 3. **Jargon may appear in the tooltip and the expander; never in the label alone.** Label the
    metric *"Chance it works"* and attach `term="mc_pop"`. `Θ/Γ` as a bare column header
    (`renderers.py:1199`) is the anti-pattern.
 
-`explain.verdict_line()` renders via native `st.success/warning/error/info` — no HTML, and
+`explain.verdict_line()` renders via native `st.success/warning/error/info`, no HTML, and
 the tone glyph means the state is readable without relying on colour.
 
 ---
@@ -336,8 +336,8 @@ Ranked by **legibility gained per unit of risk**. Every step is independently sh
 | **1** | Add `term=` tooltips to the 12 worst bare numbers: MC PoP, Θ/Γ, delta, IV rank, Edge Score, confluence, Gold Zone, GEX, DTE, annualised yield, Hurst, VaR | `renderers.py:170, 428-430, 1199-1208, 3490-3500`; `ui_helpers.py:1486-1517` | **Tiny.** Additive `help=` on existing widgets; no layout change, no logic touched. | Biggest legibility win available, near-zero risk. Roughly 20 call sites. |
 | **2** | Replace the Quick Reference `edu` list with `explain.glossary()` | `renderers.py:2974-3016` (delete 43 lines) | **Small, isolated.** One expander. Keep the title string `"Quick Reference Guide"` so the `css.py:950-961` auto-open hook still matches. | Kills the drift risk between tooltips and glossary permanently; 27 hand-written HTML entries become 66 generated ones. |
 | **3** | Add `verdict_line()` to the top of the 6 primary cards: Recommended Trade, Diamond status, Setup Analysis, Scanner summary, Ledger summary, Radar summary | `renderers.py:321-450` (Setup), `:916-1060` (Cash Flow header), `:3225-3300` (ledger); `render_pre_tabs.py:1380-1400` (execution strip) | **Small.** Additive; one `st.success/info` per card above existing content. | This is the requirement's core deliverable. Nothing is removed, so it cannot regress. |
-| **4** | Invert jargon-first ordering on the Signals tab: `_explain()` copy above the raw metric card | `renderers.py:421-446` (Hurst), and the 25 other `_explain()` sites | **Small.** Statement reordering within one function. | The plain English already exists and is well-written — it is just in second place. |
-| **5** | Swap all `${x:,.2f}` / `${x:.0f}` hand-formatting for `explain.money/pct/ratio/compact` | `renderers.py`, `ui_helpers.py`, `render_pre_tabs.py` — 287 format-spec sites | **Medium.** Wide but mechanical; a wrong call site produces a visibly wrong string, not a crash. | Collapses 8 formatting conventions into 1. Do it file-by-file, verifying visually. |
+| **4** | Invert jargon-first ordering on the Signals tab: `_explain()` copy above the raw metric card | `renderers.py:421-446` (Hurst), and the 25 other `_explain()` sites | **Small.** Statement reordering within one function. | The plain English already exists and is well-written, it is just in second place. |
+| **5** | Swap all `${x:,.2f}` / `${x:.0f}` hand-formatting for `explain.money/pct/ratio/compact` | `renderers.py`, `ui_helpers.py`, `render_pre_tabs.py`, 287 format-spec sites | **Medium.** Wide but mechanical; a wrong call site produces a visibly wrong string, not a crash. | Collapses 8 formatting conventions into 1. Do it file-by-file, verifying visually. |
 | **6** | Convert `Opt.covered_calls` / `cash_secured_puts` result tables from 16 columns to 6, with the rest behind *"Show every column"* | `ui_helpers.py:1456-1517` (`_options_scan_dataframe`, `_options_scan_column_config`); `renderers.py:1300-1500` | **Medium.** Column config is centralised in `ui_helpers`, so the change lands in two functions, but every table that consumes them shifts. | Cash Flow's 85 numbers drop to roughly 25 in one edit. |
 | **7** | Fix S1 + S2: wrap the IV term-structure fetch and the scanner close-map loop in one `@st.cache_data(ttl=300)` + `ThreadPoolExecutor`, copying `sentiment_radar.py:620-629` | `renderers.py:1071-1099`, `renderers.py:2332-2345` | **Medium.** Touches the fetch path; needs care that cached functions are never called *from* worker threads (the comment at `sentiment_radar.py:617-619` documents why). | Turns 3 + N sequential round-trips into 1 parallel batch. The single largest perceived-speed win. |
 | **8** | Cache `TA.hurst` on the render path (or switch to the already-cached estimator) | `renderers.py:421` | **Tiny.** One line, wrap in a `@st.cache_data(ttl=300)` helper. | Cheap; removes a full recompute from every Signals-fragment interaction. |
@@ -346,7 +346,7 @@ Ranked by **legibility gained per unit of risk**. Every step is independently sh
 | **11** | Delete or wire up `creator_signals.py`, `asymmetry.py`, `dossier.py` | 3,772 untracked lines | **Zero at runtime** (nothing imports them). | Housekeeping; do it whenever. |
 
 **Suggested first PR:** steps 1-3. About 30 call sites, entirely additive, no layout risk, and
-it delivers the literal requirement — plain answer visible, math one click away — on the
+it delivers the literal requirement: plain answer visible, math one click away, on the
 screens where confusion is worst.
 
 ---
@@ -357,7 +357,7 @@ A simplification plan that calls everything bad is not an audit. These are genui
 should be left alone:
 
 - **The writing.** The `_explain()` bodies and the 27 glossary entries are some of the
-  clearest plain-English finance copy I have read in a codebase — *"Think of a store where
+  clearest plain-English finance copy I have read in a codebase, *"Think of a store where
   sales grow every single quarter"* (`renderers.py:415`). The problem is packaging, not prose.
   Most of `TERMS[...].detail` is derived from it.
 - **Sentiment Radar** (`modules/sentiment_radar.py`) is already the model for the rest of the
@@ -378,7 +378,7 @@ should be left alone:
 
 ---
 
-## Appendix — `modules/explain.py` API
+## Appendix: `modules/explain.py` API
 
 ```python
 from modules import explain
@@ -388,7 +388,7 @@ explain.TERMS                    # 66 × Term(short, plain, detail, formula, lab
 explain.lookup("Θ/Γ")            # resolves keys, labels and aliases → Term
 explain.tooltip("mc_pop")        # text for a native help= parameter (None if unknown)
 explain.missing_terms([...])     # migration aid: which jargon still lacks a definition
-explain.check_registry()         # [] when healthy — asserted in tests
+explain.check_registry()         # [] when healthy, asserted in tests
 explain.money/pct/ratio/score/compact/signed        # the one formatter each
 explain.tone_label / verdict_text / TONE_GLYPH      # 🟢🟡🔴⚪
 
@@ -400,6 +400,6 @@ explain.term_badge("gex")                           # one-line caption for dense
 explain.glossary()                                  # the whole registry, searchable
 ```
 
-Tests: `tests/test_explain.py` — 45 tests, including one that imports the module in a
+Tests: `tests/test_explain.py`, 45 tests, including one that imports the module in a
 subprocess with `import streamlit` monkey-patched to raise, proving the registry and every
 pure helper work with no Streamlit runtime.

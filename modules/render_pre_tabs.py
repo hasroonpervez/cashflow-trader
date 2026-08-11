@@ -66,7 +66,7 @@ class HudState:
 
 @st.fragment
 def render_watchlist_editor_fragment(cfg_tx: ConfigTransaction) -> None:
-    """Watchlist editor only — isolated rerun scope (Phase 3.3)."""
+    """Watchlist editor only: isolated rerun scope (Phase 3.3)."""
     _wl_expanded = bool(st.session_state.pop("_open_watchlist_editor", False))
 
     def _persist_watchlist_text_callback():
@@ -186,7 +186,7 @@ def render_watchlist_editor_fragment(cfg_tx: ConfigTransaction) -> None:
                     st.rerun()
                 else:
                     st.warning(
-                        "⚠️ Watchlist saved for this session only. On Streamlit Cloud the filesystem is read-only — "
+                        "⚠️ Watchlist saved for this session only. On Streamlit Cloud the filesystem is read-only, "
                         "your list will reset on the next reboot. Add your tickers to **App settings → Secrets** as "
                         "`watchlist = \"AAPL,TSLA,...\"` to make them permanent."
                     )
@@ -234,7 +234,7 @@ def render_mission_control_hud(cfg_tx: ConfigTransaction, cfg: dict, saved_scann
 
     # Audit finding #19: this was a hard-coded 10000 literal, so whenever the Equity Radar
     # capital widget was not on screen the saved value was replaced by the default and
-    # written back to config.json — a user who set $100,000 lost it silently.
+    # written back to config.json, a user who set $100,000 lost it silently.
     equity_capital = saved_equity_capital(cfg)
     with st.container(border=True):
         st.markdown(
@@ -405,7 +405,7 @@ def _reusable_snapshot(prev_snap, prev_key, cache_key):
     """Previous global-market snapshot, but only when it was fetched for THIS key.
 
     Audit finding: the timeout path read
-    ``_global_snap = _prev_snap if _prev_key == _cache_key else _prev_snap`` — both arms
+    ``_global_snap = _prev_snap if _prev_key == _cache_key else _prev_snap``, both arms
     identical, so a bundle fetched for a different watchlist/ticker was reused, then
     re-stamped with the new cache key, and the tape kept its "(cached)" caption. A
     mismatched key now yields ``None``, which routes to the honest empty-snapshot branch.
@@ -489,13 +489,13 @@ def render_tape_open_editor_flush(
         if _timed_out:
             st.warning(
                 f"Yahoo did not answer within {_BUNDLE_WALL_TIMEOUT}s and there is no cached snapshot for this "
-                "watchlist. Tape prices are **not loaded** on this pass — they are blank, not stale."
+                "watchlist. Tape prices are **not loaded** on this pass, they are blank, not stale."
             )
         else:
-            st.toast("Yahoo data still loading — tape prices may be stale. Refresh in ~30s.", icon="⏳")
+            st.toast("Yahoo data still loading, tape prices may be stale. Refresh in ~30s.", icon="⏳")
     elif _timed_out:
         st.caption(
-            f"Yahoo timed out after {_BUNDLE_WALL_TIMEOUT}s — showing the previous snapshot for this exact watchlist. "
+            f"Yahoo timed out after {_BUNDLE_WALL_TIMEOUT}s, showing the previous snapshot for this exact watchlist. "
             "Prices below are from the last successful fetch."
         )
     elif _boot_guard and len(_bundle_watch_items) < len(watch_items):
@@ -587,7 +587,7 @@ def render_tape_open_editor_flush(
     if not _flush_ok and "watchlist" in _pending_cfg_keys and not st.session_state.get("_cf_watchlist_disk_warned"):
         st.session_state["_cf_watchlist_disk_warned"] = True
         st.toast(
-            "Watchlist saved for this session only — won't survive a reboot on Streamlit Cloud.",
+            "Watchlist saved for this session only: won't survive a reboot on Streamlit Cloud.",
             icon="⚠️",
         )
 
@@ -769,7 +769,7 @@ def render_desk_after_context(
                     if _mx > 0.75:
                         st.warning(
                             f"**Correlated book risk:** `{_html_mod.escape(_tku)}` vs `{_html_mod.escape(_peer)}` "
-                            f"≈ **{_mx:.2f}** on this matrix — positions may move together; size and hedges accordingly."
+                            f"≈ **{_mx:.2f}** on this matrix, positions may move together; size and hedges accordingly."
                         )
     except Exception as e:
         log_warn("correlated book risk warning from correlation matrix", e, ticker=_tku)
@@ -798,9 +798,9 @@ def render_desk_after_context(
     if not mini_mode:
         _rs_u = _consensus.get("rs_spy_ratio")
         if _rs_u is not None and np.isfinite(float(_rs_u)):
-            _rs_ln = f"RS vs SPY (~90d batch ratio) **{float(_rs_u):.2f}** — tilt in the blend"
+            _rs_ln = f"RS vs SPY (~90d batch ratio) **{float(_rs_u):.2f}**: tilt in the blend"
         else:
-            _rs_ln = "RS vs SPY: **not in batch map** — RS tilt neutral in the blend"
+            _rs_ln = "RS vs SPY: **not in batch map**: RS tilt neutral in the blend"
         st.markdown(
             unified_probability_dial_html(
                 ticker,
@@ -864,7 +864,7 @@ def render_desk_after_context(
             st.markdown(
                 f"<div style='font-size:0.78rem;color:#a5b4fc;margin:0 0 10px 0;padding:8px 12px;border-radius:10px;"
                 f"border:1px solid rgba(129,140,248,0.35);background:rgba(67,56,202,0.12)'>"
-                f"<strong style='color:#c4b5fd'>Active conviction</strong> · ×{_cm:.2f} — {_html_mod.escape(_cl)}</div>",
+                f"<strong style='color:#c4b5fd'>Active conviction</strong> · ×{_cm:.2f}, {_html_mod.escape(_cl)}</div>",
                 unsafe_allow_html=True,
             )
             _pc1, _pc2 = st.columns(2)
@@ -883,13 +883,13 @@ def render_desk_after_context(
                     f"(**1.5× ATR** ≈ `${1.5 * _atr_u:,.2f}` below **${price:,.2f}**)."
                 )
             else:
-                st.info("ATR or price unavailable — cannot size from this snapshot.")
+                st.info("ATR or price unavailable, cannot size from this snapshot.")
             if int(getattr(ctx, "d_n", 0) or 0) >= 3 and float(getattr(ctx, "d_wr", 0) or 0) > 0:
                 _w = float(max(1.0, min(99.0, ctx.d_wr)))
                 _kf, _kh = kelly_criterion(_w, 1.0, 1.0, use_quant=False)
                 st.caption(
                     f"Illustrative **binary Kelly** from diamond win rate **{_w:.0f}%** vs **1:1** payoff: "
-                    f"full **{_kf}%** · half **{_kh}%** of bankroll — not a recommendation; use your own edge math."
+                    f"full **{_kf}%** · half **{_kh}%** of bankroll, not a recommendation; use your own edge math."
                 )
 
     if earnings_near and earnings_dt:
@@ -903,13 +903,13 @@ def render_desk_after_context(
             Assignment risk on short calls jumps with that backdrop. We pause auto alerts until after {safe_html(_ed)}.</span></div>""",
             unsafe_allow_html=True,
         )
-        # ── CRITICAL: ≤ 3 DAYS TO PRINT — REDUCE POSITION SIZE ──────────────
+        # ── CRITICAL: ≤ 3 DAYS TO PRINT, REDUCE POSITION SIZE ──────────────
         # Inside 3 calendar days the binary vol event dominates all other signals.
         # Short options face IV crush risk AND gap-move assignment risk simultaneously.
         # The desk rule: cut new entries in half, close short delta within 1 strike of ATM.
         if days_to_earnings is not None and int(days_to_earnings) <= 3:
             st.error(
-                f"🚨 **Earnings in {int(days_to_earnings)} day{'s' if int(days_to_earnings) != 1 else ''} — reduce position size immediately.** "
+                f"🚨 **Earnings in {int(days_to_earnings)} day{'s' if int(days_to_earnings) != 1 else ''}, reduce position size immediately.** "
                 "Binary event risk is maximum: IV can crush 20-40% the morning after the print AND the stock can gap 5-15% on the news. "
                 "Desk rule: close or hedge any short option within 2 strikes of the money before market close today. "
                 "Do not open new premium-selling positions until after the earnings date."
@@ -941,7 +941,7 @@ def render_desk_after_context(
         # the old fabricated rising line (audit: empty series -> confident uptrend).
         vix_spark = pd.Series(dtype="float64")
     earnings_spark = earnings_runway_spark_series(days_to_earnings)
-    # Audit finding: this was `np.linspace(qs - 10, qs + 4, 7)` — an always-rising line
+    # Audit finding: this was `np.linspace(qs - 10, qs + 4, 7)`, an always-rising line
     # captioned "24h directional momentum context". No 24h history of the Quant Edge
     # score is stored anywhere, so there is nothing honest to plot: draw nothing.
     qe_spark = pd.Series(dtype="float64")
@@ -979,19 +979,19 @@ def render_desk_after_context(
         elif days_to_earnings is not None:
             de = int(days_to_earnings)
             if de < 0:
-                earnings_caption = "Print is behind you — size for the next cycle once the date is fresh"
+                earnings_caption = "Print is behind you: size for the next cycle once the date is fresh"
             elif de == 0:
-                earnings_caption = "Earnings today — gaps and IV swings; size to what you can hold through"
+                earnings_caption = "Earnings today: gaps and IV swings; size to what you can hold through"
             elif de <= 5:
-                earnings_caption = "Under a week — IV often richest here; ease naked upside risk if you run tight"
+                earnings_caption = "Under a week: IV often richest here; ease naked upside risk if you run tight"
             elif de <= 14:
-                earnings_caption = "Inside two weeks — decide strikes and contracts before the event"
+                earnings_caption = "Inside two weeks: decide strikes and contracts before the event"
             else:
-                earnings_caption = "Outside two weeks — set risk budget and strikes before IV heats up (hover the gold line for what it shows)"
+                earnings_caption = "Outside two weeks: set risk budget and strikes before IV heats up (hover the gold line for what it shows)"
         else:
             earnings_caption = "Plan size before the print"
         _earn_spark_hint = (
-            "Illustrative: days-to-earnings stepping down toward the print — not stock price or IV."
+            "Illustrative: days-to-earnings stepping down toward the print, not stock price or IV."
         )
         st.markdown(
             _glance_metric_card(
@@ -1039,7 +1039,7 @@ def render_desk_after_context(
         log_warn("fetch headlines for trade header", e, ticker=str(ticker))
         _headlines_v19 = []
         _news_bias_v19 = None
-    _inst_flow_lbl = "—"
+    _inst_flow_lbl = "n/a"
     try:
         _dp_tr = TA.get_dark_pool_proxy(df)
         if _dp_tr is not None and len(_dp_tr) and "dark_pool_alert" in _dp_tr.columns:
@@ -1048,7 +1048,7 @@ def render_desk_after_context(
             )
     except Exception as e:
         log_warn("computing dark pool proxy for institutional flow label", e, ticker=str(ticker))
-    _news_sent_lbl = "—"
+    _news_sent_lbl = "n/a"
     if _news_bias_v19 is not None and _headlines_v19:
         if _news_bias_v19 > 0.15:
             _news_sent_lbl = "Positive"
@@ -1056,7 +1056,7 @@ def render_desk_after_context(
             _news_sent_lbl = "Negative"
         else:
             _news_sent_lbl = "Neutral"
-    _score_disp = f"{_news_bias_v19:+.2f}" if _news_bias_v19 is not None else "—"
+    _score_disp = f"{_news_bias_v19:+.2f}" if _news_bias_v19 is not None else "n/a"
     _nb_col = "#94a3b8"
     if _news_bias_v19 is not None:
         if _news_bias_v19 > 0.3:
@@ -1120,14 +1120,14 @@ def render_desk_after_context(
         tk_esc = _html_mod.escape(ticker)
         _ref_rank_iv = _miv if _miv > 0 else ref_iv_bluf
         iv_badge_html = _iv_rank_pill_html(ticker, price, _ref_rank_iv)
-        _mc_hdr = "—"
+        _mc_hdr = "n/a"
         try:
             _mpv = master_b.get("mc_pop")
             if _mpv is not None and math.isfinite(float(_mpv)):
                 _mc_hdr = f"{float(_mpv):.1f}%"
         except (TypeError, ValueError):
             pass
-        _hvn_hdr = "—"
+        _hvn_hdr = "n/a"
         try:
             _hv = gold_zone_components.get("HVN") if isinstance(gold_zone_components, dict) else None
             if _hv is not None and math.isfinite(float(_hv)):

@@ -1,7 +1,7 @@
 """Hand-verified unit tests for every pure function in modules/creator_signals.py.
 
 No network: every fetch is injected. Expected numbers are computed by hand in
-the comments, then asserted — the code is checked against the math, not
+the comments, then asserted, the code is checked against the math, not
 against itself.
 Run:  python -m pytest tests/test_creator_signals.py -q
 """
@@ -37,7 +37,7 @@ def _m(ticker="NVDA", source_id="a", tier=TIER_CASHTAG, conf=1.0, age=0.0,
 
 
 # =====================================================================
-# Ticker extraction — cashtags, bare words, stopwords, length bounds
+# Ticker extraction: cashtags, bare words, stopwords, length bounds
 # =====================================================================
 
 def test_cashtag_extraction_and_tier():
@@ -80,7 +80,7 @@ def test_every_stopword_named_in_the_spec_is_present():
 
 def test_stopword_filter_applies_to_bare_only_cashtag_still_wins():
     # bare "PM" is dropped (too many false positives) but "$PM" is the author
-    # explicitly saying "ticker" — that must survive.
+    # explicitly saying "ticker": that must survive.
     assert extract_tickers("Meeting at 4 PM") == []
     assert [h.symbol for h in extract_tickers("Adding $PM here")] == ["PM"]
 
@@ -160,7 +160,7 @@ def test_age_in_days():
 
 
 # =====================================================================
-# Consensus — the integrity rule
+# Consensus: the integrity rule
 # =====================================================================
 
 def test_weights_sum_to_one():
@@ -291,7 +291,7 @@ def test_consensus_partial_data_flag_survives_no_evidence():
 # =====================================================================
 
 def test_direction_bullish():
-    assert infer_direction("Why I am buying $NVDA — deeply undervalued") == "bullish"
+    assert infer_direction("Why I am buying $NVDA: deeply undervalued") == "bullish"
 
 
 def test_direction_bearish():
@@ -521,7 +521,7 @@ def test_default_roster_is_wellformed():
 
 
 # =====================================================================
-# collect_mentions — injected fetcher, never touches the network
+# collect_mentions: injected fetcher, never touches the network
 # =====================================================================
 
 SRC_A = CreatorSource("rss", "a.example.com", "Creator A", 1.0)
@@ -663,7 +663,7 @@ def test_module_imports_without_streamlit():
 
 
 # ---------------------------------------------------------------------------
-# Spam resistance — a prolific creator must not manufacture consensus alone.
+# Spam resistance: a prolific creator must not manufacture consensus alone.
 # Regression: per-source conviction was a SUM, so volume defeated the time decay
 # (six 7-day-old posts capped to 1.0 == one post today). It is now built on the
 # creator's best single mention plus a saturating REPEAT_BONUS.

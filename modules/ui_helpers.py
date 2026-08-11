@@ -44,7 +44,7 @@ def streamlit_df_widget_key(prefix: str, data) -> str:
     """Element key for ``st.dataframe`` that tracks content shape + checksum.
 
     Avoids Streamlit frontend ``setIn`` crashes when row counts or cell values change between
-    reruns (especially with ``column_config``). Do not pass ``pandas.Styler`` here — use the
+    reruns (especially with ``column_config``). Do not pass ``pandas.Styler`` here, use the
     underlying ``DataFrame`` instead.
     """
     df = data
@@ -330,7 +330,7 @@ def sentinel_ledger_table_rows(
         else:
             d["Edge realization %"] = None
 
-        d["Pin maturity"] = "—"
+        d["Pin maturity"] = "n/a"
         try:
             strike = float(d.get("strike", 0) or 0)
             iv_pct = float(d.get("iv", 30) or 30)
@@ -612,7 +612,7 @@ def _mini_sparkline(series, color="#00E5FF"):
     return fig
 
 
-# Earnings glance headline — must match branches in modules.pages._parse_earnings
+# Earnings glance headline: must match branches in modules.pages._parse_earnings
 EARN_GLANCE_FEED_UNAVAILABLE = "Date unavailable from feed"
 EARN_GLANCE_DEFERRED = "Deferred: use Upcoming Earnings tab"
 
@@ -629,7 +629,7 @@ def earnings_runway_spark_series(days_to_earnings):
     if d < 0:
         return pd.Series(np.linspace(4.0, 0.0, 7))
     if d >= 28:
-        # Far-dated print: gentle dip — reads as “plenty of runway,” not price action.
+        # Far-dated print: gentle dip, reads as “plenty of runway,” not price action.
         return pd.Series(np.linspace(32.0, 29.5, 7))
     hi = min(30.0, float(d) + 6.0)
     lo = float(d)
@@ -642,7 +642,7 @@ def _glance_sparkline_svg(series, color="#00E5FF", w=112, h=44, title=None):
     """Single SVG path sparkline for glance cards (sidebar-safe; no Plotly iframe).
 
     Returns ``""`` when there is nothing to draw. Audit finding: an empty series used to
-    be replaced with ``[0.0, 1.0]``, which renders a confident **rising** line — it fired
+    be replaced with ``[0.0, 1.0]``, which renders a confident **rising** line, it fired
     on the VIX card every time the VIX feed was unavailable (now common, since macro
     absence is reported honestly rather than defaulted to 20.0).
     """
@@ -687,7 +687,7 @@ def _glance_metric_card(label, value_html, caption_html, series, line_color, spa
     """One self-contained glass card: text left, SVG sparkline right (works with sidebar open)."""
     spark = _glance_sparkline_svg(series, line_color, title=spark_title)
     if not spark:
-        # No series to draw — say so rather than leaving a shape the eye reads as a trend.
+        # No series to draw: say so rather than leaving a shape the eye reads as a trend.
         spark = (
             "<div style='font-size:.62rem;color:#64748b;letter-spacing:.08em;"
             "text-align:right;padding-top:14px'>NO SERIES</div>"
@@ -737,8 +737,8 @@ def edge_scan_due(last_scan_ts, now_ts, scan_key, last_key, interval_s: float = 
     """Should the full-watchlist edge scan re-run right now? (pure; no Streamlit)
 
     Audit finding: this scan had no timer at all. It sat in an always-executing expander
-    body and re-scanned the entire watchlist on **every** rerun — every checkbox, every
-    tab click — while the caption promised "about every 90 seconds". It re-runs when the
+    body and re-scanned the entire watchlist on **every** rerun, every checkbox, every
+    tab click: while the caption promised "about every 90 seconds". It re-runs when the
     inputs changed, or when the interval has genuinely elapsed. Never otherwise.
     """
     if scan_key != last_key:
@@ -792,7 +792,7 @@ def _fragment_rolling_edge_capture():
 
     _gb = st.session_state.get("_cf_global_market_bundle")
     _panel = _gb.raw_panel if _gb is not None else None
-    # Only re-scan when the inputs changed or the 90s the caption promises has elapsed —
+    # Only re-scan when the inputs changed or the 90s the caption promises has elapsed
     # not on every rerun of an always-executing expander body.
     _scan_key = (tuple(wl), bool(use_q), vix_arg, _scan_mode)
     _due = edge_scan_due(
@@ -1132,7 +1132,7 @@ def _fragment_technical_zone(
         "Tweak layers below; those toggles refresh the visuals without another Yahoo pull.",
         tip_plain="Candles show OHLC. EMA and Bollinger frame trend and volatility. Fib, Gann, and S/R are reference rails you can mute. Diamonds flag confluence. Gold line is the Gold Zone. **Gamma Flip:** MM hedging inflection (neon dashed). **Shadow move:** purple band from whale-volume close range vs IV Expected Move. **OpEx pin:** pink dotted GEX/ΘΓ magnet. Volume / RSI / MACD as labeled.",
     )
-    # ── Chart overlay toggles — grouped by function ──────────────────────────
+    # ── Chart overlay toggles: grouped by function ──────────────────────────
     # Grouping gives users a mental model for what each toggle affects:
     #   Price:     the core price canvas (trend channels, levels)
     #   Structure: the geometric / pattern overlays (trend systems, Fib, Gann)
@@ -1191,17 +1191,17 @@ def _fragment_technical_zone(
         st.markdown(
             "<div style='margin:0 0 12px 0;padding:12px 14px;border-radius:10px;border:1px solid rgba(168,85,247,0.45);"
             "background:rgba(88,28,135,0.18);font-size:0.88rem;line-height:1.5;color:#e9d5ff'>"
-            "<strong style='color:#d8b4fe'>⚡ Regime calibration — Shadow breakout</strong><br>"
+            "<strong style='color:#d8b4fe'>⚡ Regime calibration, Shadow breakout</strong><br>"
             "<span style='color:#c4b5fd'>Spot is <strong>outside</strong> the whale-volume <strong>Shadow</strong> band (purple) "
             "but still <strong>inside</strong> the IV <strong>1σ Expected Move</strong>. "
-            "Large prints led the range; options-implied vol has not fully caught up — watch for institutional-led "
+            "Large prints led the range; options-implied vol has not fully caught up, watch for institutional-led "
             "trend continuation or reversal before retail reprices risk.</span></div>",
             unsafe_allow_html=True,
         )
     _sh_mv = st.session_state.get("_cf_shadow_move") or {}
     _sl = _sh_mv.get("low") if isinstance(_sh_mv, dict) else None
     _su = _sh_mv.get("high") if isinstance(_sh_mv, dict) else None
-    # Audit finding #7: read the ticker-keyed map, not the shared scalar — the scalar
+    # Audit finding #7: read the ticker-keyed map, not the shared scalar, the scalar
     # could still be holding the pin computed for a *different* symbol.
     _pin_px = (st.session_state.get("_cf_opex_pin_map") or {}).get(str(ticker).strip().upper())
     try:
@@ -1338,8 +1338,8 @@ def _fragment_technical_zone(
                     if isinstance(_bluf_desk, dict)
                     else ""
                 )
-                _d_inst = "—"
-                _d_news = "—"
+                _d_inst = "n/a"
+                _d_news = "n/a"
                 try:
                     _dpd = TA.get_dark_pool_proxy(df)
                     if _dpd is not None and len(_dpd) and "dark_pool_alert" in _dpd.columns:
@@ -1399,7 +1399,7 @@ def _fragment_technical_zone(
                 "neutral",
             )
 
-    # Escape the symbol before it enters `unsafe_allow_html` — the same value is already
+    # Escape the symbol before it enters `unsafe_allow_html`, the same value is already
     # escaped at the Turbo card above, and these two were the file's only exceptions.
     _tk_alert = _html_mod.escape(str(ticker))
     if latest_d and latest_d["type"] == "blue" and (df.index[-1] - latest_d["date"]).days <= 3:
@@ -1550,7 +1550,7 @@ def _options_scan_column_config(*, put_table: bool):
         "\u0398/\u0393": st.column_config.NumberColumn(
             "\u0398/\u0393",
             format="%.4f",
-            help="Theta divided by Gamma (per-day theta / gamma) — desk gamma-risk context.",
+            help="Theta divided by Gamma (per-day theta / gamma), desk gamma-risk context.",
         ),
         "OTM %": st.column_config.NumberColumn("OTM", format="%.2f%%"),
         "$/100 sh": st.column_config.NumberColumn("$/100 sh", format="$%.2f"),
@@ -1559,7 +1559,7 @@ def _options_scan_column_config(*, put_table: bool):
         "MC PoP %": st.column_config.NumberColumn(
             "MC PoP %",
             format="%.1f%%",
-            help="10k antithetic simulations — v22.0 Predictive Analytics",
+            help="10k antithetic simulations: v22.0 Predictive Analytics",
         ),
         "Vol": st.column_config.NumberColumn("Volume", format="%.0f"),
         "OI": st.column_config.NumberColumn("OI", format="%.0f"),

@@ -1,10 +1,10 @@
-"""Tests for modules/asymmetry.py — pure numpy/pandas, no network, headless.
+"""Tests for modules/asymmetry.py, pure numpy/pandas, no network, headless.
 
 The two load-bearing tests in this file:
-  * ``test_no_lookahead_*`` — a function's output at index i must be identical
+  * ``test_no_lookahead_*``: a function's output at index i must be identical
     when future rows are mutated and appended. If this ever fails, every
     backtest built on the module is fiction.
-  * ``test_verdict_partial_data_can_never_be_confident`` — the honesty
+  * ``test_verdict_partial_data_can_never_be_confident``, the honesty
     invariant. Partial data must not be able to produce a confident verdict
     under any combination of inputs.
 """
@@ -460,7 +460,7 @@ def test_kelly_missing_inputs_return_none_and_bad_inputs_raise():
 
 
 # ---------------------------------------------------------------------------
-# 7. base_rate_report — the honesty layer
+# 7. base_rate_report, the honesty layer
 # ---------------------------------------------------------------------------
 
 def test_base_rate_without_history_is_unvalidated():
@@ -509,7 +509,7 @@ def test_base_rate_validated_requires_the_promotion_gate():
 
 
 def test_base_rate_rejects_regime_beta_screen():
-    """Great in the first half, negative in the second — the Blue Diamond v2 trap."""
+    """Great in the first half, negative in the second, the Blue Diamond v2 trap."""
     flagged_rets = np.concatenate([np.full(80, 0.08), np.full(80, -0.03)])
     rets = np.concatenate([flagged_rets, np.zeros(100)])
     flags = np.array([True] * 160 + [False] * 100)
@@ -533,7 +533,7 @@ def test_base_rate_drops_non_finite_returns_transparently():
 
 
 # ---------------------------------------------------------------------------
-# 8. asymmetry_verdict — the partial-data invariant
+# 8. asymmetry_verdict, the partial-data invariant
 # ---------------------------------------------------------------------------
 
 def test_verdict_full_data_can_be_confident():
@@ -765,7 +765,7 @@ def test_module_has_no_streamlit_dependency():
 
 
 def test_module_reuses_existing_atr_and_promotion_gate():
-    """No second ATR, no second promotion gate — reuse is part of the contract."""
+    """No second ATR, no second promotion gate, reuse is part of the contract."""
     src = MODULE_PATH.read_text()
     assert "from .ta import TA" in src
     assert "from .validated_signals import promotion_gate" in src

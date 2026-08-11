@@ -131,7 +131,7 @@ def test_causal_weekly_slice_never_leaks_a_bar_that_had_not_closed():
 
     ``<=``, not ``<``: on a ``W-FRI`` frame the bar stamped Friday F closes at that
     Friday's close, which is the same instant the daily bar at ``ts == F`` closes.
-    Both are in the same information set, so including it is not lookahead — and
+    Both are in the same information set, so including it is not lookahead, and
     excluding it (the old flat ``ts - 6 days`` rule) left the weekly bias a week stale.
     A genuinely open week resamples to the *upcoming* Friday label, which is ``> ts``
     and is still correctly excluded.
@@ -225,7 +225,7 @@ def test_pre_diamond_fails_closed_without_measurable_volatility():
 
 def test_no_options_data_no_longer_outranks_a_measured_name():
     blank = {"pre_diamond_status": {}, "10x Potential": 0, "qs": 0.0,
-             "d_status": "None", "GEX Regime": "—"}
+             "d_status": "None", "GEX Regime": "n/a"}
     measured = dict(blank, **{"GEX Regime": "🛡️ STABLE"})
     assert compute_explosion_score(blank) == compute_explosion_score(measured) == 0.0
     assert explosion_score_detail(blank)["gex_available"] is False
