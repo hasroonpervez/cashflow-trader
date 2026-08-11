@@ -334,27 +334,66 @@ def build_row(
 # Streamlit tab — imports kept inside so the math above stays test-importable
 # ---------------------------------------------------------------------------
 
+def verdict_for_row(r: RadarRow) -> str:
+    """One plain-English line per ticker — no jargon."""
+    if "partial-data" in r.flags or "source-disagreement" in r.flags:
+        return "⚠️ Weak data — ignore for now"
+    if r.roc_5d is not None and abs(r.roc_5d) >= EARLY_ROC_LIMIT:
+        return "🏃 Already ran — you'd be late"
+    if "thin-confirmation" in r.flags:
+        return "🤔 One loud corner of Reddit — wait for confirmation"
+    if r.score >= 70:
+        return "🔥 Hot & still early — research this NOW"
+    if r.score >= 50:
+        return "👀 Warming up — put on close watch"
+    if r.score >= 30:
+        return "🌤️ Mild buzz — nothing urgent"
+    return "❄️ Quiet — no crowd interest yet"
+
+
 def render_sentiment_radar_tab(universe_csv: str) -> None:
     import streamlit as st
     import pandas as pd
     from modules.data import fetch_stock
 
+    st.markdown('<div id="sentiment"></div>', unsafe_allow_html=True)
     st.markdown("### 📡 Sentiment Radar")
     st.caption(
-        "Retail-buzz asymmetric signals from **free** sources: ApeWisdom (Reddit mentions), "
-        "StockTwits (labeled bull/bear), independent Reddit re-count as a cross-check, "
-        "Yahoo volume/price. Scores are capped when sources disagree or confirmation is thin — "
-        "**a high score is a research lead, not a buy signal.**"
+        "**One question, answered simply: who is retail waking up to — before the price moves?** "
+        "Free sources only (Reddit, StockTwits, Yahoo). High score = buzz building early. "
+        "It's a research lead, never a buy signal."
     )
+
+    with st.expander("❓ How to read this (30 seconds)"):
+        st.markdown(
+            """
+| You see | It means |
+|---|---|
+| **Score 70+** 🔥 | Buzz accelerating, volume waking up, price hasn't moved yet — the asymmetric setup. Research it today. |
+| **Score 50–70** 👀 | Warming up. Add to watch, check again tomorrow. |
+| **Below 50** | Noise. Do nothing. |
+| **"Already ran"** 🏃 | Buzz is high but the stock already jumped — the easy part is over. Chasing = being exit liquidity. |
+| **"Weak data"** ⚠️ | Sources disagree or are missing — the score can't be trusted this scan. |
+
+**Workflow:** scan here → cross-check hot names in 🌎 Market Radar (technical coil) →
+if BOTH agree and price is still flat, that's your candidate. Then usual rules: small size, confirm every order.
+"""
+        )
 
     symbols = [s.strip().upper() for s in universe_csv.split(",") if s.strip()]
     if not symbols:
         st.info("No symbols configured.")
         return
 
-    if not st.button("📡 Scan Sentiment Now", type="primary", key="sr_scan",
-                     use_container_width=False):
-        st.caption("Press scan — sources are rate-limited, so this runs on demand.")
+    scan_clicked = st.button("📡 Scan Now", type="primary", key="sr_scan")
+
+    # Results persist across tab switches / reruns until the next scan.
+    if not scan_clicked:
+        cached = st.session_state.get("sr_results")
+        if cached is not None:
+            _render_results(st, cached["rows"], cached["when"])
+        else:
+            st.caption("Press **Scan Now** — takes ~30–60s (free sources are rate-limited).")
         return
 
     rows: list[RadarRow] = []
@@ -391,28 +430,67 @@ def render_sentiment_radar_tab(universe_csv: str) -> None:
     prog.empty()
 
     rows.sort(key=lambda r: r.score, reverse=True)
+    from datetime import datetime as _dt
+    when = _dt.now().strftime("%b %d, %I:%M %p")
+    st.session_state["sr_results"] = {"rows": rows, "when": when}
+    _render_results(st, rows, when)
+
+
+def _render_results(st, rows: list[RadarRow], when: str) -> None:
+    import pandas as pd
+
+    st.caption(f"Last scan: **{when}** — results stay until you scan again.")
+
+    # ---- Top-3 spotlight cards: the only thing a beginner needs to look at
+    top = [r for r in rows if r.score > 0][:3]
+    if top:
+        st.markdown("#### 🏆 Today's top signals")
+        cols = st.columns(len(top))
+        for col, r in zip(cols, top):
+            with col:
+                st.metric(
+                    label=r.ticker,
+                    value=f"{r.score:.0f} / 100",
+                    delta=f"{r.velocity:.1f}x buzz" if r.velocity > 1 else "flat buzz",
+                    delta_color="normal" if r.velocity > 1 else "off",
+                )
+                st.caption(verdict_for_row(r))
+
+    # ---- Full board, verdict first, numbers for those who want them
     df_out = pd.DataFrame([{
         "Ticker": r.ticker,
+        "Verdict": verdict_for_row(r),
         "Score": r.score,
-        "Mentions": r.mentions,
-        "Velocity": round(r.velocity, 2),
-        "Bull/Labeled": f"{r.st_bullish}/{r.st_total}",
-        "Wilson LB": round(r.wilson, 2),
-        "Vol z": None if r.vol_z is None else round(r.vol_z, 2),
-        "5d ROC %": None if r.roc_5d is None else round(100 * r.roc_5d, 1),
-        "Flags": ", ".join(r.flags) if r.flags else "clean",
+        "Buzz": f"{r.velocity:.1f}x" if r.velocity else "—",
+        "Bullish %": (f"{100 * r.st_bullish / r.st_total:.0f}% of {r.st_total}"
+                      if r.st_total else "no votes"),
+        "Volume": ("normal" if r.vol_z is None else
+                   ("🔊 unusual" if r.vol_z >= 2 else "normal")),
+        "5d move": "—" if r.roc_5d is None else f"{100 * r.roc_5d:+.1f}%",
     } for r in rows])
 
     st.dataframe(
         df_out, use_container_width=True, hide_index=True,
         column_config={
             "Score": st.column_config.ProgressColumn(
-                "Asymmetric Score", min_value=0, max_value=100, format="%.1f"),
+                "Score", min_value=0, max_value=100, format="%.0f"),
         },
     )
-    st.caption(
-        f"Weights: velocity {WEIGHTS['velocity']:.0%} · sentiment (Wilson 95% LB) "
-        f"{WEIGHTS['wilson']:.0%} · volume-z {WEIGHTS['volume_z']:.0%} · earliness "
-        f"{WEIGHTS['earliness']:.0%}. Flagged rows are capped "
-        f"(thin ≤ {THIN_CONFIRM_CAP:.0f}, disagreement ≤ {DISAGREE_CAP:.0f})."
-    )
+    with st.expander("🔬 Nerd numbers (raw components & flags)"):
+        st.dataframe(pd.DataFrame([{
+            "Ticker": r.ticker,
+            "Mentions": r.mentions,
+            "Mentions 24h ago": r.mentions_prev,
+            "Velocity": round(r.velocity, 2),
+            "Bull/Labeled": f"{r.st_bullish}/{r.st_total}",
+            "Wilson LB": round(r.wilson, 3),
+            "Vol z": None if r.vol_z is None else round(r.vol_z, 2),
+            "5d ROC": None if r.roc_5d is None else round(r.roc_5d, 4),
+            "Flags": ", ".join(r.flags) if r.flags else "clean",
+        } for r in rows]), use_container_width=True, hide_index=True)
+        st.caption(
+            f"Weights: velocity {WEIGHTS['velocity']:.0%} · sentiment (Wilson 95% LB) "
+            f"{WEIGHTS['wilson']:.0%} · volume-z {WEIGHTS['volume_z']:.0%} · earliness "
+            f"{WEIGHTS['earliness']:.0%}. Flagged rows are capped "
+            f"(thin ≤ {THIN_CONFIRM_CAP:.0f}, disagreement ≤ {DISAGREE_CAP:.0f})."
+        )

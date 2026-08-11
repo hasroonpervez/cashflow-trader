@@ -985,7 +985,7 @@ function cfOnStickyNavClick(ev){
     cfScrollToHashId(id);
     return;
   }
-  var map={setup:0,'quant-dashboard':0,strategies:1,risk:2,scanner:2,news:2,guide:2};
+  var map={setup:0,'quant-dashboard':0,strategies:1,risk:2,scanner:2,sentiment:5,news:2,guide:2};
   if(map[id]===undefined)return;
   ev.preventDefault();
   ev.stopPropagation();
@@ -1059,6 +1059,7 @@ def inject_css_and_navbar():
 <a href="#strategies">Strategies</a>
 <a href="#risk">Risk</a>
 <a href="#scanner">Scanner</a>
+<a href="#sentiment">Sentiment</a>
 <a href="#news">News</a>
 <a href="#guide">Guide</a>
 </div>
