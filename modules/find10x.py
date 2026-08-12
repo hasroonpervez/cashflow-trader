@@ -488,6 +488,13 @@ def _render_dossier(st, X, ticker: str) -> None:
     if narrative is not None:
         st.markdown("**Generated summary**: prose only; every figure above comes from the data layer.")
         st.markdown(getattr(narrative, "text", "") or "")
+    elif "claude-cli-unavailable" in set(getattr(d, "flags", []) or []):
+        # Hosted deployment (Streamlit Cloud): there is no local narrative engine
+        # there at all, so telling visitors to authenticate a CLI is nonsense.
+        st.caption(
+            "Generated summary is not available in this deployment; "
+            "the figures above stand on their own."
+        )
     else:
         st.caption(
             "Narrative unavailable: the `claude` CLI is not signed in. "
