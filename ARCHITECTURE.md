@@ -188,16 +188,75 @@ Go and Rust lose for the same reason with more effort. JavaScript is already in 
 where it belongs: Bun and SvelteKit on the frontend. The split is deliberate, JS where the DOM
 lives and Python where the math lives.
 
-**If Python ever does become the measured bottleneck**, escalate surgically in this order,
-never by rewriting: Polars instead of pandas in new worker code (Rust-backed, 5 to 30x on
-dataframe work, while `core/` keeps pandas where the tests pin behaviour), then the vectorised
-greeks path that already exists in `options.py`, then Numba or a small PyO3 extension for one
-profiled hot loop with the test suite as the guard.
+**If Python ever does become the measured bottleneck**, escalate surgically, never by
+rewriting. The order below is corrected by measurement, see `STACK_SURVEY_2026-08.md`:
+
+1. **Vectorise scalar hot paths.** Already done for the normal CDF: binding `_cdf` to
+   `scipy.stats.norm.cdf` cost 16.2 us per call in pure dispatch overhead. Switching to
+   `math.erf` gave the identical answer to 1.1e-16 (below double-precision epsilon) and made
+   `bs_greeks` **42x faster**, taking a 200-strike chain from 12.6 ms to 0.30 ms.
+2. **DuckDB for analytical scans.** The single largest remaining win: an identical backtest
+   query measured 2,659 ms in Postgres versus 45 to 100 ms via DuckDB. Already in the design.
+3. **Polars, but not yet.** Measured on this repo's actual indicator pipeline at 500 bars:
+   **2.81x** (pandas 0.649 ms, Polars 0.231 ms). Note this only appears on a *chained*
+   pipeline; on isolated single operations Polars is roughly 1x and sometimes slower, because
+   its advantage is collapsing many pandas calls into one query plan. The win is real, but it
+   lands on a background job that runs every 15 minutes where nobody is waiting, and the
+   migration touches ~62 call sites plus every consumer relying on a pandas DatetimeIndex,
+   `.iloc` or index-aligned `.shift`, which Polars does not have. **Revisit at a specific
+   trigger:** a universe above ~5,000 tickers, or a move to intraday bars.
+4. **Numba or a small PyO3 extension** for one profiled hot loop, with the tests as the guard.
 
 **The trigger for revisiting this decision:** thousands of concurrent users, or tick-level
 data. Daily bars for one user is not close.
 
-### 3.4 Postgres tuning for this box (18 GB RAM)
+### 3.4 What actually makes it feel fast, ranked by measured milliseconds
+
+A six-domain survey benchmarked the alternatives (full report: `STACK_SURVEY_2026-08.md`).
+The ranking below is what matters, and note where language choice lands:
+
+| # | Lever | Removes | Status |
+|---|---|---|---|
+| 1 | **Never cross the network on an interaction.** Ship one precomputed snapshot; serve every subsequent sort, filter and tab switch from memory. | **20 to 80 ms per interaction.** Local read 0.4 ms vs 40 ms typical Cloudflare RTT, a 100x gap. | **ADD, see 3.5** |
+| 2 | **Edge cache + async stale-while-revalidate** at Cloudflare. | 131 to 202 ms on a cold load, and permanently removes origin timeouts from user-visible latency. | **ADD** |
+| 3 | **Prefetch on hover.** SvelteKit does this by default. | Converts 20 to 80 ms into 0 ms perceived, using the 200 to 400 ms a human takes between hover and click. | Free with SvelteKit |
+| 4 | **No quant math in a request.** | Up to 55 to 64 ms. Measured: putting a 12.6 ms handler in the request path took the cheap endpoint from 0.139 ms to 55.3 ms mean under load. Adding workers did **not** fix it. | Already the design |
+| 5 | Brotli on API JSON | 14.5 ms on a 10 Mbps phone. Payload 22 kB to 4 kB. | Cloudflare does it |
+| 6 | Cap initial table at 50 rows, virtualise the rest | 12.8 ms. Full DOM rebuild is 0.9 ms at 50 rows, 13.7 ms at 500. | UI rule |
+| 7 | **Vectorise scalar hot paths** | 12.6 ms to 0.30 ms on a chain. | **DONE**, 42x |
+| 8 | DuckDB for backtest scans | 2,659 ms to 45 ms. | Already the design |
+| 9 | Choice of database | at most 0.135 ms | Postgres confirmed |
+| 10 | **Choice of API language and framework** | **0.060 ms** | Python confirmed |
+| 11 | **Choice of quant compute language** | **0.013 ms** | Python confirmed |
+
+Levers 10 and 11 together are 0.073 ms against a 40 ms round trip: **0.18 percent**. One frame
+at 120 Hz is 8.3 ms, so the entire language question is one hundred and fourteenth of a single
+frame. Meanwhile lever 1 is worth 20 to 80 ms on every tap.
+
+### 3.5 The snapshot pattern (the thing that actually delivers "feels like x.com")
+
+Apps that feel instant are not written in faster languages. They do not ask the network when
+you interact. Adopt the same pattern, which costs about half a day and no new technology:
+
+1. After each compute pass the worker writes the entire dashboard as **one JSON document** at a
+   versioned, immutable URL: `/api/snapshot/{build_id}.json`, with
+   `Cache-Control: public, max-age=31536000, immutable`.
+2. A tiny `/api/version` endpoint returns the current `build_id`. It is the only thing that is
+   ever revalidated.
+3. A **service worker** stores the snapshot. The app boots from local disk (0.4 ms), renders
+   immediately, then checks `/api/version` in the background and swaps if a newer build exists.
+4. Sorting, filtering, switching tabs and drilling into a ticker all run against the in-memory
+   snapshot. **Zero network.** Measured at under 0.05 ms for a filter-and-sort over 500 rows.
+
+Because the snapshot URL is immutable, Cloudflare caches it at the edge forever and the box is
+off the critical path entirely. This also means the app **keeps working when the box is asleep,
+rebooting or offline**, which is a real benefit of self-hosting on a laptop.
+
+A full sync engine (ElectricSQL, Zero, PowerSync, Replicache) is **not** needed. Those solve
+multi-writer conflict resolution. This app has one writer, a scheduled job, and a read-only
+client. The snapshot pattern gets the same perceived speed for a fraction of the complexity.
+
+### 3.6 Postgres tuning for this box (18 GB RAM)
 
 Defaults assume a shared server and leave most of the machine unused. Set in `postgresql.conf`:
 
