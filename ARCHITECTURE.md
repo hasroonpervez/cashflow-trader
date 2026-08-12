@@ -68,7 +68,7 @@ flowchart LR
         subgraph store["Storage tier"]
             PG[("PostgreSQL 17<br/>operational truth")]
             LAKE[("Parquet lake<br/>+ DuckDB<br/>backtests")]
-            RDS[("Redis<br/>cache + pubsub")]
+            RDS[("Valkey<br/>cache + pubsub")]
         end
 
         subgraph serve["Serving tier (read only, instant)"]
@@ -114,12 +114,12 @@ most-familiar. Section 3.1 states honestly where that costs you something.
 | Operational DB | **PostgreSQL 17** | ACID, JSONB, partitioning, materialized views, mature. Data volume here is millions of rows, which is nothing for Postgres. | SQLite: excellent single-node but weaker under concurrent worker writes and no concurrent matview refresh. MongoDB: we have relational data with real joins. |
 | DB driver | **asyncpg**, raw SQL in `db/repositories/` | The fastest Postgres driver for Python by a wide margin: binary protocol, prepared statement cache, roughly 3x psycopg on read throughput. An ORM in the hot path buys nothing here because our reads are two or three hand-tuned queries. | SQLAlchemy ORM at runtime: object hydration overhead on every row for no benefit. It stays for migrations only. |
 | Analytics / backtest | **Parquet lake + DuckDB** | Columnar scans over years of bars are the one workload a row store is mediocre at. DuckDB reads Parquet at memory speed, runs in-process, zero server, and is vectorised. This is what modern quant desks actually use. | Timescale: good, but an extension dependency for a benefit DuckDB gives free. Everything-in-pandas: does not scale and is part of why the current app is slow. |
-| Cache / pubsub | **Redis 8** | Sub-millisecond reads and pub/sub for live UI push. Optional by design: if Redis is down the API reads Postgres directly and stays correct, just slower. | Postgres LISTEN/NOTIFY only: workable, but Redis also solves caching in the same process boundary. |
+| Cache / pubsub | **Valkey 9** | Sub-millisecond reads and pub/sub for live UI push. Optional by design: if it is down the API reads Postgres directly and stays correct, just slower. **Valkey, not Redis:** Redis left BSD in March 2024 for RSAL/SSPL and only added AGPLv3 back in May 2025. AGPL is OSI-approved but is strong copyleft. Valkey is the Linux Foundation fork under plain **BSD-3**, drop-in wire-compatible, backed by AWS, Google and Oracle. Same speed, no licence question. | Redis 8: works and is now AGPL, but there is no reason to accept copyleft when a permissive drop-in exists. Postgres LISTEN/NOTIFY only: workable, but this also solves caching. |
 | API framework | **Litestar** on **Python 3.13** | Benchmarks consistently ahead of FastAPI on request throughput, and it uses **msgspec** rather than Pydantic for serialisation, which is the fastest validation/serialisation library in Python. Same async model, better dependency injection, and it still **reuses `core/` unchanged**. Python 3.13 is measurably faster than 3.12 and is already installed on the box. | FastAPI: fine, and the safe fallback if the team stalls; simply slower per request. Node or Go API: would strand 852 tests of hardened quant code behind a language boundary. |
 | HTTP server | **Granian** | A Rust HTTP server for Python ASGI. Faster than uvicorn, lower tail latency, and handles its own worker supervision. | uvicorn + httptools: the conventional pick, measurably slower under concurrency. Keep as fallback. |
 | Serialisation | **msgspec** | Fastest JSON encode/decode in Python, and it validates while decoding so there is no second pass. | Pydantic v2: fast, but msgspec is faster and Litestar is built around it. orjson: encode only, no validation. |
 | Job scheduling | **APScheduler** in a dedicated worker process | Cron-like schedules in-process, simple, no broker required for the periodic path. | Celery: more machinery than a single box needs. Bare cron: no retry, no job state, no introspection. |
-| On-demand jobs | **Arq** (async Redis queue) | For user-triggered work like "build a dossier for TSLA": enqueue, return immediately, stream progress. Keeps the request path clean. | Running it inline: that is the current bug. |
+| On-demand jobs | **Arq** (async Valkey/Redis-protocol queue) | For user-triggered work like "build a dossier for TSLA": enqueue, return immediately, stream progress. Keeps the request path clean. | Running it inline: that is the current bug. |
 | Frontend | **SvelteKit + Svelte 5 (runes)**, TypeScript, Tailwind v4, shadcn-svelte | The faster choice, and not marginally: Svelte compiles away the framework, so there is no virtual DOM diff at runtime and hydration payloads are typically 30 to 50 percent smaller than the React equivalent. For a data-dense dashboard that is exactly the workload where it wins. | Next.js 15 + React 19: bigger runtime, heavier hydration. My earlier objection was charting ecosystem, and it was wrong: the two chart libraries below are vanilla JS and framework agnostic, so React buys nothing here. |
 | JS runtime | **Bun** | Faster cold start, faster install, faster server-side IO than Node. SvelteKit has a first-class Bun adapter. Node 26 is already on the box as the fallback if any dependency misbehaves. | Node: the safe default, simply slower to boot and to serve. |
 | Data fetching | **TanStack Query (Svelte)** | Caching, background refetch, stale-while-revalidate and optimistic updates are solved problems. Do not hand-roll. | Raw fetch in effects: reinvents caching badly. |
@@ -256,7 +256,81 @@ A full sync engine (ElectricSQL, Zero, PowerSync, Replicache) is **not** needed.
 multi-writer conflict resolution. This app has one writer, a scheduled job, and a read-only
 client. The snapshot pattern gets the same perceived speed for a fraction of the complexity.
 
-### 3.6 Postgres tuning for this box (18 GB RAM)
+### 3.6 Licence audit: everything here is free and open source
+
+Checked deliberately, because two of these changed recently.
+
+| Component | Licence | Free? | Note |
+|---|---|---|---|
+| PostgreSQL 17 | PostgreSQL Licence | Yes | Permissive, BSD-like |
+| DuckDB | MIT | Yes | |
+| Apache Arrow / Parquet | Apache 2.0 | Yes | |
+| **Valkey** | **BSD-3** | Yes | Chosen over Redis specifically for this |
+| Litestar | MIT | Yes | |
+| Granian | BSD-3 | Yes | |
+| msgspec | BSD-3 | Yes | |
+| asyncpg | Apache 2.0 | Yes | |
+| SQLAlchemy / Alembic | MIT | Yes | |
+| APScheduler | MIT | Yes | |
+| Arq | MIT | Yes | |
+| Python | PSF | Yes | |
+| numpy / pandas / scipy | BSD-3 | Yes | |
+| hmmlearn | BSD-3 | Yes | |
+| Polars | MIT | Yes | Deferred, but free when wanted |
+| SvelteKit / Svelte | MIT | Yes | |
+| Bun | MIT | Yes | |
+| Tailwind CSS | MIT | Yes | |
+| shadcn-svelte | MIT | Yes | You own the copied source |
+| TanStack Query | MIT | Yes | |
+| **lightweight-charts** | **Apache 2.0** | Yes | **Attribution required, see below** |
+| uPlot | MIT | Yes | |
+| D3 / LayerChart | ISC / MIT | Yes | |
+| cloudflared client | Apache 2.0 | Yes | The client is open; the service is not, see below |
+| uptime-kuma | MIT | Yes | Already running on the box |
+
+### Two things to be deliberate about
+
+**1. lightweight-charts requires attribution.** It is Apache 2.0 and free, but the licence
+requires naming TradingView as the creator. The library ships an `attributionLogo` option in
+`LayoutOptions` that is **enabled by default** and satisfies this with a small corner link. So
+the correct action is simply: **do not disable it.** If you ever do, you must instead carry the
+NOTICE text and a link to https://www.tradingview.com/ somewhere the user can see.
+
+**2. Cloudflare is free-as-in-beer, not free-as-in-freedom.** The `cloudflared` client is
+Apache 2.0, but Tunnel and Access are a proprietary hosted service. They cost nothing and are
+the pragmatic choice, but you are depending on someone else's platform. Fully open, fully
+self-hosted alternatives, in order of practicality:
+
+| Alternative | Licence | Trade-off |
+|---|---|---|
+| **Pangolin** | AGPL / open | Self-hosted tunnel with an auth layer, but needs a cheap public VPS to terminate |
+| **frp** | Apache 2.0 | Battle-tested reverse tunnel, also needs a public VPS, no built-in auth |
+| **Headscale + Tailscale clients** | BSD-3 | Fully open control plane you host; private access only, no public URL |
+| **WireGuard direct** | GPLv2 | Simplest and fastest, but you must expose a UDP port and handle DNS |
+
+Every one of those costs a few dollars a month for a VPS, which is why Cloudflare wins for a
+personal tool. **Decide once, deliberately, and record it here.** If vendor independence
+matters more than the money, take Pangolin or frp on a small VPS.
+
+### One thing that is not open source, and not in this stack
+
+**kdb+/q** is the real language of institutional quant finance and would be genuinely fast for
+time-series, but it is proprietary with a restricted free tier. It was evaluated in
+`STACK_SURVEY_2026-08.md` and rejected. DuckDB gets you the columnar speed under MIT.
+
+### Data sources: free, but understand what you are relying on
+
+| Source | Cost | Reality |
+|---|---|---|
+| Yahoo Finance via `yfinance` | Free | Apache 2.0 library, but an **unofficial** scraper of an endpoint with no SLA. It throttles shared IPs constantly. Treat every fetch as failure-prone; the ingestion layer already does. |
+| Alpha Vantage | Free tier | Real API with a documented key. `TIME_SERIES_DAILY_ADJUSTED` is premium-only, which is why the code falls back and tags `price_basis`. |
+| ApeWisdom / StockTwits / Reddit JSON | Free | Public endpoints, rate limited, no SLA. Back off on 429. |
+| Google Trends via `pytrends` | Free | **Unofficial** and the most fragile of the set. It must always fail soft. |
+
+None of these are contractually guaranteed. That is precisely why the architecture stores
+everything it fetches: **the database is the asset, the sources are just weather.**
+
+### 3.7 Postgres tuning for this box (18 GB RAM)
 
 Defaults assume a shared server and leave most of the machine unused. Set in `postgresql.conf`:
 
@@ -348,7 +422,7 @@ flowchart TD
 ```
 
 Arrows only point downward. `core/` imports nothing from the layers above it. Add a CI check
-that fails the build if `core/` ever imports `litestar`, `asyncpg`, `sqlalchemy`, `streamlit` or `redis`.
+that fails the build if `core/` ever imports `litestar`, `asyncpg`, `sqlalchemy`, `streamlit` or `valkey`.
 
 ---
 
@@ -603,7 +677,7 @@ sequenceDiagram
     participant X as External API
     participant P as Postgres
     participant C as Compute job
-    participant R as Redis
+    participant R as Valkey
     participant U as Browser
 
     Note over S,P: Runs on a timer. No user is waiting.
@@ -650,7 +724,7 @@ sequenceDiagram
 ## 7. API design
 
 Litestar on Granian, all responses typed as `msgspec.Struct`, all reads served from Postgres
-or Redis. Handlers are async; the CPU-bound quant core runs in a process pool so a heavy
+or Valkey. Handlers are async; the CPU-bound quant core runs in a process pool so a heavy
 computation can never block the event loop.
 
 ```
