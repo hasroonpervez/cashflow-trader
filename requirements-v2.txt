@@ -1,0 +1,15 @@
+# CashFlow Trader v2 stack (ARCHITECTURE.md section 3).
+# Runtime: Python 3.13 on the box. Keep requirements.txt untouched for the
+# legacy Streamlit app until cutover.
+#
+# core/ has zero framework dependencies; these packages are for db, workers,
+# api, web. Versions are the measured ones from STACK_SURVEY_2026-08.md.
+sqlalchemy==2.0.52
+alembic==1.19.1
+asyncpg==0.31.0
+
+litestar==2.24
+granian==2.8.1
+msgspec>=0.19.0
+
+valkey>=6.2.0

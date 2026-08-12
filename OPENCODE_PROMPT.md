@@ -38,8 +38,19 @@ These are not preferences. Breaking any of them fails the work.
    including an inverted vanna sign, a Kelly clip that could size a position above 100 percent
    of bankroll, and lookahead bias contaminating every historical win rate. Run
    `pytest tests/ -q` before you start and after every step. If a test fails, you broke
-   something. Do not edit a test to make it pass unless you can show in writing that the test
-   was asserting buggy behaviour.
+   something.
+
+   **Verified baseline, so you know the target is real:** 852 pass on Python 3.12.13 with
+   numpy 2.0.2 and pandas 2.3.3 (the production replica), on Python 3.13.15 with numpy 2.5.2
+   and pandas 3.0.5, and on Python 3.14.6. The suite is genuinely green across all three; if
+   it is not green for you, the cause is your change or your environment, not a pre-existing
+   failure.
+
+   **Two clarifications on "do not edit tests":**
+   - Updating an *import path* (`from modules.x` becomes `from core.x`) during step 2 is
+     expected and fine. That is a move, not a weakening.
+   - Changing an *assertion* is only acceptable if you can show in writing that the test was
+     asserting buggy behaviour. State the argument in your report.
 2. **`core/` has zero framework dependencies.** No Litestar, no asyncpg, no SQLAlchemy, no
    Streamlit, no Valkey. It is pure functions over dataframes and plain types. Add a CI check
    that fails the build if any of those appear in a `core/` import. This single rule is what
@@ -59,11 +70,15 @@ These are not preferences. Breaking any of them fails the work.
 
 ### Build in this order. Each step ends with something that works.
 
+**Note on paths:** until step 2 the quant code lives in `modules/`. Everything in this brief
+that says `core/` means `modules/` before that move and `core/` after it.
+
 1. **`db/`** Alembic migrations for the schema in section 5 of `ARCHITECTURE.md`. Seed
    `instruments` from the current `watchlist` and `radar_universe` in `config.json`.
-2. **`core/`** Move `modules/` to `core/`, strip every Streamlit import, add the import ban
-   check. **All 852 tests green on Python 3.13 as well as 3.12** before you go further. They
-   were validated on 3.12.13; if something fails on 3.13, fix it there rather than downgrading.
+2. **`core/`** Move `modules/` to `core/`, strip every Streamlit import, update the test
+   import paths, add the import ban check. **All 852 tests green before you go further.**
+   Already verified green on 3.12.13, 3.13.15 and 3.14.6, so any failure here is the move,
+   not the language.
 3. **`workers/ingest_bars.py`** plus `job_runs` logging. Backfill two years for the universe.
    Verify `price_basis` is set correctly for both Yahoo and Alpha Vantage.
 4. **`workers/compute_signals.py`** writing `scan_runs` and `signals`, using `core/`.
@@ -94,8 +109,10 @@ Read these. Each one cost real time.
 - **Run long enough to hit the timers.** That bug fired at 90 seconds; every smoke test ran for
   35. Soak for several minutes with a real browser session open before declaring success.
 - **`scipy.stats.norm.cdf` on scalars is 400x slower than `math.erf`.** It was costing 12.6 ms
-  per option chain in pure dispatch overhead. Already fixed in `core/options.py`; do not
-  reintroduce the pattern anywhere else. Vectorise or use `math`.
+  per option chain in pure dispatch overhead, because it is a frozen-distribution method that
+  runs full argument validation and array dispatch on every scalar call. Already fixed in
+  **`modules/options.py`** (which becomes `core/options.py` at step 2); do not reintroduce the
+  pattern anywhere else. Vectorise, or use `math`.
 - **Do not mix adjusted and unadjusted prices.** `price_basis` is part of the bars primary key
   for exactly this reason. A reverse split silently injected a fake gap in v1.
 
