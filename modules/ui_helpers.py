@@ -751,9 +751,21 @@ def edge_scan_due(last_scan_ts, now_ts, scan_key, last_key, interval_s: float = 
         return True
 
 
-@st.fragment(run_every=_EDGE_SCAN_INTERVAL_S)
+@st.fragment
 def _fragment_rolling_edge_capture():
-    """Full-watchlist quant vs retail edge log + matrix; reruns on a timer without blocking the rest of the app."""
+    """Full-watchlist quant vs retail edge log + matrix, scanned on demand.
+
+    DEPLOY SAFETY: this deliberately has no ``run_every=``. The audit found the
+    caption promised a 90-second timer that did not exist, and the first fix was to
+    add a real one. That killed the Streamlit Cloud deployment: ``run_every`` reruns
+    the fragment unconditionally in EVERY open session, forever, and each due tick
+    does a full-watchlist network scan. On a free-tier container that is a permanent
+    background load, and the platform kills the app (health check refused on 8501).
+
+    The honest resolution is the other one: keep the work on-demand and make the
+    copy true. ``edge_scan_due`` still enforces a 90s floor between real scans, so
+    interacting with the tab repeatedly does not re-hammer Yahoo.
+    """
     _scan_mode = st.session_state.get(
         "_cf_scanner_mode",
         st.session_state.get(
@@ -761,8 +773,10 @@ def _fragment_rolling_edge_capture():
             st.session_state.get("sb_scanner_mode_radio", "📈 Options Yield"),
         ),
     )
+    _rescan = st.button("Rescan watchlist", key="cf_edge_rescan")
     st.caption(
-        "Full watchlist scan about every **90 seconds**. **Highest Quant** sorts to the top. "
+        "Scanned when you open this panel or press **Rescan watchlist**, and at most "
+        "once every 90 seconds. **Highest Quant** sorts to the top. "
         "**Edge gap** is Quant score minus Retail score (each 0 to 100)."
     )
     if _scan_mode == "📈 Options Yield":
@@ -802,6 +816,8 @@ def _fragment_rolling_edge_capture():
         st.session_state.get("_cf_edge_scan_key"),
     )
     failed_syms = st.session_state.get("_cf_edge_scan_failed") or []
+    if _rescan:
+        _due = True
     if _due:
         with st.spinner("Scanning watchlist for edge scores…"):
             rows, failed_syms = scan_watchlist_edge_rows(wl, vix_arg, use_q, panel_raw=_panel)
