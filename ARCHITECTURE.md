@@ -155,7 +155,49 @@ combined: it turns a multi-second wait into a single indexed read. The fast stac
 because it is free to choose it now and expensive to change later, not because Litestar
 versus FastAPI is what you will feel. **Do not let stack debates delay Phase 0.**
 
-### 3.3 Postgres tuning for this box (18 GB RAM)
+### 3.3 Why not Node, Go or Rust for the backend
+
+This gets asked every time, so here are measurements instead of opinions. Benchmarked on the
+target box against the exact production stack (Python 3.12.13, numpy 2.0.2, pandas 2.3.3):
+
+| Operation | Measured |
+|---|---|
+| Rank an 80-ticker universe | **0.005 ms** |
+| Serialise a 50-row dashboard payload | **0.037 ms** |
+| Build one opportunity row (500 bars, full convexity) | 0.52 ms |
+| Black-Scholes greeks, one contract | 0.063 ms |
+| Greeks across a 200-strike chain | 12.6 ms (worker only, and already vectorisable) |
+
+A dashboard read is one indexed query plus 0.037 ms of Python. The round trip through
+Cloudflare to a phone is 20 to 80 ms. **Python is under 0.2 percent of perceived latency.**
+A Node rewrite might save 20 microseconds on a 50,000 microsecond request.
+
+Three reasons the rewrite is actively worse, not merely unnecessary:
+
+1. **Node has no numerical stack.** numpy, scipy and hmmlearn are C and Fortran; Python is
+   only the steering wheel. Rewriting means hand-implementing Wilson bounds, bootstrap
+   confidence intervals, HMM regime fitting, fractional differencing and Black-Scholes greeks.
+2. **That is exactly the code the audit proved is hard to get right.** It found an inverted
+   vanna sign, a Kelly clip applied in the wrong order that could size a position above 100
+   percent of bankroll, and lookahead bias contaminating every historical win rate. A rewrite
+   reintroduces that whole class of risk in a language with weaker numerical tooling.
+3. **The valuable asset is the 852 tests and the audit knowledge inside them,** not the source
+   lines. A language change discards it.
+
+Go and Rust lose for the same reason with more effort. JavaScript is already in this stack
+where it belongs: Bun and SvelteKit on the frontend. The split is deliberate, JS where the DOM
+lives and Python where the math lives.
+
+**If Python ever does become the measured bottleneck**, escalate surgically in this order,
+never by rewriting: Polars instead of pandas in new worker code (Rust-backed, 5 to 30x on
+dataframe work, while `core/` keeps pandas where the tests pin behaviour), then the vectorised
+greeks path that already exists in `options.py`, then Numba or a small PyO3 extension for one
+profiled hot loop with the test suite as the guard.
+
+**The trigger for revisiting this decision:** thousands of concurrent users, or tick-level
+data. Daily bars for one user is not close.
+
+### 3.4 Postgres tuning for this box (18 GB RAM)
 
 Defaults assume a shared server and leave most of the machine unused. Set in `postgresql.conf`:
 
