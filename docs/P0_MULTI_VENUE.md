@@ -13,7 +13,7 @@ Default `MODE=paper`. `place_order` raises `PermissionError` unless mode is in `
 | `risk/kelly.py` | Fractional / fee-aware Kelly |
 | `risk/sizing.py` | Thin paper Kelly adapter wrapping existing helpers |
 | `risk/promotion_gate.py` | Annotates promote/hold (does **not** block paper fills) |
-| `risk/stage2.py` | Annotate-only DSR/PBO overfitting hook (placeholders; does not block paper fills) |
+| `risk/stage2.py` | Stage-2 DSR / PBO overfitting stats (annotate-only) |
 | `risk/portfolio_risk.py` | Advisory PortfolioRisk stub (haircut only) |
 | `execution/paper_ledger.py` | Signals / orders / fills / **outcomes** (PnL stub) |
 | `execution/pipeline.py` | Signal -> gate annotate -> stage2 annotate -> size_paper -> PortfolioRisk -> venue -> ledger |
@@ -30,12 +30,14 @@ Stage-1 paper gate now also requires bootstrap 95% CI lo>0 (reuse
 `modules.validated_signals.bootstrap_ci`). Hold remains annotate-only;
 paper fills still record.
 
-Stage-1 (`risk/promotion_gate.py`) annotates promote/hold from sample quality
-(min_n, split-half, concentration, bootstrap CI). Stage-2 (`risk/stage2.py`) is
-an annotate-only overfitting hook: `evaluate_stage2` returns placeholder DSR/PBO
-plus reasons and never blocks paper fills. PBO stays None without a 2D
-`returns_matrix` (N>=2) and that absence does not fail the hook. The 0.25
-research haircut applies only to a stage-1 hold.
+Stage-1 (`risk/promotion_gate.py`) is sample-quality: min_n, split-half, concentration,
+bootstrap CI. Stage-2 (`risk/stage2.py`) is the overfitting hook: stats lifted from
+kalshi-bot/backtest.py (Bailey / Lopez de Prado) for deflated Sharpe (DSR) and optional
+CSCV PBO when a 2D `returns_matrix` is supplied. `run_paper_pipeline` calls
+`evaluate_stage2` after the promotion gate and appends `stage2:` reasons. Stage-2 is
+annotate-only: it never blocks paper fills, and the 0.25 research haircut applies only
+to a stage-1 hold. Missing PBO (no matrix) does not fail the hook; DSR still applies
+once n is sufficient.
 
 ## Sizing
 
