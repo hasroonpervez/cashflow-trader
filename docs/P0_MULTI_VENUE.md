@@ -24,6 +24,10 @@ Default `MODE=paper`. `place_order` raises `PermissionError` unless mode is in `
 Promotion gate marks `promoted` true/false and may research-haircut size when held.
 Paper fills **still record** so the outcome ledger can grow past min_n (no chicken-and-egg).
 
+Stage-1 paper gate now also requires bootstrap 95% CI lo>0 (reuse
+`modules.validated_signals.bootstrap_ci`). Hold remains annotate-only;
+paper fills still record.
+
 ## Sig_* producers
 
 Producers emit unified paper `Signal` records that feed `run_paper_pipeline`
