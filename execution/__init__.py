@@ -1,5 +1,7 @@
-"""Paper execution: ledger + Signal -> gate -> kelly -> venue pipeline."""
-from .paper_ledger import PaperLedger
-from .pipeline import PaperPipeline, PipelineResult
+"""Paper execution path."""
+from __future__ import annotations
 
-__all__ = ["PaperLedger", "PaperPipeline", "PipelineResult"]
+from execution.paper_ledger import PaperLedger
+from execution.pipeline import PaperPipelineResult, run_paper_pipeline
+
+__all__ = ["PaperLedger", "PaperPipelineResult", "run_paper_pipeline"]

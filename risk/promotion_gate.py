@@ -1,121 +1,109 @@
-"""Strategy promotion gate: min-n, split-half, concentration -> promote/hold.
-
-Pure functions. Reimplemented for cashflow-trader (concepts only from the
-Aug 2026 research program / validation-gate pattern).
-"""
+"""Promotion gate — hold signals until sample quality clears."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Iterable, Optional, Sequence
-
-import numpy as np
+from dataclasses import dataclass
+from typing import Mapping, Sequence
 
 
 @dataclass(frozen=True)
-class GateDecision:
-    """Promote vs hold with explicit reasons."""
-
-    decision: str  # "promote" | "hold"
-    passed: bool
-    reasons: list[str]
+class PromotionGateResult:
+    ok: bool
+    reasons: tuple[str, ...]
     n: int
-    expectancy: float
-    checks: dict[str, bool] = field(default_factory=dict)
-    details: dict = field(default_factory=dict)
+    split_half_corr: float | None
+    max_label_share: float | None
 
 
-def split_half_consistent(returns: Sequence[float], min_half: int = 10) -> dict:
-    """Require positive mean return in both chronological halves."""
-    r = np.asarray(list(returns), dtype=float)
-    if len(r) < 2 * min_half:
-        return {
-            "consistent": False,
-            "reason": f"insufficient sample for split-half (<{2 * min_half})",
-            "h1_mean": float("nan"),
-            "h2_mean": float("nan"),
-        }
-    mid = len(r) // 2
-    h1, h2 = r[:mid], r[mid:]
-    return {
-        "consistent": bool(h1.mean() > 0 and h2.mean() > 0),
-        "h1_mean": float(h1.mean()),
-        "h2_mean": float(h2.mean()),
-    }
+def _pearson(a: Sequence[float], b: Sequence[float]) -> float:
+    n = len(a)
+    if n != len(b) or n == 0:
+        return 0.0
+    mean_a = sum(a) / n
+    mean_b = sum(b) / n
+    num = sum((x - mean_a) * (y - mean_b) for x, y in zip(a, b))
+    den_a = sum((x - mean_a) ** 2 for x in a) ** 0.5
+    den_b = sum((y - mean_b) ** 2 for y in b) ** 0.5
+    if den_a == 0.0 or den_b == 0.0:
+        return 0.0
+    return num / (den_a * den_b)
 
 
-def concentration_check(
-    returns: Sequence[float],
-    buckets: Optional[Sequence] = None,
-) -> dict:
-    """Lottery-ticket detector: does removing top-3 trades flip expectancy?"""
-    r = np.asarray(list(returns), dtype=float)
-    if len(r) == 0:
-        return {"fragile": True, "reason": "empty returns"}
-    total = float(r.sum())
-    top3 = float(np.sort(r)[-3:].sum()) if len(r) >= 3 else total
-    ex_top3 = total - top3
-    out = {
-        "total": total,
-        "top3_trades_share": (top3 / total) if total > 0 else None,
-        "expectancy_ex_top3": float(ex_top3 / max(len(r) - 3, 1)),
-        "fragile": bool(total > 0 and ex_top3 <= 0),
-    }
-    if buckets is not None:
-        b = list(buckets)
-        if len(b) != len(r):
-            out["bucket_error"] = "returns/buckets length mismatch"
+def check(
+    outcomes: Sequence[float],
+    *,
+    min_n: int = 30,
+    split_half_corr: float = 0.3,
+    max_concentration: float = 0.35,
+    labels: Sequence[str] | None = None,
+) -> PromotionGateResult:
+    """Evaluate promotion readiness (min_n / split-half corr / concentration)."""
+    reasons: list[str] = []
+    n = len(outcomes)
+    corr: float | None = None
+    top_share: float | None = None
+
+    if n < min_n:
+        reasons.append(f"min_n: {n} < {min_n}")
+
+    if n >= 4:
+        mid = n // 2
+        left = [float(x) for x in outcomes[:mid]]
+        right = [float(x) for x in outcomes[mid : 2 * mid]]
+        corr = _pearson(left, right)
+        if corr < split_half_corr:
+            reasons.append(f"split_half: corr={corr:.3f} < {split_half_corr}")
+    else:
+        reasons.append("split_half: insufficient sample")
+
+    if labels is not None and n > 0:
+        if len(labels) != n:
+            reasons.append("concentration: labels length mismatch")
         else:
-            by: dict = {}
-            for ret, key in zip(r, b):
-                by[key] = by.get(key, 0.0) + float(ret)
-            top_bucket = max(by.values()) if by else 0.0
-            out["top_bucket_share"] = (top_bucket / total) if total > 0 else None
-    return out
+            counts: dict[str, int] = {}
+            for lab in labels:
+                counts[str(lab)] = counts.get(str(lab), 0) + 1
+            top_share = max(counts.values()) / n
+            if top_share > max_concentration:
+                reasons.append(
+                    f"concentration: top_share={top_share:.3f} > {max_concentration}"
+                )
+
+    return PromotionGateResult(
+        ok=not reasons,
+        reasons=tuple(reasons),
+        n=n,
+        split_half_corr=corr,
+        max_label_share=top_share,
+    )
 
 
 def promotion_gate(
-    returns: Iterable[float],
-    buckets: Optional[Sequence] = None,
+    outcomes: Sequence[float],
     *,
-    min_trades: int = 100,
-    require_split_half: bool = True,
-    require_concentration: bool = True,
-) -> GateDecision:
-    """Go/no-go before a strategy earns sizing beyond paper.
+    min_n: int = 30,
+    split_half_corr: float = 0.3,
+    max_concentration: float = 0.35,
+    labels: Sequence[str] | None = None,
+) -> PromotionGateResult:
+    """Alias for :func:`check`."""
+    return check(
+        outcomes,
+        min_n=min_n,
+        split_half_corr=split_half_corr,
+        max_concentration=max_concentration,
+        labels=labels,
+    )
 
-    Pass requires:
-      - n >= min_trades
-      - positive expectancy in both chronological halves (when required)
-      - profit not fragile to removing top-3 trades (when required)
-    """
-    r = np.asarray(list(returns), dtype=float)
-    n = int(len(r))
-    expectancy = float(r.mean()) if n else 0.0
-    halves = split_half_consistent(r)
-    conc = concentration_check(r, buckets)
 
-    checks = {
-        "min_n": n >= min_trades,
-        "split_half": (not require_split_half) or bool(halves.get("consistent")),
-        "concentration": (not require_concentration) or (not conc.get("fragile", False)),
-    }
-    reasons: list[str] = []
-    if not checks["min_n"]:
-        reasons.append(f"n={n} < min_trades={min_trades}")
-    if not checks["split_half"]:
-        reasons.append(halves.get("reason") or "split-half not both positive")
-    if not checks["concentration"]:
-        reasons.append("concentration: expectancy fragile after removing top-3 trades")
-
-    passed = all(checks.values())
-    if passed:
-        reasons.append("all promotion checks passed")
-    return GateDecision(
-        decision="promote" if passed else "hold",
-        passed=passed,
-        reasons=reasons,
-        n=n,
-        expectancy=expectancy,
-        checks=checks,
-        details={"split_half": halves, "concentration": conc},
+def gate_from_stats(gate_stats: Mapping[str, object] | None) -> PromotionGateResult:
+    """Build a gate result from a pipeline ``gate_stats`` mapping."""
+    stats = dict(gate_stats or {})
+    outcomes = list(stats.get("outcomes") or [])  # type: ignore[arg-type]
+    labels = stats.get("labels")
+    return check(
+        outcomes,
+        min_n=int(stats.get("min_n", 30)),  # type: ignore[arg-type]
+        split_half_corr=float(stats.get("split_half_corr", 0.3)),  # type: ignore[arg-type]
+        max_concentration=float(stats.get("max_concentration", 0.35)),  # type: ignore[arg-type]
+        labels=None if labels is None else list(labels),  # type: ignore[arg-type]
     )

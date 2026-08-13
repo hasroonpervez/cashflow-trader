@@ -3,49 +3,51 @@ from __future__ import annotations
 
 import pytest
 
-from venues.base import OrderRequest, VenueAdapter
-from venues.kalshi.adapter import KalshiDryRunAdapter
+from venues.base import Mode, OrderRequest
+from venues.kalshi import KalshiDryRunAdapter
 
 
-def test_deterministic_fill_stable_across_calls():
-    adapter = KalshiDryRunAdapter(mode="dry_run")
-    req = OrderRequest(
-        market_id="KXTEST-1",
-        side="yes",
-        price=0.42,
-        quantity=7,
-        client_order_id="cid-1",
-    )
-    a = adapter.place_order(req)
-    b = adapter.place_order(req)
-    assert a.ok and b.ok
-    assert a.order_id == b.order_id
-    assert a.filled_qty == 7
-    assert a.avg_fill_price == pytest.approx(0.42)
-    assert a.raw["digest"] == b.raw["digest"]
-
-
-def test_live_mode_refused_on_base_adapter():
-    class _Dummy(VenueAdapter):
-        name = "dummy"
-
-        def _place_order_impl(self, request):
-            raise AssertionError("should not be called")
-
-    live = _Dummy(mode="live")
-    req = OrderRequest("M", "yes", 0.5, 1, "c")
-    with pytest.raises(RuntimeError, match="refused"):
-        live.place_order(req)
-
-
-def test_kalshi_adapter_rejects_live_construction():
+def test_live_construction_rejected() -> None:
     with pytest.raises(ValueError):
-        KalshiDryRunAdapter(mode="live")
+        KalshiDryRunAdapter(mode=Mode.LIVE)
 
 
-def test_invalid_price_rejected():
-    adapter = KalshiDryRunAdapter(mode="paper")
-    req = OrderRequest("M", "yes", 1.0, 2, "c2")
-    res = adapter.place_order(req)
-    assert not res.ok
-    assert res.status == "rejected"
+def test_place_order_live_refused_on_base_mode() -> None:
+    adapter = KalshiDryRunAdapter(mode=Mode.PAPER)
+    adapter.mode = Mode.LIVE
+    with pytest.raises(PermissionError):
+        adapter.place_order(
+            OrderRequest(market="M", side="yes", size=1.0, signal_id="sig")
+        )
+
+
+def test_deterministic_fills_from_signal_id() -> None:
+    adapter = KalshiDryRunAdapter(mode=Mode.DRY_RUN)
+    order = OrderRequest(
+        market="DEMO-MARKET",
+        side="yes",
+        size=25.0,
+        signal_id="abc123",
+    )
+    f1 = adapter.place_order(order)
+    f2 = adapter.place_order(order)
+    assert f1.order_id == f2.order_id
+    assert f1.price == f2.price
+    assert f1.mode is Mode.DRY_RUN
+    assert 0.0 < f1.price <= 1.0
+
+
+def test_different_signal_ids_differ() -> None:
+    adapter = KalshiDryRunAdapter()
+    a = adapter.place_order(
+        OrderRequest(market="M", side="yes", size=1.0, signal_id="a")
+    )
+    b = adapter.place_order(
+        OrderRequest(market="M", side="yes", size=1.0, signal_id="b")
+    )
+    assert a.order_id != b.order_id
+
+
+def test_fetch_markets_no_network() -> None:
+    markets = KalshiDryRunAdapter().fetch_markets()
+    assert markets and markets[0]["market"] == "DEMO-MARKET"

@@ -1,4 +1,6 @@
-"""Shared signal schema for multi-venue paper execution."""
-from .schema import Signal
+"""Shared signal types."""
+from __future__ import annotations
+
+from signals.schema import Signal
 
 __all__ = ["Signal"]

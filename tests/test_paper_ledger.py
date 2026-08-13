@@ -1,31 +1,36 @@
 """Unit tests for execution.paper_ledger."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 from execution.paper_ledger import PaperLedger
 
 
-def test_records_signal_order_fill_with_utc():
-    led = PaperLedger(":memory:")
-    ts = datetime(2026, 8, 12, 20, 0, 0, tzinfo=timezone.utc)
-    s = led.record_signal({"strategy": "demo", "market_id": "M1"}, signal_id="s1", ts=ts)
-    o = led.record_order({"market_id": "M1", "quantity": 3}, order_id="o1", ts=ts)
-    f = led.record_fill({"order_id": "o1", "filled_qty": 3}, fill_id="f1", ts=ts)
+def test_record_and_list_fills() -> None:
+    ledger = PaperLedger()
+    ledger.record_signal({"id": "s1"})
+    ledger.record_order({"market": "M", "size": 10})
+    ledger.record_fill({"order_id": "o1", "price": 0.4})
+    ledger.record_fill({"order_id": "o2", "price": 0.5})
 
-    assert s.ts_utc.endswith("Z")
-    assert o.ts_utc.endswith("Z")
-    assert f.ts_utc.endswith("Z")
-    assert led.count() == {"signal": 1, "order": 1, "fill": 1}
-    assert led.signals()[0].payload["signal_id"] == "s1"
-    assert led.orders()[0].payload["order_id"] == "o1"
-    assert led.fills()[0].payload["fill_id"] == "f1"
-    led.close()
+    fills = ledger.list_fills()
+    assert len(fills) == 2
+    assert fills[0].kind == "fill"
+    assert fills[0].payload["order_id"] == "o1"
+    assert fills[1].payload["order_id"] == "o2"
 
 
-def test_list_kind_order_is_append_order():
-    led = PaperLedger()
-    led.record_signal({"n": 1}, signal_id="a")
-    led.record_signal({"n": 2}, signal_id="b")
-    ids = [r.payload["signal_id"] for r in led.signals()]
-    assert ids == ["a", "b"]
+def test_list_events_filter() -> None:
+    ledger = PaperLedger()
+    ledger.record_signal({"id": "s1"})
+    ledger.record_order({"id": "o1"})
+    assert len(ledger.list_events()) == 2
+    assert len(ledger.list_events("signal")) == 1
+    assert len(ledger.list_events("order")) == 1
+    assert ledger.list_fills() == []
+
+
+def test_in_memory_isolation() -> None:
+    a = PaperLedger()
+    b = PaperLedger()
+    a.record_fill({"order_id": "only-a"})
+    assert len(a.list_fills()) == 1
+    assert len(b.list_fills()) == 0

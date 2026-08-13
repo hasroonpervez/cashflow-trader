@@ -61,7 +61,12 @@ pip install -r requirements-dev.txt
 python3 -m pytest tests/ -q
 ```
 
-**852 tests, all passing.** Coverage includes utils (`safe_last`, `safe_float`, `safe_html`, `log_warn`), `ConfigTransaction`, correlation / RS vs SPY, signal desk, BS Greeks (vanna/charm, now pinned by a finite-difference test), quant edge, allocation, watchlist helpers, smoke imports, and the v24.0 modules below (no live network in any test).
+**852 tests, all passing.**
+
+### P0 multi-venue paper scaffold
+
+Paper/dry-run only (no live orders): shared `Signal` schema, fee-aware Kelly + promotion gate, Kalshi dry-run venue stub, and an in-memory/SQLite paper ledger. See [`docs/P0_MULTI_VENUE.md`](docs/P0_MULTI_VENUE.md). Streamlit `app.py` is unchanged.
+ Coverage includes utils (`safe_last`, `safe_float`, `safe_html`, `log_warn`), `ConfigTransaction`, correlation / RS vs SPY, signal desk, BS Greeks (vanna/charm, now pinned by a finite-difference test), quant edge, allocation, watchlist helpers, smoke imports, and the v24.0 modules below (no live network in any test).
 
 > **Note on `requirements.txt`:** the pinned `numpy==2.0.2` does not build on Python 3.13+. On a newer interpreter, install unpinned (`pip install streamlit yfinance pandas numpy plotly requests hmmlearn scipy pytrends pytest`).
 
