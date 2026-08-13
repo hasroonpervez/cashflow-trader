@@ -55,15 +55,22 @@ def bar_patterns(df: pd.DataFrame, *, lookback: int = 5) -> dict[str, Any]:
     }
 
 
-def event_patterns(*, p_true: float, market_price: float) -> dict[str, Any]:
+def event_patterns(
+    *, p_true: float, market_price: float, side: str = "yes"
+) -> dict[str, Any]:
     """Kalshi yes/no book shape. Annotate only. Not a live edge claim."""
     p = float(p_true)
     px = float(market_price)
-    edge = p - px
+    chosen = (side or "yes").lower()
+    if chosen == "no":
+        edge = (1.0 - p) - px
+    else:
+        edge = p - px
     return {
         "price_extreme": bool(px <= 0.15 or px >= 0.85),
         "edge_sign": 1 if edge > 0 else (-1 if edge < 0 else 0),
         "abs_edge": abs(edge),
+        "side": chosen,
         "crowded_yes": bool(px >= 0.85),
         "crowded_no": bool(px <= 0.15),
         "paper_only": True,
@@ -72,6 +79,10 @@ def event_patterns(*, p_true: float, market_price: float) -> dict[str, Any]:
 
 
 def merge_patterns(meta: Mapping[str, Any] | None, patterns: Mapping[str, Any]) -> dict[str, Any]:
+    """Caller metadata cannot clobber computed patterns."""
     out = dict(meta or {})
-    out["patterns"] = dict(patterns)
+    extra = out.get("patterns")
+    merged = dict(extra) if isinstance(extra, Mapping) else {}
+    merged.update(dict(patterns))
+    out["patterns"] = merged
     return out
