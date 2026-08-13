@@ -1,29 +1,64 @@
-# P0 — Multi-venue paper scaffold
+# P0: Multi-venue paper scaffold
 
-**Status:** paper / dry-run only. Live venue orders are **not** implemented.
+**Status:** paper / dry-run only. No live orders. No venue credentials.
 
-Default `MODE=paper`. `place_order` refuses unless mode is in `{paper, dry_run}`.
-
-## Layout
+## What landed
 
 | Path | Role |
 |---|---|
-| `signals/schema.py` | Unified `Signal` record |
-| `risk/kelly.py` | `fractional_kelly(p, b, fraction=0.25, fee_rate=0.0)` |
-| `risk/promotion_gate.py` | `PromotionGateResult` + `check` (min_n / split-half / concentration) |
-| `execution/paper_ledger.py` | In-memory `PaperLedger` |
-| `execution/pipeline.py` | `run_paper_pipeline(signal, gate_stats, adapter, ledger, bankroll)` |
-| `venues/base.py` | `VenueAdapter` ABC; live placement refused |
-| `venues/kalshi/adapter.py` | Deterministic dry-run fills from signal id hash (no network) |
+| `signals/schema.py` | Shared `Signal` dataclass |
+| `risk/kelly.py` | Fee-aware fractional Kelly (binary contracts) |
+| `risk/promotion_gate.py` | min-n + split-half + concentration → promote/hold |
+| `venues/base.py` | `VenueAdapter`; `place_order` refuses unless mode ∈ {paper, dry_run} |
+| `venues/kalshi/adapter.py` | Deterministic dry-run fills; **no network** |
+| `execution/paper_ledger.py` | SQLite/in-memory paper signals/orders/fills (UTC) |
+| `execution/pipeline.py` | Signal → gate → Kelly → Kalshi dry-run → ledger |
 
-## Mode
+## Persistence choice (no Alembic paper migration)
 
-Supported execution modes: `paper` and `dry_run`. Live is enumerated for future dual-OK enablement but is not implemented and cannot place orders.
+`db/` Alembic migrations already model **Postgres partitioned market-data**
+tables (`bars_daily`, `options_snapshot`, …). Coupling paper accounting into
+that chain would force Postgres + partition DDL for a unit-testable stub.
 
-Do not stage live API keys or `.env` / `*.pem` secrets in this repo.
+P0 therefore uses **`execution/paper_ledger.PaperLedger`**:
 
-## Next (not P0)
+- default `:memory:` SQLite for tests
+- optional on-disk SQLite path for local paper runs
+- UTC timestamps (`…Z`)
 
-- Persist paper fills via Alembic / outcome ledger
-- Wire desk signals into the pipeline
-- Additional venue adapters (stubs later; live needs dual OK)
+A future P1 can add a dedicated Alembic revision for paper tables once the
+write-path schema is settled — without blocking this scaffold.
+
+## Safety
+
+- `VenueAdapter.place_order` raises if `mode` is not `paper` / `dry_run`.
+- `KalshiDryRunAdapter` refuses construction with `mode="live"`.
+- Streamlit `app.py` is untouched.
+- No secrets, PEM keys, or env files are read.
+
+## Quick exercise
+
+```python
+from execution.pipeline import PaperPipeline
+from signals.schema import Signal
+
+pipe = PaperPipeline(skip_gate=True, bankroll=10_000)
+sig = Signal(
+    signal_id="demo-1",
+    strategy="demo",
+    market_id="KX-DEMO",
+    venue="kalshi",
+    side="yes",
+    p_true=0.65,
+    market_price=0.45,
+)
+print(pipe.run(sig))
+```
+
+## Tests
+
+```bash
+python3 -m pytest tests/test_kelly.py tests/test_promotion_gate.py \
+  tests/test_paper_ledger.py tests/test_kalshi_dry_run.py \
+  tests/test_paper_pipeline.py -q
+```

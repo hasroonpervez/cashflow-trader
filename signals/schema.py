@@ -1,35 +1,41 @@
-"""Unified paper Signal record."""
-
+"""Canonical Signal dataclass for the paper pipeline."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Mapping
-from uuid import uuid4
+from typing import Any, Literal, Optional
 
 
-def _utc_now() -> datetime:
+def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-@dataclass
+@dataclass(frozen=True)
 class Signal:
-    """Cross-venue paper signal.
+    """Venue-agnostic trading signal.
 
-    Fields: id, ts (UTC), venue, market, side, p_true, source, metadata.
+    ``p_true`` is model probability of the YES outcome in [0, 1].
+    ``market_price`` is the quoted YES price in (0, 1).
     """
 
+    signal_id: str
+    strategy: str
+    market_id: str
     venue: str
-    market: str
-    side: str
+    side: Literal["yes", "no"]
     p_true: float
-    source: str
-    id: str = field(default_factory=lambda: uuid4().hex)
-    ts: datetime = field(default_factory=_utc_now)
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    market_price: float
+    ts_utc: datetime = field(default_factory=utcnow)
+    bucket: Optional[str] = None
+    meta: dict[str, Any] = field(default_factory=dict)
 
-    def __post_init__(self) -> None:
-        if not 0.0 <= float(self.p_true) <= 1.0:
-            raise ValueError("p_true must be in [0, 1]")
-        if self.ts.tzinfo is None:
-            object.__setattr__(self, "ts", self.ts.replace(tzinfo=timezone.utc))
+    def effective_price(self) -> float:
+        """Price of the contract side being bought."""
+        if self.side == "yes":
+            return float(self.market_price)
+        return 1.0 - float(self.market_price)
+
+    def effective_p_true(self) -> float:
+        if self.side == "yes":
+            return float(self.p_true)
+        return 1.0 - float(self.p_true)

@@ -4,6 +4,18 @@ from signals.schema import Signal
 from venues.kalshi.adapter import KalshiDryRunAdapter
 
 
+def _promote_stats():
+    outcomes = [1.0, 0.0] * 20
+    labels = ["A", "B"] * 20
+    return {
+        "outcomes": outcomes,
+        "labels": labels,
+        "min_n": 30,
+        "split_half_corr": -1.0,
+        "max_concentration": 0.6,
+    }
+
+
 def test_pipeline_paper_fill():
     signal = Signal(
         venue="kalshi",
@@ -15,10 +27,10 @@ def test_pipeline_paper_fill():
     ledger = PaperLedger()
     result = run_paper_pipeline(
         signal,
-        adapter=KalshiDryRunAdapter(),
-        ledger=ledger,
-        bankroll=1000.0,
-        bypass_gate=True,
+        _promote_stats(),
+        KalshiDryRunAdapter(),
+        ledger,
+        1000.0,
         fee_rate=0.0,
     )
     assert result.accepted is True
@@ -37,10 +49,9 @@ def test_pipeline_holds_without_history():
     )
     result = run_paper_pipeline(
         signal,
-        adapter=KalshiDryRunAdapter(),
-        ledger=PaperLedger(),
-        bankroll=1000.0,
-        bypass_gate=False,
-        gate_outcomes=[],
+        {"outcomes": []},
+        KalshiDryRunAdapter(),
+        PaperLedger(),
+        1000.0,
     )
     assert result.accepted is False

@@ -1,63 +1,91 @@
-"""Base venue adapter — paper/dry-run only at P0."""
-
+"""VenueAdapter ABC - live place_order is hard-refused at P0."""
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from enum import Enum
-from typing import Any, Mapping, Sequence
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Any, Literal
+
+Mode = Literal["paper", "dry_run", "live"]
+
+ALLOWED_ORDER_MODES = frozenset({"paper", "dry_run"})
+LIVE_MODES_REFUSED = frozenset({"live"})
 
 
-class Mode(str, Enum):
-    PAPER = "paper"
-    DRY_RUN = "dry_run"
-    LIVE = "live"
-
-
-_ALLOWED_PLACE = frozenset({Mode.PAPER, Mode.DRY_RUN})
+def utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 @dataclass(frozen=True)
 class OrderRequest:
-    market: str
-    side: str
-    size: float
-    price: float | None = None
-    signal_id: str | None = None
-    metadata: Mapping[str, Any] | None = None
+    """Venue-agnostic order intent."""
+
+    market_id: str
+    side: Literal["yes", "no", "buy", "sell"]
+    price: float
+    quantity: int
+    client_order_id: str
+    meta: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
-class Fill:
+class OrderResult:
+    """Fill / reject result from a venue adapter."""
+
+    ok: bool
+    mode: str
+    venue: str
     order_id: str
-    market: str
+    client_order_id: str
+    market_id: str
     side: str
-    size: float
-    price: float
-    mode: Mode
-    raw: Mapping[str, Any] | None = None
+    requested_price: float
+    requested_qty: int
+    filled_qty: int
+    avg_fill_price: float
+    status: str
+    ts_utc: datetime
+    reason: str = ""
+    raw: dict[str, Any] = field(default_factory=dict)
 
 
 class VenueAdapter(ABC):
-    """Venue interface. ``place_order`` only allows paper/dry_run modes."""
+    """Shared venue interface.
 
-    name: str
+    ``place_order`` refuses unless ``mode`` is in {paper, dry_run}.
+    Subclasses implement ``_place_order_impl`` for the safe paths only.
+    """
 
-    def __init__(self, mode: Mode | str = Mode.PAPER) -> None:
-        self.mode = Mode(mode) if not isinstance(mode, Mode) else mode
+    name: str = "base"
 
-    @abstractmethod
-    def fetch_markets(self) -> Sequence[Mapping[str, Any]]:
-        raise NotImplementedError
+    def __init__(self, mode: Mode = "dry_run") -> None:
+        self.mode: Mode = mode
 
-    def place_order(self, order: OrderRequest) -> Fill:
-        if self.mode not in _ALLOWED_PLACE:
-            raise PermissionError(
-                f"{self.name}: place_order refused unless mode in "
-                f"{{paper, dry_run}}; got {self.mode.value!r}"
+    def place_order(self, request: OrderRequest) -> OrderResult:
+        if self.mode not in ALLOWED_ORDER_MODES:
+            raise RuntimeError(
+                f"{self.name}: place_order refused for mode={self.mode!r}; "
+                f"allowed={sorted(ALLOWED_ORDER_MODES)}. No live trading at P0."
             )
-        return self._place_paper(order)
+        if request.quantity <= 0:
+            return OrderResult(
+                ok=False,
+                mode=self.mode,
+                venue=self.name,
+                order_id="",
+                client_order_id=request.client_order_id,
+                market_id=request.market_id,
+                side=request.side,
+                requested_price=float(request.price),
+                requested_qty=int(request.quantity),
+                filled_qty=0,
+                avg_fill_price=0.0,
+                status="rejected",
+                ts_utc=utcnow(),
+                reason="quantity must be > 0",
+            )
+        return self._place_order_impl(request)
 
     @abstractmethod
-    def _place_paper(self, order: OrderRequest) -> Fill:
+    def _place_order_impl(self, request: OrderRequest) -> OrderResult:
         raise NotImplementedError

@@ -1,26 +1,51 @@
+"""Unit tests for venues.kalshi dry-run adapter."""
+from __future__ import annotations
+
 import pytest
 
-from venues.base import Mode, OrderRequest
+from venues.base import OrderRequest, VenueAdapter
 from venues.kalshi.adapter import KalshiDryRunAdapter
 
 
-def test_dry_run_fill_deterministic():
-    a = KalshiDryRunAdapter(Mode.DRY_RUN)
-    order = OrderRequest(market="M", side="yes", size=10.0, signal_id="abc")
-    f1 = a.place_order(order)
-    f2 = a.place_order(order)
-    assert f1.order_id == f2.order_id
-    assert f1.price == f2.price
-    assert f1.mode is Mode.DRY_RUN
+def test_deterministic_fill_stable_across_calls():
+    adapter = KalshiDryRunAdapter(mode="dry_run")
+    req = OrderRequest(
+        market_id="KXTEST-1",
+        side="yes",
+        price=0.42,
+        quantity=7,
+        client_order_id="cid-1",
+    )
+    a = adapter.place_order(req)
+    b = adapter.place_order(req)
+    assert a.ok and b.ok
+    assert a.order_id == b.order_id
+    assert a.filled_qty == 7
+    assert a.avg_fill_price == pytest.approx(0.42)
+    assert a.raw["digest"] == b.raw["digest"]
 
 
-def test_live_mode_refused_on_construct():
+def test_live_mode_refused_on_base_adapter():
+    class _Dummy(VenueAdapter):
+        name = "dummy"
+
+        def _place_order_impl(self, request):
+            raise AssertionError("should not be called")
+
+    live = _Dummy(mode="live")
+    req = OrderRequest("M", "yes", 0.5, 1, "c")
+    with pytest.raises(RuntimeError, match="refused"):
+        live.place_order(req)
+
+
+def test_kalshi_adapter_rejects_live_construction():
     with pytest.raises(ValueError):
-        KalshiDryRunAdapter(Mode.LIVE)
+        KalshiDryRunAdapter(mode="live")
 
 
-def test_base_live_place_refused():
-    a = KalshiDryRunAdapter(Mode.PAPER)
-    a.mode = Mode.LIVE
-    with pytest.raises(PermissionError):
-        a.place_order(OrderRequest(market="M", side="yes", size=1.0))
+def test_invalid_price_rejected():
+    adapter = KalshiDryRunAdapter(mode="paper")
+    req = OrderRequest("M", "yes", 1.0, 2, "c2")
+    res = adapter.place_order(req)
+    assert not res.ok
+    assert res.status == "rejected"
