@@ -6,6 +6,7 @@ from typing import Any, Mapping
 import pandas as pd
 
 from modules.validated_signals import orb30_signal, swing_pullback_signal
+from signals.producers.patterns import bar_patterns
 from signals.schema import Signal
 
 # Paper venue for cash equities: Robinhood stub refuses LIVE.
@@ -70,13 +71,17 @@ def produce_orb30(
     if not raw or raw.get("status") != "signal":
         return None
     p = _DEFAULT_P_ORB30 if p_true is None else float(p_true)
+    extra = {"symbol": symbol, "family": "equity_day"}
+    pats = bar_patterns(day_5m)
+    if pats:
+        extra["patterns"] = pats
     return _as_buy_signal(
         market=symbol,
         source="Sig_orb30",
         raw=raw,
         p_true=p,
         edge=edge,
-        extra_meta={"symbol": symbol, "family": "equity_day"},
+        extra_meta=extra,
     )
 
 
@@ -96,11 +101,15 @@ def produce_swing_pullback(
     if not raw or raw.get("status") != "signal":
         return None
     p = _DEFAULT_P_SWING if p_true is None else float(p_true)
+    extra = {"symbol": symbol, "family": "equity_swing"}
+    pats = bar_patterns(daily)
+    if pats:
+        extra["patterns"] = pats
     return _as_buy_signal(
         market=symbol,
         source="Sig_swing_pullback",
         raw=raw,
         p_true=p,
         edge=edge,
-        extra_meta={"symbol": symbol, "family": "equity_swing"},
+        extra_meta=extra,
     )

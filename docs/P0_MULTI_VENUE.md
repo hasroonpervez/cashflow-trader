@@ -71,6 +71,12 @@ gap-skips). Kalshi helper always builds a `Signal` and sets `edge` from
 `run_paper_pipeline(...)` with the matching paper adapter
 (`RobinhoodReadAdapter` / `KalshiDryRunAdapter`) and a `PaperLedger`.
 
+Pattern features (paper annotate only) live in `signals/producers/patterns.py`:
+equity producers attach `metadata["patterns"]` from OHLCV (`inside_bar`,
+`range_compression`, `hh_count`/`hl_count`, `close_location`); Kalshi attaches
+book-shape tags (`price_extreme`, `edge_sign`, crowded yes/no). These are
+`unvalidated` and must not size live.
+
 ## Mode
 
 Supported: `paper`, `dry_run`. Live enumerated for future dual-OK only.
