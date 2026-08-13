@@ -1,4 +1,4 @@
-"""Paper pipeline: Signal → gate (annotate) → Kelly → PortfolioRisk → venue → ledger."""
+"""Paper pipeline: Signal → gate (annotate) → Kelly adapter → PortfolioRisk → venue → ledger."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -7,7 +7,7 @@ from typing import Any, Mapping
 from execution.paper_ledger import PaperLedger
 from risk.portfolio_risk import PortfolioRiskAdvice, advise_portfolio_risk
 from risk.promotion_gate import PromotionGateResult, gate_from_stats
-from risk.sizing import size_paper
+from risk.sizing import KellySizing, size_paper
 from signals.schema import Signal
 from venues.base import OrderRequest, VenueAdapter
 
@@ -21,6 +21,7 @@ class PaperPipelineResult:
     reasons: tuple[str, ...]
     portfolio_risk: PortfolioRiskAdvice | None = None
     promoted: bool = False
+    sizing: KellySizing | None = None
 
 
 def run_paper_pipeline(
@@ -40,6 +41,7 @@ def run_paper_pipeline(
     Promotion gate **annotates** promote/hold and may haircut size, but does
     **not** block paper fills (avoids chicken-and-egg while n < min_n).
     Live placement remains refused by the venue adapter.
+    Sizing goes through ``risk.sizing.size_paper`` (stake only; no orders).
     """
     ledger.record_signal(signal.to_ledger_dict())
 
@@ -47,14 +49,14 @@ def run_paper_pipeline(
     promoted = bool(decision.ok)
 
     # Always size for paper; haircut when gate holds so research still accrues fills.
-    sized = size_paper(
+    sizing = size_paper(
         signal,
         bankroll,
         odds_b=odds_b,
         fee_rate=fee_rate,
         kelly_fraction=kelly_fraction,
     )
-    stake_frac = sized.stake_frac
+    stake_frac = sizing.fraction
     if not promoted:
         stake_frac *= 0.25  # research-size while gate holds
 
@@ -65,7 +67,7 @@ def run_paper_pipeline(
     if advice.haircut > 0:
         stake *= max(0.0, 1.0 - advice.haircut)
 
-    reasons: list[str] = list(sized.reasons)
+    reasons: list[str] = list(sizing.reasons)
     if not promoted:
         reasons.extend(decision.reasons)
         reasons.append("gate: annotate-hold; paper fill still recorded")
@@ -80,6 +82,7 @@ def run_paper_pipeline(
             reasons=tuple(reasons) + ("kelly: non-positive stake",),
             portfolio_risk=advice,
             promoted=promoted,
+            sizing=sizing,
         )
 
     order = OrderRequest(
@@ -138,4 +141,5 @@ def run_paper_pipeline(
         reasons=tuple(reasons),
         portfolio_risk=advice,
         promoted=promoted,
+        sizing=sizing,
     )
