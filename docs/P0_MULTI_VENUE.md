@@ -8,22 +8,23 @@ Default `MODE=paper`. `place_order` raises `PermissionError` unless mode is in `
 
 | Path | Role |
 |---|---|
-| `signals/schema.py` | Unified `Signal` record |
-| `risk/kelly.py` | `fractional_kelly(p, b, fraction=0.25, fee_rate=0.0)` |
-| `risk/promotion_gate.py` | `PromotionGateResult` + `check` (min_n / split-half / concentration) |
-| `execution/paper_ledger.py` | In-memory `PaperLedger` |
-| `execution/pipeline.py` | `run_paper_pipeline(signal, gate_stats, adapter, ledger, bankroll)` |
-| `venues/base.py` | `VenueAdapter` ABC; live placement refused |
-| `venues/kalshi/adapter.py` | Deterministic dry-run fills from signal id hash (no network) |
+| `signals/schema.py` | Unified `Signal` (+ aliases: instrument/market_id, p_model, source_node, edge) |
+| `risk/kelly.py` | Fractional / fee-aware Kelly |
+| `risk/promotion_gate.py` | Annotates promote/hold (does **not** block paper fills) |
+| `risk/portfolio_risk.py` | Advisory PortfolioRisk stub (haircut only) |
+| `execution/paper_ledger.py` | Signals / orders / fills / **outcomes** (PnL stub) |
+| `execution/pipeline.py` | Signal → gate annotate → Kelly → PortfolioRisk → venue → ledger |
+| `venues/kalshi/adapter.py` | Deterministic dry-run fills |
+| `venues/coinbase/adapter.py` | Paper stub; live refused |
+| `venues/robinhood/adapter.py` | Paper/read stub; live refused |
+
+## Gate vs paper fills
+
+Promotion gate marks `promoted` true/false and may research-haircut size when held.
+Paper fills **still record** so the outcome ledger can grow past min_n (no chicken-and-egg).
 
 ## Mode
 
-Supported execution modes: `paper` and `dry_run`. Live is enumerated for future dual-OK enablement but is not implemented and cannot place orders.
+Supported: `paper`, `dry_run`. Live enumerated for future dual-OK only.
 
-Do not stage live API keys or `.env` / `*.pem` secrets in this repo.
-
-## Next (not P0)
-
-- Persist paper fills via Alembic / outcome ledger
-- Wire desk signals into the pipeline
-- Additional venue adapters (stubs later; live needs dual OK)
+Do not stage live API keys or `.env` / `*.pem` in this repo.
