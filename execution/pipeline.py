@@ -5,9 +5,9 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 from execution.paper_ledger import PaperLedger
-from risk.kelly import fractional_kelly
 from risk.portfolio_risk import PortfolioRiskAdvice, advise_portfolio_risk
 from risk.promotion_gate import PromotionGateResult, gate_from_stats
+from risk.sizing import size_paper
 from signals.schema import Signal
 from venues.base import OrderRequest, VenueAdapter
 
@@ -47,12 +47,14 @@ def run_paper_pipeline(
     promoted = bool(decision.ok)
 
     # Always size for paper; haircut when gate holds so research still accrues fills.
-    stake_frac = fractional_kelly(
-        signal.p_true,
-        odds_b,
-        fraction=kelly_fraction,
+    sized = size_paper(
+        signal,
+        bankroll,
+        odds_b=odds_b,
         fee_rate=fee_rate,
+        kelly_fraction=kelly_fraction,
     )
+    stake_frac = sized.stake_frac
     if not promoted:
         stake_frac *= 0.25  # research-size while gate holds
 
@@ -63,7 +65,7 @@ def run_paper_pipeline(
     if advice.haircut > 0:
         stake *= max(0.0, 1.0 - advice.haircut)
 
-    reasons: list[str] = []
+    reasons: list[str] = list(sized.reasons)
     if not promoted:
         reasons.extend(decision.reasons)
         reasons.append("gate: annotate-hold; paper fill still recorded")
