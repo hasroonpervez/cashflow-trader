@@ -11,7 +11,7 @@ Default `MODE=paper`. `place_order` raises `PermissionError` unless mode is in `
 | `signals/schema.py` | Unified `Signal` (+ aliases: instrument/market_id, p_model, source_node, edge) |
 | `signals/producers/` | Sig_* producers → `Signal` (equity wrappers + Kalshi event helper) |
 | `risk/kelly.py` | Fractional / fee-aware Kelly |
-| `risk/sizing.py` | Thin math_engine Kelly adapter (binary fee-aware + optional skewed) |
+| `risk/sizing.py` | Thin paper Kelly adapter wrapping existing helpers |
 | `risk/promotion_gate.py` | Annotates promote/hold (does **not** block paper fills) |
 | `risk/portfolio_risk.py` | Advisory PortfolioRisk stub (haircut only) |
 | `execution/paper_ledger.py` | Signals / orders / fills / **outcomes** (PnL stub) |
@@ -29,21 +29,13 @@ Stage-1 paper gate now also requires bootstrap 95% CI lo>0 (reuse
 `modules.validated_signals.bootstrap_ci`). Hold remains annotate-only;
 paper fills still record.
 
-## Kelly sizing adapter
+## Sizing
 
-Paper pipeline sizes via `risk.sizing.size_paper` (stake fraction/size only;
-never places orders):
-
-- kalshi / event: fee-aware binary Kelly. Formulas are lifted from kalshi-bot
-  `math_engine` (`kelly_criterion`, `adjusted_kelly`, `fee_per_contract`, and
-  `size_position` net-edge Kelly) and implemented as pure functions in this
-  repo. There is no runtime import of the sibling kalshi-bot package.
-- robinhood / coinbase / equity: `modules.asymmetry.kelly_fraction_skewed` when
-  that import is safe; otherwise binary Kelly with a fallback reason string.
-
-`risk.kelly.fractional_kelly` remains the generic helper (zero-fee binary Kelly
-matches it). Gate hold still haircuts stake by 0.25; PortfolioRisk runs after
-sizing.
+The paper pipeline sizes via `risk.sizing.size_paper`, a thin adapter that wraps
+existing helpers (`risk.kelly.fractional_kelly` for Kalshi/default binary markets,
+`modules.asymmetry.kelly_fraction_skewed` for Robinhood/Coinbase). It is not a
+port of kalshi-bot `math_engine`. Gate hold still haircuts stake by 0.25; PortfolioRisk
+runs after sizing.
 
 ## Sig_* producers
 
