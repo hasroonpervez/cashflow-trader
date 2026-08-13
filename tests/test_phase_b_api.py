@@ -348,3 +348,31 @@ def test_paper_settle_seeds_edge_across_restart(tmp_path: Path, no_yahoo: None) 
         assert preview.status_code == 201, preview.text
         assert preview.json()["edge"]["n"] == 1
         assert client.get("/paper/positions").json()["count"] == 1
+
+
+def test_paper_settle_idempotent_or_409(tmp_path: Path, no_yahoo: None) -> None:
+    """Same order_id must not append a second outcome."""
+    from api.app import create_app
+
+    db = tmp_path / "snapshots.sqlite"
+    led = tmp_path / "paper_ledger.sqlite"
+    with TestClient(app=create_app(db_path=db, ledger_path=led)) as client:
+        placed = client.post(
+            "/paper/place",
+            json={"market": "DEMO-MARKET", "side": "yes", "p_true": 0.65, "mode": "dry_run"},
+        )
+        oid = placed.json()["fill"]["order_id"]
+        first = client.post("/paper/settle", json={"order_id": oid, "pnl": 1.25})
+        assert first.status_code == 201, first.text
+        assert first.json().get("idempotent") is False
+        again = client.post("/paper/settle", json={"order_id": oid, "pnl": 1.25})
+        assert again.status_code == 201, again.text
+        assert again.json()["idempotent"] is True
+        assert again.json()["pnl"] == 1.25
+        clash = client.post("/paper/settle", json={"order_id": oid, "pnl": 2.0})
+        assert clash.status_code == 409, clash.text
+        preview = client.post(
+            "/paper/preview",
+            json={"market": "DEMO-MARKET", "side": "yes", "p_true": 0.65},
+        )
+        assert preview.json()["edge"]["n"] == 1

@@ -55,6 +55,7 @@ The Phase B API seeds `gate_stats` from the SQLite paper ledger on
 so calib/edge compound across API restart. Preview still uses a throwaway
 in-memory ledger so it does not persist fills. `POST /paper/settle` writes
 settled PnL onto that ledger (paper only) so OpenClaw can close place→settle→calib.
+A second settle on the same order_id with the same pnl is idempotent; a different pnl returns 409.
 
 ## Sizing
 
