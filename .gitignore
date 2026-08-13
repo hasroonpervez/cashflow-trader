@@ -32,3 +32,9 @@ dossier_cache.corrupt-*.json
 
 # Phase A ingest snapshots (WAL + shm)
 data/snapshots.sqlite*
+# Phase B web
+node_modules/
+web/.svelte-kit/
+web/build/
+web/dist/
+web/.vite/
