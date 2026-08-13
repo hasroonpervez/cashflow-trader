@@ -15,6 +15,7 @@ case "$cmd" in
   place_paper|place) curl -sS -X POST "$BASE/paper/place" -H 'Content-Type: application/json' -d "${1:-$DEMO}" ;;
   positions) curl -sS "$BASE/paper/positions" ;;
   kill) curl -sS -X POST "$BASE/paper/kill" -H 'Content-Type: application/json' -d "${1:-{}}" ;;
-  *) echo "usage: paper.sh health|preview|place_paper|positions|kill [json]" >&2; exit 1 ;;
+  settle) curl -sS -X POST "$BASE/paper/settle" -H 'Content-Type: application/json' -d "${1:-{\"order_id\":\"\",\"pnl\":0}}" ;;
+  *) echo "usage: paper.sh health|preview|place_paper|positions|kill|settle [json]" >&2; exit 1 ;;
 esac
 echo

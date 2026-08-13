@@ -53,7 +53,8 @@ The Phase B API seeds `gate_stats` from the SQLite paper ledger on
 `/paper/preview` and `/paper/place` (`gate_stats_from_ledger`). Body knobs
 (min_n, etc.) pass through; settled `outcomes` always come from the ledger
 so calib/edge compound across API restart. Preview still uses a throwaway
-in-memory ledger so it does not persist fills. Paper only.
+in-memory ledger so it does not persist fills. `POST /paper/settle` writes
+settled PnL onto that ledger (paper only) so OpenClaw can close place→settle→calib.
 
 ## Sizing
 
