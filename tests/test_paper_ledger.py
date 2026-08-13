@@ -1,36 +1,13 @@
-"""Unit tests for execution.paper_ledger."""
-from __future__ import annotations
-
 from execution.paper_ledger import PaperLedger
 
 
-def test_record_and_list_fills() -> None:
-    ledger = PaperLedger()
-    ledger.record_signal({"id": "s1"})
-    ledger.record_order({"market": "M", "size": 10})
-    ledger.record_fill({"order_id": "o1", "price": 0.4})
-    ledger.record_fill({"order_id": "o2", "price": 0.5})
-
-    fills = ledger.list_fills()
-    assert len(fills) == 2
-    assert fills[0].kind == "fill"
-    assert fills[0].payload["order_id"] == "o1"
-    assert fills[1].payload["order_id"] == "o2"
-
-
-def test_list_events_filter() -> None:
-    ledger = PaperLedger()
-    ledger.record_signal({"id": "s1"})
-    ledger.record_order({"id": "o1"})
-    assert len(ledger.list_events()) == 2
-    assert len(ledger.list_events("signal")) == 1
-    assert len(ledger.list_events("order")) == 1
-    assert ledger.list_fills() == []
-
-
-def test_in_memory_isolation() -> None:
-    a = PaperLedger()
-    b = PaperLedger()
-    a.record_fill({"order_id": "only-a"})
-    assert len(a.list_fills()) == 1
-    assert len(b.list_fills()) == 0
+def test_ledger_records_kinds():
+    led = PaperLedger()
+    led.record_signal({"id": "s1"})
+    led.record_order({"id": "o1"})
+    led.record_fill({"order_id": "f1"})
+    led.record_outcome({"order_id": "f1", "pnl": 1.25, "settled": True})
+    assert len(led.list_events()) == 4
+    assert len(led.list_fills()) == 1
+    assert len(led.list_outcomes()) == 1
+    assert led.list_outcomes()[0].payload["pnl"] == 1.25

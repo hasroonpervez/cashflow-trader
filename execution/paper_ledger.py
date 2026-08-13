@@ -1,4 +1,4 @@
-"""In-memory paper ledger for signals, orders, and fills."""
+"""In-memory paper ledger for signals, orders, fills, and outcomes."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -20,7 +20,7 @@ class LedgerEvent:
 
 
 class PaperLedger:
-    """In-memory ledger: record_signal / record_order / record_fill / list_fills."""
+    """Append-only paper ledger including outcome/PnL rows for calib feedback."""
 
     def __init__(self) -> None:
         self._events: list[LedgerEvent] = []
@@ -40,6 +40,12 @@ class PaperLedger:
         self._events.append(ev)
         return ev
 
+    def record_outcome(self, outcome: Mapping[str, Any]) -> LedgerEvent:
+        """Record settlement / PnL for calib → gate / shrink loops."""
+        ev = LedgerEvent(kind="outcome", payload=dict(outcome))
+        self._events.append(ev)
+        return ev
+
     def list_events(self, kind: str | None = None) -> list[LedgerEvent]:
         if kind is None:
             return list(self._events)
@@ -47,3 +53,6 @@ class PaperLedger:
 
     def list_fills(self) -> list[LedgerEvent]:
         return self.list_events("fill")
+
+    def list_outcomes(self) -> list[LedgerEvent]:
+        return self.list_events("outcome")

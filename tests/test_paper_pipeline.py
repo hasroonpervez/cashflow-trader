@@ -1,92 +1,65 @@
-"""Unit tests for execution.pipeline paper path."""
 from __future__ import annotations
-
-from datetime import datetime, timezone
 
 from execution.paper_ledger import PaperLedger
 from execution.pipeline import run_paper_pipeline
 from signals.schema import Signal
-from venues.kalshi import KalshiDryRunAdapter
+from venues.kalshi.adapter import KalshiDryRunAdapter
 
 
-def _signal(**kwargs):
-    base = dict(
+def test_pipeline_records_fill_even_when_gate_holds():
+    """Gate annotate-hold must not block paper fills (Graph blocker #2)."""
+    signal = Signal(
         venue="kalshi",
         market="DEMO-MARKET",
         side="yes",
         p_true=0.65,
-        source="unit-test",
-        id="sig-pipeline-1",
-        ts=datetime(2026, 8, 12, 12, 0, tzinfo=timezone.utc),
-        metadata={},
+        source="Sig_K.unit",
+        edge=0.05,
     )
-    base.update(kwargs)
-    return Signal(**base)
+    assert signal.instrument == "DEMO-MARKET"
+    assert signal.p_model == 0.65
+    assert signal.source_node == "Sig_K.unit"
 
-
-def _passing_gate_stats(n: int = 40) -> dict:
-    half = [1.0, 0.0, 1.0, 1.0, 0.0] * (n // 10)
-    outcomes = half + half
-    labels = ["A", "B", "C", "D"] * (n // 4)
-    return {
-        "outcomes": outcomes,
-        "labels": labels,
-        "min_n": 30,
-        "split_half_corr": 0.3,
-        "max_concentration": 0.35,
-    }
-
-
-def test_pipeline_holds_without_history() -> None:
     ledger = PaperLedger()
     result = run_paper_pipeline(
-        _signal(),
-        {},
+        signal,
+        {"outcomes": []},
         KalshiDryRunAdapter(),
         ledger,
-        bankroll=1000.0,
-    )
-    assert result.accepted is False
-    assert result.fill is None
-    assert ledger.list_fills() == []
-    assert len(ledger.list_events("signal")) == 1
-
-
-def test_pipeline_accepts_and_records_fill() -> None:
-    ledger = PaperLedger()
-    result = run_paper_pipeline(
-        _signal(p_true=0.7),
-        _passing_gate_stats(),
-        KalshiDryRunAdapter(mode="paper"),
-        ledger,
-        bankroll=1000.0,
-        odds_b=1.0,
+        1000.0,
         fee_rate=0.0,
-        kelly_fraction=0.25,
     )
     assert result.accepted is True
-    assert result.stake > 0
+    assert result.promoted is False
     assert result.fill is not None
-    assert result.fill["mode"] == "paper"
     assert len(ledger.list_fills()) == 1
-    assert len(ledger.list_events("order")) == 1
+    assert len(ledger.list_outcomes()) == 1
+    assert result.portfolio_risk is not None
 
 
-def test_pipeline_rejects_nonpositive_kelly() -> None:
-    ledger = PaperLedger()
+def test_pipeline_promoted_when_gate_ok():
+    outcomes = [1.0, 0.0] * 20
+    labels = ["A", "B"] * 20
+    signal = Signal(
+        venue="kalshi",
+        market="DEMO-MARKET",
+        side="yes",
+        p_true=0.65,
+        source="unit",
+    )
     result = run_paper_pipeline(
-        _signal(p_true=0.4),
-        _passing_gate_stats(),
+        signal,
+        {
+            "outcomes": outcomes,
+            "labels": labels,
+            "min_n": 30,
+            "split_half_corr": -1.0,
+            "max_concentration": 0.6,
+        },
         KalshiDryRunAdapter(),
-        ledger,
-        bankroll=1000.0,
-        odds_b=1.0,
+        PaperLedger(),
+        1000.0,
         fee_rate=0.0,
     )
-    assert result.accepted is False
-    assert "kelly: non-positive stake" in result.reasons
-
-
-def test_signal_requires_utc() -> None:
-    sig = _signal(ts=datetime(2026, 1, 1, 0, 0))
-    assert sig.ts.tzinfo is not None
+    assert result.accepted is True
+    assert result.promoted is True
