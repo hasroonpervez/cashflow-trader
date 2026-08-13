@@ -53,6 +53,8 @@ Handlers are mounted at the root and under /api so the desk can fetch /api/bars/
 - GET /snapshot/{symbol} — {symbol, exists}
 - POST /paper/preview — wraps run_paper_pipeline + KalshiDryRunAdapter
 - POST /paper/place — same pipeline; dry-run fill; mode live returns 403
+- GET /paper/positions — in-memory paper fills in this API process
+- POST /paper/kill — cancel those paper fills; mode live returns 403
 
 Paper JSON body (minimal): market, side, p_true, optional source, bankroll, edge, id, gate_stats, odds_b, fee_rate, kelly_fraction, open_exposure, mode (dry_run or paper only).
 
@@ -62,7 +64,7 @@ API tests live in tests/test_phase_b_api.py. They use a tempfile SQLite via crea
 
 ## Out of scope (not this PR)
 
-- LaunchAgent plists, OpenClaw skills, Tailscale, Cloudflare Tunnel
+- LaunchAgent plists, Tailscale, Cloudflare Tunnel, copying the skill onto the box
 - Live venue keys, dotenv files, pem files
 - Replacing Streamlit; app.py stays
 - Postgres / Valkey (still SQLite snapshots from Phase A)

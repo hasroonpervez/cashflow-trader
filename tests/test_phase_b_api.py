@@ -172,7 +172,7 @@ def test_paper_place_dry_run(tmp_path: Path, no_yahoo: None) -> None:
 def test_paper_live_mode_refused(tmp_path: Path, no_yahoo: None) -> None:
     client, _ = _client(tmp_path, seed=False)
     with client:
-        for path in ("/paper/preview", "/paper/place", "/api/paper/place"):
+        for path in ("/paper/preview", "/paper/place", "/api/paper/place", "/paper/kill", "/api/paper/kill"):
             r = client.post(
                 path,
                 json={
@@ -211,3 +211,34 @@ def test_api_module_does_not_import_yfinance() -> None:
     assert "yfinance" not in imported
     assert "modules.data" not in src
     assert "fetch_stock" not in src
+
+
+def test_paper_positions_and_kill(tmp_path: Path, no_yahoo: None) -> None:
+    client, _ = _client(tmp_path, seed=False)
+    with client:
+        empty = client.get("/paper/positions")
+        assert empty.status_code == 200, empty.text
+        assert empty.json()["live"] is False
+        assert empty.json()["positions"] == []
+        placed = client.post(
+            "/paper/place",
+            json={
+                "market": "DEMO-MARKET",
+                "side": "yes",
+                "p_true": 0.65,
+                "mode": "dry_run",
+                "id": "pos-1",
+            },
+        )
+        assert placed.status_code == 201, placed.text
+        oid = placed.json()["fill"]["order_id"]
+        book = client.get("/api/paper/positions")
+        assert book.status_code == 200
+        assert book.json()["count"] == 1
+        assert book.json()["positions"][0]["order_id"] == oid
+        killed = client.post("/paper/kill", json={"order_id": oid})
+        assert killed.status_code == 201, killed.text
+        assert killed.json()["live"] is False
+        assert oid in killed.json()["cancelled"]
+        after = client.get("/paper/positions")
+        assert after.json()["positions"] == []
