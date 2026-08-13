@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from signals.producers.patterns import event_patterns
 from signals.schema import Signal
 
 _VENUE = "kalshi"
@@ -53,6 +54,7 @@ def produce_kalshi_event(
         "market_price": px,
         "paper_only": True,
         "no_network": True,
+        "patterns": event_patterns(p_true=p, market_price=px),
     }
     if strategy:
         meta["strategy"] = str(strategy)
