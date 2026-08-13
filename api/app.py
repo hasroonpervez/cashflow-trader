@@ -300,6 +300,38 @@ async def _paper_place(data: dict[str, Any] | None, state: State) -> dict[str, A
     return payload
 
 
+
+async def _paper_outcomes(state: State) -> dict[str, Any]:
+    """Settled paper PnL from the SQLite ledger. Read-only. Never live."""
+    from risk.calib import outcomes_from_ledger
+
+    ledger = _session_ledger(state)
+    rows: list[dict[str, Any]] = []
+    for ev in ledger.list_outcomes():
+        payload = dict(ev.payload)
+        if not payload.get("settled"):
+            continue
+        pnl = payload.get("pnl")
+        if pnl is None:
+            continue
+        rows.append(
+            {
+                "order_id": payload.get("order_id"),
+                "signal_id": payload.get("signal_id"),
+                "pnl": float(pnl),
+                "settled": True,
+            }
+        )
+    pnls = outcomes_from_ledger(ledger)
+    return {
+        "outcomes": rows,
+        "pnls": pnls,
+        "count": len(pnls),
+        "mode": "paper",
+        "live": False,
+    }
+
+
 async def _paper_positions(state: State) -> dict[str, Any]:
     """Open paper fills in this API process. Never hits a live venue."""
     killed = set(_killed_ids(state))
@@ -448,6 +480,7 @@ def create_app(db_path: Optional[PathLike] = None, ledger_path: Optional[PathLik
         post(["/paper/preview", "/api/paper/preview"])(_paper_preview),
         post(["/paper/place", "/api/paper/place"])(_paper_place),
         get(["/paper/positions", "/api/paper/positions"])(_paper_positions),
+        get(["/paper/outcomes", "/api/paper/outcomes"])(_paper_outcomes),
         post(["/paper/kill", "/api/paper/kill"])(_paper_kill),
         post(["/paper/settle", "/api/paper/settle"])(_paper_settle),
     ]

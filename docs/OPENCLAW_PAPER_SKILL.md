@@ -12,7 +12,7 @@ OpenClaw should run the desk (agent loop) against the Phase B API on
 |---|---|
 | `openclaw-skill/cashflow-paper/SKILL.md` | OpenClaw skill (AgentSkills frontmatter) |
 | `openclaw-skill/cashflow-paper/scripts/paper.sh` | curl helper, loopback-only |
-| `api/app.py` | `/paper/preview`, `/paper/place`, `/paper/positions`, `/paper/kill`, `/paper/settle` |
+| `api/app.py` | `/paper/preview`, `/paper/place`, `/paper/positions`, `/paper/outcomes`, `/paper/kill`, `/paper/settle` |
 
 ## Tools
 
@@ -21,6 +21,7 @@ OpenClaw should run the desk (agent loop) against the Phase B API on
 | preview | `POST http://127.0.0.1:8000/paper/preview` |
 | place_paper | `POST http://127.0.0.1:8000/paper/place` |
 | positions | `GET http://127.0.0.1:8000/paper/positions` |
+| outcomes | `GET http://127.0.0.1:8000/paper/outcomes` |
 | kill | `POST http://127.0.0.1:8000/paper/kill` |
 | settle | `POST http://127.0.0.1:8000/paper/settle` |
 

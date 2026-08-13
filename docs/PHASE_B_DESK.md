@@ -54,6 +54,7 @@ Handlers are mounted at the root and under /api so the desk can fetch /api/bars/
 - POST /paper/preview — wraps run_paper_pipeline + KalshiDryRunAdapter; seeds gate_stats from SQLite ledger; does not persist fills
 - POST /paper/place — same pipeline; dry-run fill; seeds gate_stats from SQLite ledger; mode live returns 403
 - GET /paper/positions — paper fills from SQLite ledger (survive API restart)
+- GET /paper/outcomes — settled paper PnL from the SQLite ledger (calib n; read-only)
 - POST /paper/kill — cancel those paper fills (persisted); mode live returns 403
 - POST /paper/settle — record settled paper PnL on the SQLite ledger; same pnl is idempotent; different pnl is 409; mode live returns 403
 

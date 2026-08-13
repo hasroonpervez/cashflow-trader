@@ -1,6 +1,6 @@
 ---
 name: cashflow-paper
-description: Paper/dry-run CashFlow desk tools against the local 127.0.0.1 API (preview, place_paper, settle, kill, positions). Never live.
+description: Paper/dry-run CashFlow desk tools against the local 127.0.0.1 API (preview, place_paper, settle, kill, positions, outcomes). Never live.
 ---
 
 # CashFlow paper desk (OpenClaw stub)
@@ -39,6 +39,11 @@ Never send `"mode":"live"`. The API returns 403.
 
 ### positions
 `curl -sS http://127.0.0.1:8000/paper/positions`
+
+### outcomes
+Read settled paper PnL from the SQLite ledger (calib n). Does not place.
+
+`curl -sS http://127.0.0.1:8000/paper/outcomes`
 
 ### kill
 Cancel paper fills in this API process. Optional `order_id`.

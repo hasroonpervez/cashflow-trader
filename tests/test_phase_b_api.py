@@ -376,3 +376,30 @@ def test_paper_settle_idempotent_or_409(tmp_path: Path, no_yahoo: None) -> None:
             json={"market": "DEMO-MARKET", "side": "yes", "p_true": 0.65},
         )
         assert preview.json()["edge"]["n"] == 1
+
+
+def test_paper_outcomes_from_ledger(tmp_path: Path, no_yahoo: None) -> None:
+    """GET /paper/outcomes reads settled PnL without a dummy preview."""
+    from api.app import create_app
+
+    db = tmp_path / "snapshots.sqlite"
+    led = tmp_path / "paper_ledger.sqlite"
+    with TestClient(app=create_app(db_path=db, ledger_path=led)) as client:
+        empty = client.get("/paper/outcomes")
+        assert empty.status_code == 200, empty.text
+        assert empty.json()["live"] is False
+        assert empty.json()["count"] == 0
+        assert empty.json()["pnls"] == []
+        placed = client.post(
+            "/paper/place",
+            json={"market": "DEMO-MARKET", "side": "yes", "p_true": 0.65, "mode": "dry_run"},
+        )
+        oid = placed.json()["fill"]["order_id"]
+        client.post("/paper/settle", json={"order_id": oid, "pnl": 1.25})
+    with TestClient(app=create_app(db_path=db, ledger_path=led)) as client:
+        body = client.get("/api/paper/outcomes")
+        assert body.status_code == 200, body.text
+        assert body.json()["live"] is False
+        assert body.json()["count"] == 1
+        assert body.json()["pnls"] == [1.25]
+        assert body.json()["outcomes"][0]["pnl"] == 1.25
