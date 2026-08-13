@@ -38,3 +38,5 @@ web/.svelte-kit/
 web/build/
 web/dist/
 web/.vite/
+# Paper ledger (WAL)
+data/paper_ledger.sqlite*

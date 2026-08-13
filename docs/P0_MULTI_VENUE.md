@@ -17,7 +17,7 @@ Default `MODE=paper`. `place_order` raises `PermissionError` unless mode is in `
 | `risk/calib.py` | Thin ledger -> gate_stats read-back (settled pnls only) |
 | `risk/edge.py` | Betting/edge annotate from settled PnL (mean + hit rate; fail closed on small n) |
 | `risk/portfolio_risk.py` | Advisory PortfolioRisk stub (haircut only) |
-| `execution/paper_ledger.py` | Signals / orders / fills / **outcomes** (PnL stub + settle) |
+| `execution/paper_ledger.py` | Signals / orders / fills / **outcomes** (PnL stub + settle); optional SQLite persist |
 | `execution/pipeline.py` | Signal -> gate annotate -> stage2 annotate -> size_paper -> PortfolioRisk -> venue -> ledger |
 | `venues/kalshi/adapter.py` | Deterministic dry-run fills |
 | `venues/coinbase/adapter.py` | Paper stub; live refused |
@@ -85,3 +85,9 @@ book-shape tags (`price_extreme`, `edge_sign`, crowded yes/no). These are
 Supported: `paper`, `dry_run`. Live enumerated for future dual-OK only.
 
 Do not stage live API keys or `.env` / `*.pem` in this repo.
+
+## Paper ledger persist
+
+`PaperLedger()` stays in-memory (tests). `PaperLedger(db_path=..., persist=True)` writes
+SQLite WAL at `data/paper_ledger.sqlite` (or `CASHFLOW_PAPER_LEDGER_DB`). The Phase B
+API uses the SQLite ledger so positions/calib/edge survive process restart. Paper only.

@@ -236,22 +236,19 @@ async def _paper_preview(data: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def _session_ledger(state: State):
-    """Process-level paper ledger for OpenClaw positions/kill (still in-memory)."""
+    """Paper ledger: SQLite if ledger_path/env set, else memory."""
     from execution.paper_ledger import PaperLedger
 
     led = getattr(state, "paper_ledger", None)
     if led is None:
-        led = PaperLedger()
+        path = getattr(state, "ledger_path", None)
+        led = PaperLedger(db_path=path, persist=True) if path else PaperLedger()
         state.paper_ledger = led
     return led
 
 
 def _killed_ids(state: State) -> list[str]:
-    ids = getattr(state, "killed_order_ids", None)
-    if ids is None:
-        ids = []
-        state.killed_order_ids = ids
-    return ids
+    return list(_session_ledger(state).killed_order_ids())
 
 
 def _fill_order_id(payload: Mapping[str, Any]) -> str:
@@ -311,17 +308,18 @@ async def _paper_kill(data: dict[str, Any] | None, state: State) -> dict[str, An
     body = data or {}
     _refuse_live(body)
     target = str(body.get("order_id") or body.get("id") or "").strip()
-    killed = _killed_ids(state)
+    killed = set(_killed_ids(state))
     cancelled: list[str] = []
-    for ev in _session_ledger(state).list_fills():
+    ledger = _session_ledger(state)
+    for ev in ledger.list_fills():
         oid = _fill_order_id(dict(ev.payload))
         if not oid or oid in killed:
             continue
         if target and oid != target:
             continue
-        killed.append(oid)
+        ledger.record_kill(oid)
+        killed.add(oid)
         cancelled.append(oid)
-    state.killed_order_ids = killed
     return {
         "ok": True,
         "cancelled": cancelled,
@@ -331,9 +329,11 @@ async def _paper_kill(data: dict[str, Any] | None, state: State) -> dict[str, An
     }
 
 
-def create_app(db_path: Optional[PathLike] = None) -> Litestar:
+def create_app(db_path: Optional[PathLike] = None, ledger_path: Optional[PathLike] = None) -> Litestar:
     """Build the Litestar app. ``db_path`` overrides CASHFLOW_SNAPSHOTS_DB."""
+    from execution.paper_ledger import resolve_ledger_path
     resolved = str(db_path) if db_path is not None else None
+    led_path = str(resolve_ledger_path(ledger_path))
     cors = CORSConfig(
         allow_origins=[
             "http://127.0.0.1:5173",
@@ -356,7 +356,7 @@ def create_app(db_path: Optional[PathLike] = None) -> Litestar:
     return Litestar(
         route_handlers=handlers,
         cors_config=cors,
-        state=State({"db_path": resolved, "paper_ledger": None, "killed_order_ids": []}),
+        state=State({"db_path": resolved, "ledger_path": led_path, "paper_ledger": None}),
     )
 
 

@@ -36,13 +36,14 @@ def _write_aapl(db: Path, n: int = 3) -> None:
     ingest_provided(str(db), "AAPL", rows, source="test")
 
 
-def _client(tmp_path: Path, *, seed: bool = True):
+def _client(tmp_path: Path, *, seed: bool = True, ledger_path=None):
     from api.app import create_app
 
     db = tmp_path / "snapshots.sqlite"
     if seed:
         _write_aapl(db, n=5)
-    app = create_app(db_path=db)
+    led = ledger_path or (tmp_path / "paper_ledger.sqlite")
+    app = create_app(db_path=db, ledger_path=led)
     return TestClient(app=app), db
 
 
@@ -240,5 +241,30 @@ def test_paper_positions_and_kill(tmp_path: Path, no_yahoo: None) -> None:
         assert killed.status_code == 201, killed.text
         assert killed.json()["live"] is False
         assert oid in killed.json()["cancelled"]
+        after = client.get("/paper/positions")
+        assert after.json()["positions"] == []
+
+
+def test_paper_ledger_survives_app_restart(tmp_path: Path, no_yahoo: None) -> None:
+    """SQLite ledger: positions and kills survive a new create_app."""
+    from api.app import create_app
+
+    db = tmp_path / "snapshots.sqlite"
+    led = tmp_path / "paper_ledger.sqlite"
+    with TestClient(app=create_app(db_path=db, ledger_path=led)) as client:
+        placed = client.post(
+            "/paper/place",
+            json={"market": "DEMO-MARKET", "side": "yes", "p_true": 0.65, "mode": "dry_run"},
+        )
+        assert placed.status_code == 201, placed.text
+        oid = placed.json()["fill"]["order_id"]
+    with TestClient(app=create_app(db_path=db, ledger_path=led)) as client:
+        book = client.get("/paper/positions")
+        assert book.status_code == 200
+        assert book.json()["count"] == 1
+        assert book.json()["positions"][0]["order_id"] == oid
+        killed = client.post("/paper/kill", json={"order_id": oid})
+        assert killed.status_code == 201, killed.text
+    with TestClient(app=create_app(db_path=db, ledger_path=led)) as client:
         after = client.get("/paper/positions")
         assert after.json()["positions"] == []
