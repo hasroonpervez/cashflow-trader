@@ -14,6 +14,7 @@ def test_skill_is_paper_loopback_only() -> None:
     assert "/paper/positions" in text
     assert "/paper/kill" in text
     assert "/paper/settle" in text
+    assert "/paper/outcomes" in text
     low = text.lower()
     assert ".pem" in low or "pem" in low
     assert "never" in low
@@ -32,3 +33,4 @@ def test_paper_sh_refuses_non_loopback() -> None:
     assert "refusing non-loopback" in script
     assert "place_paper" in script
     assert "settle" in script
+    assert "outcomes" in script
