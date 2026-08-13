@@ -46,6 +46,14 @@ class PaperLedger:
         self._events.append(ev)
         return ev
 
+    def settle_outcome(
+        self, *, signal_id: str, pnl: float, extra: Mapping | None = None
+    ) -> LedgerEvent:
+        payload = {"signal_id": signal_id, "pnl": float(pnl), "settled": True}
+        if extra:
+            payload.update(dict(extra))
+        return self.record_outcome(payload)
+
     def list_events(self, kind: str | None = None) -> list[LedgerEvent]:
         if kind is None:
             return list(self._events)

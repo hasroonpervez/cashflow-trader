@@ -14,8 +14,9 @@ Default `MODE=paper`. `place_order` raises `PermissionError` unless mode is in `
 | `risk/sizing.py` | Thin paper Kelly adapter wrapping existing helpers |
 | `risk/promotion_gate.py` | Annotates promote/hold (does **not** block paper fills) |
 | `risk/stage2.py` | Annotate-only DSR/PBO overfitting hook (placeholders; does not block paper fills) |
+| `risk/calib.py` | Thin ledger -> gate_stats read-back (settled pnls only) |
 | `risk/portfolio_risk.py` | Advisory PortfolioRisk stub (haircut only) |
-| `execution/paper_ledger.py` | Signals / orders / fills / **outcomes** (PnL stub) |
+| `execution/paper_ledger.py` | Signals / orders / fills / **outcomes** (PnL stub + settle) |
 | `execution/pipeline.py` | Signal -> gate annotate -> stage2 annotate -> size_paper -> PortfolioRisk -> venue -> ledger |
 | `venues/kalshi/adapter.py` | Deterministic dry-run fills |
 | `venues/coinbase/adapter.py` | Paper stub; live refused |
@@ -36,6 +37,14 @@ an annotate-only overfitting hook: `evaluate_stage2` returns placeholder DSR/PBO
 plus reasons and never blocks paper fills. PBO stays None without a 2D
 `returns_matrix` (N>=2) and that absence does not fail the hook. The 0.25
 research haircut applies only to a stage-1 hold.
+
+## Settlement -> calib
+
+Settlement to calib is a thin ledger feedback hook, not Platt/Brier/ECE.
+The paper pipeline writes an unsettled outcome stub (`pnl: None`);
+`PaperLedger.settle_outcome` appends a settled row with numeric PnL, and
+`risk.calib.gate_stats_from_ledger` reads those PnLs back as `gate_stats["outcomes"]`
+for the next `run_paper_pipeline` call. Live path is unchanged.
 
 ## Sizing
 
