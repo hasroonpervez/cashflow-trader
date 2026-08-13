@@ -159,6 +159,17 @@ def _pipeline_kwargs(body: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _seeded_pipeline_kwargs(body: Mapping[str, Any], ledger) -> dict[str, Any]:
+    """Body knobs pass through; settled ledger outcomes always win."""
+    from risk.calib import gate_stats_from_ledger
+
+    kw = _pipeline_kwargs(body)
+    extra = dict(kw["gate_stats"])
+    extra.pop("outcomes", None)
+    kw["gate_stats"] = gate_stats_from_ledger(ledger, **extra)
+    return kw
+
+
 def _result_json(result, *, preview: bool) -> dict[str, Any]:
     fill = dict(result.fill) if result.fill else None
     return {
@@ -207,8 +218,12 @@ async def _snapshot_exists(symbol: str, state: State) -> dict[str, Any]:
     return {"symbol": sym, "exists": bool(exists)}
 
 
-async def _paper_preview(data: dict[str, Any] | None) -> dict[str, Any]:
-    """Size + gate a paper signal. No venue call, no network."""
+async def _paper_preview(data: dict[str, Any] | None, state: State) -> dict[str, Any]:
+    """Size + gate a paper signal. No venue call, no network.
+
+    Seeds gate_stats from the SQLite paper ledger (annotate only). Uses a
+    throwaway in-memory ledger so preview never persists a fill.
+    """
     body = data or {}
     _refuse_live(body)
     from execution.paper_ledger import PaperLedger
@@ -216,7 +231,7 @@ async def _paper_preview(data: dict[str, Any] | None) -> dict[str, Any]:
     from venues.kalshi.adapter import KalshiDryRunAdapter
 
     signal = _signal_from_body(body)
-    kw = _pipeline_kwargs(body)
+    kw = _seeded_pipeline_kwargs(body, _session_ledger(state))
     # Dry-run adapter: deterministic fake fill, no network. Preview still wraps
     # the existing pipeline so sizing/gate/stage2 stay in one place.
     result = run_paper_pipeline(
@@ -264,7 +279,7 @@ async def _paper_place(data: dict[str, Any] | None, state: State) -> dict[str, A
     from venues.kalshi.adapter import KalshiDryRunAdapter
 
     signal = _signal_from_body(body)
-    kw = _pipeline_kwargs(body)
+    kw = _seeded_pipeline_kwargs(body, _session_ledger(state))
     mode_raw = str(body.get("mode") or "dry_run").strip().lower().replace("-", "_")
     mode = Mode.PAPER if mode_raw == "paper" else Mode.DRY_RUN
     adapter = KalshiDryRunAdapter(mode=mode)
