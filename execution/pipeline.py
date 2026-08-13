@@ -8,6 +8,7 @@ from execution.paper_ledger import PaperLedger
 from risk.portfolio_risk import PortfolioRiskAdvice, advise_portfolio_risk
 from risk.promotion_gate import PromotionGateResult, gate_from_stats
 from risk.sizing import size_paper
+from risk.edge import EdgeModelResult, edge_from_stats
 from risk.stage2 import Stage2Result, stage2_from_stats
 from signals.schema import Signal
 from venues.base import OrderRequest, VenueAdapter
@@ -23,6 +24,7 @@ class PaperPipelineResult:
     portfolio_risk: PortfolioRiskAdvice | None = None
     promoted: bool = False
     stage2: Stage2Result | None = None
+    edge: EdgeModelResult | None = None
 
 
 def run_paper_pipeline(
@@ -50,6 +52,7 @@ def run_paper_pipeline(
     decision = gate_from_stats(gate_stats)
     promoted = bool(decision.ok)
     stage2 = stage2_from_stats(gate_stats)
+    edge_note = edge_from_stats(gate_stats, model_edge=signal.edge)
 
     # Always size for paper; haircut when gate holds so research still accrues fills.
     sized = size_paper(
@@ -77,6 +80,9 @@ def run_paper_pipeline(
     if not stage2.ok:
         reasons.extend(stage2.reasons)
         reasons.append("stage2: annotate-hold; paper fill still recorded")
+    if not edge_note.ok:
+        reasons.extend(edge_note.reasons)
+        reasons.append("edge: annotate-hold; paper fill still recorded")
     reasons.extend(f"portfolio_risk: {r}" for r in advice.reasons)
 
     if stake <= 0:
@@ -89,6 +95,7 @@ def run_paper_pipeline(
             portfolio_risk=advice,
             promoted=promoted,
             stage2=stage2,
+            edge=edge_note,
         )
 
     order = OrderRequest(
@@ -148,4 +155,5 @@ def run_paper_pipeline(
         portfolio_risk=advice,
         promoted=promoted,
         stage2=stage2,
+        edge=edge_note,
     )

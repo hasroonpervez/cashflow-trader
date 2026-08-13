@@ -60,3 +60,25 @@ def test_kalshi_event_patterns_not_a_live_claim():
     assert pats["unvalidated"] is True
     assert pats["edge_sign"] == -1
     assert event_patterns(p_true=0.65, market_price=0.45)["abs_edge"] == 0.20
+
+
+def test_event_patterns_side_no():
+    yes = event_patterns(p_true=0.40, market_price=0.55, side="yes")
+    no = event_patterns(p_true=0.40, market_price=0.55, side="no")
+    assert no["side"] == "no"
+    assert abs(no["abs_edge"] - 0.05) < 1e-9
+    assert no["edge_sign"] == 1
+    assert yes["edge_sign"] == -1
+
+
+def test_caller_metadata_cannot_clobber_patterns():
+    sig = produce_kalshi_event(
+        p_true=0.65,
+        market_price=0.90,
+        market_id="MKT",
+        metadata={"patterns": {"hijack": True}, "note": "keep"},
+    )
+    assert sig.metadata["note"] == "keep"
+    assert sig.metadata["patterns"].get("hijack") is True
+    assert sig.metadata["patterns"]["unvalidated"] is True
+    assert sig.metadata["patterns"]["price_extreme"] is True

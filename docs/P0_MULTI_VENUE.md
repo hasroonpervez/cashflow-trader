@@ -15,6 +15,7 @@ Default `MODE=paper`. `place_order` raises `PermissionError` unless mode is in `
 | `risk/promotion_gate.py` | Annotates promote/hold (does **not** block paper fills) |
 | `risk/stage2.py` | Annotate-only DSR/PBO overfitting hook (placeholders; does not block paper fills) |
 | `risk/calib.py` | Thin ledger -> gate_stats read-back (settled pnls only) |
+| `risk/edge.py` | Betting/edge annotate from settled PnL (mean + hit rate; fail closed on small n) |
 | `risk/portfolio_risk.py` | Advisory PortfolioRisk stub (haircut only) |
 | `execution/paper_ledger.py` | Signals / orders / fills / **outcomes** (PnL stub + settle) |
 | `execution/pipeline.py` | Signal -> gate annotate -> stage2 annotate -> size_paper -> PortfolioRisk -> venue -> ledger |
@@ -44,7 +45,9 @@ Settlement to calib is a thin ledger feedback hook, not Platt/Brier/ECE.
 The paper pipeline writes an unsettled outcome stub (`pnl: None`);
 `PaperLedger.settle_outcome` appends a settled row with numeric PnL, and
 `risk.calib.gate_stats_from_ledger` reads those PnLs back as `gate_stats["outcomes"]`
-for the next `run_paper_pipeline` call. Live path is unchanged.
+for the next `run_paper_pipeline` call. `risk.edge.edge_from_stats` then annotates
+realized mean PnL / hit rate vs the signal's model edge. Fail closed when n is
+small. It does **not** change stake or block paper fills. Live path is unchanged.
 
 ## Sizing
 

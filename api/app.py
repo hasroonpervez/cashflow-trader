@@ -169,6 +169,7 @@ def _result_json(result, *, preview: bool) -> dict[str, Any]:
         "reasons": list(result.reasons),
         "decision": _public(result.decision),
         "stage2": _public(result.stage2),
+        "edge": _public(getattr(result, "edge", None)),
         "portfolio_risk": _public(result.portfolio_risk),
         "mode": "dry_run",
         "preview": bool(preview),
