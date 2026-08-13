@@ -18,7 +18,7 @@ from litestar import Litestar, get, post
 from litestar.config.cors import CORSConfig
 from litestar.datastructures import State
 from litestar.exceptions import HTTPException, NotFoundException
-from litestar.status_codes import HTTP_400_BAD_REQUEST, HTTP_403_FORBIDDEN
+from litestar.status_codes import HTTP_400_BAD_REQUEST, HTTP_403_FORBIDDEN, HTTP_409_CONFLICT
 
 from modules.snapshot_bars import has_snapshot as helper_has_snapshot
 from modules.snapshot_bars import try_snapshot_bars
@@ -344,6 +344,28 @@ async def _paper_kill(data: dict[str, Any] | None, state: State) -> dict[str, An
     }
 
 
+
+def _event_keys(payload: Mapping[str, Any]) -> set[str]:
+    keys: set[str] = set()
+    for field in ("order_id", "id", "signal_id", "fill_id"):
+        val = str(payload.get(field) or "").strip()
+        if val:
+            keys.add(val)
+    return keys
+
+
+def _settled_outcome(ledger, target: str):
+    """Last settled outcome matching target, or None."""
+    last = None
+    for ev in ledger.list_outcomes():
+        payload = dict(ev.payload)
+        if not payload.get("settled"):
+            continue
+        if target in _event_keys(payload):
+            last = ev
+    return last
+
+
 async def _paper_settle(data: dict[str, Any] | None, state: State) -> dict[str, Any]:
     """Record settled paper PnL on the SQLite ledger. mode=live → 403."""
     body = data or {}
@@ -366,19 +388,35 @@ async def _paper_settle(data: dict[str, Any] | None, state: State) -> dict[str, 
     ledger = _session_ledger(state)
     keys: set[str] = set()
     for ev in list(ledger.list_fills()) + list(ledger.list_outcomes()):
-        payload = dict(ev.payload)
-        for field in ("order_id", "id", "signal_id", "fill_id"):
-            val = str(payload.get(field) or "").strip()
-            if val:
-                keys.add(val)
+        keys |= _event_keys(dict(ev.payload))
     if target not in keys:
         raise NotFoundException(detail=f"paper fill not found for {target}")
+    existing = _settled_outcome(ledger, target)
+    if existing is not None:
+        prev = float(existing.payload["pnl"])
+        if prev == pnl:
+            return {
+                "ok": True,
+                "settled": True,
+                "idempotent": True,
+                "order_id": target,
+                "signal_id": existing.payload.get("signal_id"),
+                "pnl": prev,
+                "payload": dict(existing.payload),
+                "mode": "paper",
+                "live": False,
+            }
+        raise HTTPException(
+            status_code=HTTP_409_CONFLICT,
+            detail=f"already settled ({prev}); will not append a second outcome",
+        )
     from risk.calib import apply_settlement
 
     ev = apply_settlement(ledger, target, pnl)
     return {
         "ok": True,
         "settled": True,
+        "idempotent": False,
         "order_id": target,
         "signal_id": ev.payload.get("signal_id"),
         "pnl": float(ev.payload["pnl"]),
