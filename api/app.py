@@ -344,6 +344,50 @@ async def _paper_kill(data: dict[str, Any] | None, state: State) -> dict[str, An
     }
 
 
+async def _paper_settle(data: dict[str, Any] | None, state: State) -> dict[str, Any]:
+    """Record settled paper PnL on the SQLite ledger. mode=live → 403."""
+    body = data or {}
+    _refuse_live(body)
+    target = str(
+        body.get("order_id") or body.get("id") or body.get("signal_id") or ""
+    ).strip()
+    if not target:
+        raise HTTPException(
+            status_code=HTTP_400_BAD_REQUEST, detail="order_id is required"
+        )
+    if "pnl" not in body:
+        raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail="pnl is required")
+    try:
+        pnl = float(body["pnl"])
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=HTTP_400_BAD_REQUEST, detail="pnl must be a number"
+        ) from exc
+    ledger = _session_ledger(state)
+    keys: set[str] = set()
+    for ev in list(ledger.list_fills()) + list(ledger.list_outcomes()):
+        payload = dict(ev.payload)
+        for field in ("order_id", "id", "signal_id", "fill_id"):
+            val = str(payload.get(field) or "").strip()
+            if val:
+                keys.add(val)
+    if target not in keys:
+        raise NotFoundException(detail=f"paper fill not found for {target}")
+    from risk.calib import apply_settlement
+
+    ev = apply_settlement(ledger, target, pnl)
+    return {
+        "ok": True,
+        "settled": True,
+        "order_id": target,
+        "signal_id": ev.payload.get("signal_id"),
+        "pnl": float(ev.payload["pnl"]),
+        "payload": dict(ev.payload),
+        "mode": "paper",
+        "live": False,
+    }
+
+
 def create_app(db_path: Optional[PathLike] = None, ledger_path: Optional[PathLike] = None) -> Litestar:
     """Build the Litestar app. ``db_path`` overrides CASHFLOW_SNAPSHOTS_DB."""
     from execution.paper_ledger import resolve_ledger_path
@@ -367,6 +411,7 @@ def create_app(db_path: Optional[PathLike] = None, ledger_path: Optional[PathLik
         post(["/paper/place", "/api/paper/place"])(_paper_place),
         get(["/paper/positions", "/api/paper/positions"])(_paper_positions),
         post(["/paper/kill", "/api/paper/kill"])(_paper_kill),
+        post(["/paper/settle", "/api/paper/settle"])(_paper_settle),
     ]
     return Litestar(
         route_handlers=handlers,

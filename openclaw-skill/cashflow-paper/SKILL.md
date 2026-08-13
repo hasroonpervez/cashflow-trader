@@ -1,6 +1,6 @@
 ---
 name: cashflow-paper
-description: Paper/dry-run CashFlow desk tools against the local 127.0.0.1 API (preview, place_paper, kill, positions). Never live.
+description: Paper/dry-run CashFlow desk tools against the local 127.0.0.1 API (preview, place_paper, settle, kill, positions). Never live.
 ---
 
 # CashFlow paper desk (OpenClaw stub)
@@ -45,8 +45,13 @@ Cancel paper fills in this API process. Optional `order_id`.
 
 `curl -sS -X POST http://127.0.0.1:8000/paper/kill -H 'Content-Type: application/json' -d '{}'`
 
+### settle
+Record settled paper PnL on the SQLite ledger (order_id + pnl). Next preview/place seeds calib/edge from it.
+
+`curl -sS -X POST http://127.0.0.1:8000/paper/settle -H 'Content-Type: application/json' -d '{"order_id":"dry-1","pnl":1.25}'`
+
 ## Hard rules
 - Only `127.0.0.1` / `localhost`. No remote hosts.
 - No live venue keys. No dotenv. No pem files.
 - No unofficial Robinhood scrape.
-- Paper ledger is in-memory in the API process (lost on restart).
+- Paper ledger is SQLite. Settle writes PnL so calib/edge compound. Never live.

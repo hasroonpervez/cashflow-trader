@@ -173,7 +173,7 @@ def test_paper_place_dry_run(tmp_path: Path, no_yahoo: None) -> None:
 def test_paper_live_mode_refused(tmp_path: Path, no_yahoo: None) -> None:
     client, _ = _client(tmp_path, seed=False)
     with client:
-        for path in ("/paper/preview", "/paper/place", "/api/paper/place", "/paper/kill", "/api/paper/kill"):
+        for path in ("/paper/preview", "/paper/place", "/api/paper/place", "/paper/kill", "/api/paper/kill", "/paper/settle", "/api/paper/settle"):
             r = client.post(
                 path,
                 json={
@@ -316,3 +316,35 @@ def test_place_seeds_gate_stats_from_ledger(tmp_path: Path, no_yahoo: None) -> N
         assert second.status_code == 201, second.text
         assert second.json()["edge"]["n"] == 1
         assert client.get("/paper/positions").json()["count"] == 2
+
+
+def test_paper_settle_seeds_edge_across_restart(tmp_path: Path, no_yahoo: None) -> None:
+    """POST /paper/settle writes PnL; next app preview/place see edge.n."""
+    from api.app import create_app
+
+    db = tmp_path / "snapshots.sqlite"
+    led = tmp_path / "paper_ledger.sqlite"
+    with TestClient(app=create_app(db_path=db, ledger_path=led)) as client:
+        placed = client.post(
+            "/paper/place",
+            json={"market": "DEMO-MARKET", "side": "yes", "p_true": 0.65, "mode": "dry_run"},
+        )
+        assert placed.status_code == 201, placed.text
+        oid = placed.json()["fill"]["order_id"]
+        missing = client.post("/paper/settle", json={"order_id": "no-such", "pnl": 1.0})
+        assert missing.status_code == 404
+        bad = client.post("/paper/settle", json={"order_id": oid})
+        assert bad.status_code == 400
+        settled = client.post("/paper/settle", json={"order_id": oid, "pnl": 1.25})
+        assert settled.status_code == 201, settled.text
+        assert settled.json()["live"] is False
+        assert settled.json()["settled"] is True
+        assert settled.json()["pnl"] == 1.25
+    with TestClient(app=create_app(db_path=db, ledger_path=led)) as client:
+        preview = client.post(
+            "/paper/preview",
+            json={"market": "DEMO-MARKET", "side": "yes", "p_true": 0.65},
+        )
+        assert preview.status_code == 201, preview.text
+        assert preview.json()["edge"]["n"] == 1
+        assert client.get("/paper/positions").json()["count"] == 1
