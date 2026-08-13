@@ -634,6 +634,18 @@ def fetch_stock(ticker, period="1y", interval="1d"):
         if not sym:
             return None
 
+        # Phase A: daily click path prefers SQLite WAL snapshots (no Yahoo).
+        # Missing/empty DB falls through to the existing fetch (Cloud-safe).
+        if str(interval).lower() == "1d":
+            try:
+                from modules.snapshot_bars import try_snapshot_bars
+
+                snap = try_snapshot_bars(sym, period=period)
+                if snap is not None and not getattr(snap, "empty", True):
+                    return snap
+            except Exception as _e:
+                log_warn("fetch_stock snapshot", _e, ticker=str(sym))
+
         def _fetch():
             try:
                 df = _yfinance_ticker(sym).history(

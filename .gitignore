@@ -29,3 +29,6 @@ radar_hits.json
 dossier_cache.json
 dossier_cache.corrupt-*.json
 *.corrupt-*
+
+# Phase A ingest snapshots (WAL + shm)
+data/snapshots.sqlite*
