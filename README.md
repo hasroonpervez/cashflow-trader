@@ -24,6 +24,12 @@ Shared paper trading scaffold (`signals/`, `risk/`, `execution/`, `venues/`) —
 
 Daily `fetch_stock` and the pages.py boot path skip Yahoo when a SQLite snapshot exists; other tabs (tape bundle, options, news, earnings) may still network. Fallback to Yahoo / Alpha Vantage if the snapshot is missing or empty (Cloud-safe). See [`docs/PHASE_A_INGEST.md`](docs/PHASE_A_INGEST.md).
 
+## OpenClaw paper skill (repo stub)
+
+Skill at `openclaw-skill/cashflow-paper` talks to the loopback API
+(`preview`, `place_paper`, `kill`, `positions`). Paper/dry-run only.
+Not installed on the box. See [`docs/OPENCLAW_PAPER_SKILL.md`](docs/OPENCLAW_PAPER_SKILL.md).
+
 ## Phase B snapshot API + thin desk (repo only)
 
 Litestar reads SQLite snapshots (no Yahoo in request handlers). Thin SvelteKit

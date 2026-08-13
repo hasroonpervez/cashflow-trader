@@ -234,11 +234,33 @@ async def _paper_preview(data: dict[str, Any] | None) -> dict[str, Any]:
     return payload
 
 
-async def _paper_place(data: dict[str, Any] | None) -> dict[str, Any]:
+def _session_ledger(state: State):
+    """Process-level paper ledger for OpenClaw positions/kill (still in-memory)."""
+    from execution.paper_ledger import PaperLedger
+
+    led = getattr(state, "paper_ledger", None)
+    if led is None:
+        led = PaperLedger()
+        state.paper_ledger = led
+    return led
+
+
+def _killed_ids(state: State) -> list[str]:
+    ids = getattr(state, "killed_order_ids", None)
+    if ids is None:
+        ids = []
+        state.killed_order_ids = ids
+    return ids
+
+
+def _fill_order_id(payload: Mapping[str, Any]) -> str:
+    return str(payload.get("order_id") or payload.get("id") or "").strip()
+
+
+async def _paper_place(data: dict[str, Any] | None, state: State) -> dict[str, Any]:
     """Paper/dry-run place via run_paper_pipeline + KalshiDryRunAdapter."""
     body = data or {}
     _refuse_live(body)
-    from execution.paper_ledger import PaperLedger
     from execution.pipeline import run_paper_pipeline
     from venues.base import Mode
     from venues.kalshi.adapter import KalshiDryRunAdapter
@@ -252,7 +274,7 @@ async def _paper_place(data: dict[str, Any] | None) -> dict[str, Any]:
         signal,
         kw["gate_stats"],
         adapter,
-        PaperLedger(),
+        _session_ledger(state),
         kw["bankroll"],
         odds_b=kw["odds_b"],
         fee_rate=kw["fee_rate"],
@@ -263,6 +285,49 @@ async def _paper_place(data: dict[str, Any] | None) -> dict[str, Any]:
     payload["signal_id"] = signal.id
     payload["mode"] = adapter.mode.value
     return payload
+
+
+async def _paper_positions(state: State) -> dict[str, Any]:
+    """Open paper fills in this API process. Never hits a live venue."""
+    killed = set(_killed_ids(state))
+    positions: list[dict[str, Any]] = []
+    for ev in _session_ledger(state).list_fills():
+        payload = dict(ev.payload)
+        oid = _fill_order_id(payload)
+        if oid and oid in killed:
+            continue
+        positions.append(payload)
+    return {
+        "positions": positions,
+        "count": len(positions),
+        "mode": "paper",
+        "live": False,
+    }
+
+
+async def _paper_kill(data: dict[str, Any] | None, state: State) -> dict[str, Any]:
+    """Cancel paper fills in this API process. mode=live → 403. No venue call."""
+    body = data or {}
+    _refuse_live(body)
+    target = str(body.get("order_id") or body.get("id") or "").strip()
+    killed = _killed_ids(state)
+    cancelled: list[str] = []
+    for ev in _session_ledger(state).list_fills():
+        oid = _fill_order_id(dict(ev.payload))
+        if not oid or oid in killed:
+            continue
+        if target and oid != target:
+            continue
+        killed.append(oid)
+        cancelled.append(oid)
+    state.killed_order_ids = killed
+    return {
+        "ok": True,
+        "cancelled": cancelled,
+        "count": len(cancelled),
+        "mode": "paper",
+        "live": False,
+    }
 
 
 def create_app(db_path: Optional[PathLike] = None) -> Litestar:
@@ -284,11 +349,13 @@ def create_app(db_path: Optional[PathLike] = None) -> Litestar:
         get(["/snapshot/{symbol:str}", "/api/snapshot/{symbol:str}"])(_snapshot_exists),
         post(["/paper/preview", "/api/paper/preview"])(_paper_preview),
         post(["/paper/place", "/api/paper/place"])(_paper_place),
+        get(["/paper/positions", "/api/paper/positions"])(_paper_positions),
+        post(["/paper/kill", "/api/paper/kill"])(_paper_kill),
     ]
     return Litestar(
         route_handlers=handlers,
         cors_config=cors,
-        state=State({"db_path": resolved}),
+        state=State({"db_path": resolved, "paper_ledger": None, "killed_order_ids": []}),
     )
 
 
