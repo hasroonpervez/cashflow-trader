@@ -25,8 +25,7 @@ OpenClaw should run the desk (agent loop) against the Phase B API on
 
 MODE is `dry_run` or `paper`. `mode=live` returns **403**.
 
-Positions/kill use an **in-memory** ledger in the API process (lost on restart).
-That is enough for a paper agent loop. It is not a durable book.
+Positions/kill persist in SQLite (data/paper_ledger.sqlite or CASHFLOW_PAPER_LEDGER_DB) so they survive API restart. Paper only. No live book.
 
 ## Hard rules
 
