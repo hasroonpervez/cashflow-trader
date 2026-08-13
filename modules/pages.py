@@ -18,6 +18,7 @@ from .data import (
     _PLOTLY_PAPER_BG, _PLOTLY_PLOT_BG, _PLOTLY_CASH_UP, _PLOTLY_CASH_DOWN,
     _client_suggests_mobile_chart,
 )
+from .snapshot_bars import try_snapshot_bars
 from .options import (
     bs_price, bs_greeks, calc_ev, kelly_criterion, calc_vol_skew,
     quant_edge_score, weekly_trend_label, calc_gold_zone,
@@ -214,6 +215,25 @@ class DashContext:
     scores: StructureScores = field(default_factory=StructureScores)
 
 
+def boot_daily_ohlcv(ticker: str, *, period: str = "1y", db_path=None):
+    """Snapshot-first daily bars for Streamlit boot/click. Never networks.
+
+    Returns a DataFrame when the SQLite snapshot exists and is non-empty,
+    otherwise ``None``. Yahoo / Alpha Vantage are the caller's fallback
+    (``fetch_stock`` or the Yahoo panel on ``global_snapshot``).
+    """
+    try:
+        sym = str(ticker).upper().strip()
+        if not sym:
+            return None
+        snap = try_snapshot_bars(sym, period=period, db_path=db_path)
+        if snap is None or getattr(snap, "empty", True):
+            return None
+        return snap
+    except Exception:
+        return None
+
+
 def build_context(
     ticker: str,
     cfg: dict,
@@ -237,8 +257,14 @@ def build_context(
         ctx.macro, ctx.vix_1mo_df = fetch_macro()
 
     gs = global_snapshot
+    # Phase A: daily boot/click prefers SQLite snapshot over the Yahoo panel
+    # (fetch_global_market_bundle / yf.download). Yahoo only if missing/empty.
+    snap_daily = boot_daily_ohlcv(ticker, period="1y")
+    use_snapshot_daily = snap_daily is not None
+
     use_panel_daily = (
-        gs is not None
+        not use_snapshot_daily
+        and gs is not None
         and gs.active_daily_df is not None
         and not gs.active_daily_df.empty
         and len(gs.active_daily_df) >= 60
@@ -264,7 +290,10 @@ def build_context(
             f_earn = submit_with_script_ctx(pool, fetch_earnings_date, ticker)
 
             f_df = f_wk = f_1mo = None
-            if not use_panel_daily:
+            if use_snapshot_daily:
+                if not use_panel_wk:
+                    f_wk = submit_with_script_ctx(pool, fetch_stock, ticker, "2y", "1wk")
+            elif not use_panel_daily:
                 f_df = submit_with_script_ctx(pool, fetch_stock, ticker, "1y", "1d")
                 f_wk = submit_with_script_ctx(pool, fetch_stock, ticker, "2y", "1wk")
                 f_1mo = submit_with_script_ctx(pool, fetch_stock, ticker, "1mo", "1d")
@@ -281,7 +310,18 @@ def build_context(
             else:
                 ctx.news = f_news.result() if f_news is not None else []
 
-            if use_panel_daily:
+            if use_snapshot_daily:
+                ctx.df = snap_daily
+                snap_1mo = boot_daily_ohlcv(ticker, period="1mo")
+                if snap_1mo is not None:
+                    ctx.df_1mo_spark = snap_1mo
+                else:
+                    ctx.df_1mo_spark = snap_daily.iloc[-30:].copy()
+                if use_panel_wk:
+                    ctx.df_wk = gs.active_weekly_df
+                else:
+                    ctx.df_wk = f_wk.result() if f_wk is not None else None
+            elif use_panel_daily:
                 ctx.df = gs.active_daily_df
                 if gs.active_1mo_df is not None and not gs.active_1mo_df.empty:
                     ctx.df_1mo_spark = gs.active_1mo_df
