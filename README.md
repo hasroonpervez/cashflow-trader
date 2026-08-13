@@ -16,8 +16,13 @@ The audit's summary was *"the '10x' branding is not currently honest."* It is cl
 
 ---
 
+## P0 multi-venue (paper)
+
+Shared paper trading scaffold (`signals/`, `risk/`, `execution/`, `venues/`) — **dry-run / paper only**, no live orders. See [`docs/P0_MULTI_VENUE.md`](docs/P0_MULTI_VENUE.md).
+
 ## At a glance
 
+- **P0 multi-venue (paper)**: Signal schema, Kelly + promotion gate, PaperLedger, Kalshi dry-run adapter — see [`docs/P0_MULTI_VENUE.md`](docs/P0_MULTI_VENUE.md).
 - **🎯 Find 10x**: **New.** Asymmetric-opportunity scanner: ranks on `convexity × confirmation`, fusing payoff shape (bounded downside vs ATR-expansion target) with retail attention and independent creator consensus. Plain-English verdict on every card; the math behind an expander.
 - **Options Yield**: Full income workflow: BLUF trade line, GEX / gamma flip, Monte Carlo PoP, spreads, Greeks, multi-ticker scanner.
 - **Vol Skew Card**: Cash Flow tab surfaces put IV vs call IV (10% OTM) with color-coded strategy guidance: elevated put skew → sell CSPs; elevated call skew → sell CCs.
