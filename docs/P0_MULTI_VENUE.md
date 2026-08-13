@@ -49,6 +49,12 @@ for the next `run_paper_pipeline` call. `risk.edge.edge_from_stats` then annotat
 realized mean PnL / hit rate vs the signal's model edge. Fail closed when n is
 small. It does **not** change stake or block paper fills. Live path is unchanged.
 
+The Phase B API seeds `gate_stats` from the SQLite paper ledger on
+`/paper/preview` and `/paper/place` (`gate_stats_from_ledger`). Body knobs
+(min_n, etc.) pass through; settled `outcomes` always come from the ledger
+so calib/edge compound across API restart. Preview still uses a throwaway
+in-memory ledger so it does not persist fills. Paper only.
+
 ## Sizing
 
 The paper pipeline sizes via `risk.sizing.size_paper`, a thin adapter that wraps

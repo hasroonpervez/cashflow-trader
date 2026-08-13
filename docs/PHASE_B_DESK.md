@@ -51,8 +51,8 @@ Handlers are mounted at the root and under /api so the desk can fetch /api/bars/
 - GET /health — status ok, mode paper, live false
 - GET /bars/{symbol} — latest snapshot bars; query n default 252; 404 if missing
 - GET /snapshot/{symbol} — {symbol, exists}
-- POST /paper/preview — wraps run_paper_pipeline + KalshiDryRunAdapter
-- POST /paper/place — same pipeline; dry-run fill; mode live returns 403
+- POST /paper/preview — wraps run_paper_pipeline + KalshiDryRunAdapter; seeds gate_stats from SQLite ledger; does not persist fills
+- POST /paper/place — same pipeline; dry-run fill; seeds gate_stats from SQLite ledger; mode live returns 403
 - GET /paper/positions — paper fills from SQLite ledger (survive API restart)
 - POST /paper/kill — cancel those paper fills (persisted); mode live returns 403
 

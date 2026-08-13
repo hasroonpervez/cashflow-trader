@@ -268,3 +268,51 @@ def test_paper_ledger_survives_app_restart(tmp_path: Path, no_yahoo: None) -> No
     with TestClient(app=create_app(db_path=db, ledger_path=led)) as client:
         after = client.get("/paper/positions")
         assert after.json()["positions"] == []
+
+
+def test_place_seeds_gate_stats_from_ledger(tmp_path: Path, no_yahoo: None) -> None:
+    """Settled SQLite outcomes seed the next preview/place. Body cannot clobber."""
+    from api.app import create_app
+    from execution.paper_ledger import PaperLedger
+    from risk.calib import apply_settlement
+
+    db = tmp_path / "snapshots.sqlite"
+    led = tmp_path / "paper_ledger.sqlite"
+    with TestClient(app=create_app(db_path=db, ledger_path=led)) as client:
+        first = client.post(
+            "/paper/place",
+            json={"market": "DEMO-MARKET", "side": "yes", "p_true": 0.65, "mode": "dry_run"},
+        )
+        assert first.status_code == 201, first.text
+        oid = first.json()["fill"]["order_id"]
+        assert first.json()["edge"]["n"] == 0
+    persist = PaperLedger(db_path=led, persist=True)
+    apply_settlement(persist, oid, 1.25)
+    persist.close()
+    with TestClient(app=create_app(db_path=db, ledger_path=led)) as client:
+        preview = client.post(
+            "/paper/preview",
+            json={
+                "market": "DEMO-MARKET",
+                "side": "yes",
+                "p_true": 0.65,
+                "gate_stats": {"outcomes": [99.0], "min_n": 30},
+            },
+        )
+        assert preview.status_code == 201, preview.text
+        assert preview.json()["preview"] is True
+        assert preview.json()["edge"]["n"] == 1
+        assert client.get("/paper/positions").json()["count"] == 1
+        second = client.post(
+            "/paper/place",
+            json={
+                "market": "DEMO-MARKET",
+                "side": "yes",
+                "p_true": 0.65,
+                "mode": "dry_run",
+                "gate_stats": {"outcomes": [99.0]},
+            },
+        )
+        assert second.status_code == 201, second.text
+        assert second.json()["edge"]["n"] == 1
+        assert client.get("/paper/positions").json()["count"] == 2
