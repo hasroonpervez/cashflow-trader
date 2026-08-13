@@ -1,4 +1,4 @@
-"""Paper pipeline: Signal → gate (annotate) → Kelly → PortfolioRisk → venue → ledger."""
+"""Paper pipeline: Signal -> gate (annotate) -> stage2 (annotate) -> Kelly -> PortfolioRisk -> venue -> ledger."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -8,6 +8,7 @@ from execution.paper_ledger import PaperLedger
 from risk.portfolio_risk import PortfolioRiskAdvice, advise_portfolio_risk
 from risk.promotion_gate import PromotionGateResult, gate_from_stats
 from risk.sizing import size_paper
+from risk.stage2 import Stage2Result, stage2_from_stats
 from signals.schema import Signal
 from venues.base import OrderRequest, VenueAdapter
 
@@ -21,6 +22,7 @@ class PaperPipelineResult:
     reasons: tuple[str, ...]
     portfolio_risk: PortfolioRiskAdvice | None = None
     promoted: bool = False
+    stage2: Stage2Result | None = None
 
 
 def run_paper_pipeline(
@@ -39,12 +41,15 @@ def run_paper_pipeline(
 
     Promotion gate **annotates** promote/hold and may haircut size, but does
     **not** block paper fills (avoids chicken-and-egg while n < min_n).
+    Stage-2 DSR/PBO also annotates only: holds append reasons and never block
+    paper fills. The 0.25 research haircut applies only to the promotion gate.
     Live placement remains refused by the venue adapter.
     """
     ledger.record_signal(signal.to_ledger_dict())
 
     decision = gate_from_stats(gate_stats)
     promoted = bool(decision.ok)
+    stage2 = stage2_from_stats(gate_stats)
 
     # Always size for paper; haircut when gate holds so research still accrues fills.
     sized = size_paper(
@@ -69,6 +74,9 @@ def run_paper_pipeline(
     if not promoted:
         reasons.extend(decision.reasons)
         reasons.append("gate: annotate-hold; paper fill still recorded")
+    if not stage2.ok:
+        reasons.extend(stage2.reasons)
+        reasons.append("stage2: annotate-hold; paper fill still recorded")
     reasons.extend(f"portfolio_risk: {r}" for r in advice.reasons)
 
     if stake <= 0:
@@ -80,6 +88,7 @@ def run_paper_pipeline(
             reasons=tuple(reasons) + ("kelly: non-positive stake",),
             portfolio_risk=advice,
             promoted=promoted,
+            stage2=stage2,
         )
 
     order = OrderRequest(
@@ -119,7 +128,7 @@ def run_paper_pipeline(
         "raw": dict(fill.raw or {}),
     }
     ledger.record_fill(fill_payload)
-    # Outcome stub row so calib→gate has a write target (PnL filled later).
+    # Outcome stub row so calib->gate has a write target (PnL filled later).
     ledger.record_outcome(
         {
             "signal_id": signal.id,
@@ -138,4 +147,5 @@ def run_paper_pipeline(
         reasons=tuple(reasons),
         portfolio_risk=advice,
         promoted=promoted,
+        stage2=stage2,
     )

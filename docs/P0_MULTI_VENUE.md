@@ -9,13 +9,14 @@ Default `MODE=paper`. `place_order` raises `PermissionError` unless mode is in `
 | Path | Role |
 |---|---|
 | `signals/schema.py` | Unified `Signal` (+ aliases: instrument/market_id, p_model, source_node, edge) |
-| `signals/producers/` | Sig_* producers → `Signal` (equity wrappers + Kalshi event helper) |
+| `signals/producers/` | Sig_* producers -> `Signal` (equity wrappers + Kalshi event helper) |
 | `risk/kelly.py` | Fractional / fee-aware Kelly |
 | `risk/sizing.py` | Thin paper Kelly adapter wrapping existing helpers |
 | `risk/promotion_gate.py` | Annotates promote/hold (does **not** block paper fills) |
+| `risk/stage2.py` | Annotate-only DSR/PBO overfitting hook (placeholders; does not block paper fills) |
 | `risk/portfolio_risk.py` | Advisory PortfolioRisk stub (haircut only) |
 | `execution/paper_ledger.py` | Signals / orders / fills / **outcomes** (PnL stub) |
-| `execution/pipeline.py` | Signal → gate annotate → size_paper → PortfolioRisk → venue → ledger |
+| `execution/pipeline.py` | Signal -> gate annotate -> stage2 annotate -> size_paper -> PortfolioRisk -> venue -> ledger |
 | `venues/kalshi/adapter.py` | Deterministic dry-run fills |
 | `venues/coinbase/adapter.py` | Paper stub; live refused |
 | `venues/robinhood/adapter.py` | Paper/read stub; live refused |
@@ -28,6 +29,13 @@ Paper fills **still record** so the outcome ledger can grow past min_n (no chick
 Stage-1 paper gate now also requires bootstrap 95% CI lo>0 (reuse
 `modules.validated_signals.bootstrap_ci`). Hold remains annotate-only;
 paper fills still record.
+
+Stage-1 (`risk/promotion_gate.py`) annotates promote/hold from sample quality
+(min_n, split-half, concentration, bootstrap CI). Stage-2 (`risk/stage2.py`) is
+an annotate-only overfitting hook: `evaluate_stage2` returns placeholder DSR/PBO
+plus reasons and never blocks paper fills. PBO stays None without a 2D
+`returns_matrix` (N>=2) and that absence does not fail the hook. The 0.25
+research haircut applies only to a stage-1 hold.
 
 ## Sizing
 
