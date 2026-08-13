@@ -24,6 +24,12 @@ Shared paper trading scaffold (`signals/`, `risk/`, `execution/`, `venues/`) —
 
 Daily `fetch_stock` and the pages.py boot path skip Yahoo when a SQLite snapshot exists; other tabs (tape bundle, options, news, earnings) may still network. Fallback to Yahoo / Alpha Vantage if the snapshot is missing or empty (Cloud-safe). See [`docs/PHASE_A_INGEST.md`](docs/PHASE_A_INGEST.md).
 
+## Phase B snapshot API + thin desk (repo only)
+
+Litestar reads SQLite snapshots (no Yahoo in request handlers). Thin SvelteKit
+desk fetches /api/bars/{symbol}. Paper/dry-run tools wrap the existing
+pipeline. See docs/PHASE_B_DESK.md. Streamlit app.py is unchanged.
+
 ## At a glance
 
 - **P0 multi-venue (paper)**: Signal schema, Kelly + promotion gate, PaperLedger, Kalshi dry-run adapter — see [`docs/P0_MULTI_VENUE.md`](docs/P0_MULTI_VENUE.md).
