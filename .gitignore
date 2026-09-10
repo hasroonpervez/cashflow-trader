@@ -6,7 +6,9 @@ __pycache__/
 .Python
 venv/
 .venv/
+.venv-*/
 .venv-ci/
+.venv-replica312/
 env/
 
 # OS / editor
