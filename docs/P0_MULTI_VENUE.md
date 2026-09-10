@@ -100,6 +100,11 @@ No pattern library, no named-setup catalog, no nightly overfit job, no live
 rails. A pattern library and settle→calib→edge learn loop are the **next**
 paper layer, after the ledger has n>0.
 
+**Roadmap (not this PR):** equity **day-trade** is the daily cashflow core.
+Swing and options are later books on the same Pulse ledger/spine. Crypto is
+later still. This first slice stays equity movers scanner + ORB/RVOL/VWAP
+only — no swing, options, or crypto code here.
+
 Universe filter for stocks-in-play that can print a large session range
 (~20% class). The first Pulse Sig (`Sig_orb_rvol_vwap`) aims to capture a
 **slice** of that move (ORB continuation still above VWAP), not the full 20%.
