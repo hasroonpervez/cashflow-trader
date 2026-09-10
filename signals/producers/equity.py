@@ -191,9 +191,8 @@ def produce_orb_rvol_vwap(
         "gap_pct": candidate.gap_pct,
         "note": "slice of ~20% in-play range; not the full move",
     }
-    pats = bar_patterns(day_5m)
-    if pats:
-        extra["patterns"] = pats
+    # No pattern-library / named-setup tags on this Sig. That layer waits
+    # until paper ledger n>0 (settle→calib→edge). Do not attach bar_patterns.
     return _as_buy_signal(
         market=symbol,
         source="Sig_orb_rvol_vwap",

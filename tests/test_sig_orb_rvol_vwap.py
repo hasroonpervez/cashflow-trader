@@ -23,6 +23,8 @@ def test_emits_sig_on_in_play_orb_above_vwap():
     assert sig.metadata.get("vwap_side") == "above"
     assert sig.metadata.get("universe", {}).get("in_play") is True
     assert sig.metadata.get("validated_raw", {}).get("status") == "signal"
+    assert "patterns" not in sig.metadata
+    assert "setup" not in sig.metadata
 
 
 def test_none_without_orb_break():

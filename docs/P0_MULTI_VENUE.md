@@ -89,13 +89,16 @@ gap-skips). Kalshi helper always builds a `Signal` and sets `edge` from
 `run_paper_pipeline(...)` with the matching paper adapter
 (`RobinhoodReadAdapter` / `KalshiDryRunAdapter`) and a `PaperLedger`.
 
-Pattern features (paper annotate only) live in `signals/producers/patterns.py`:
-equity producers attach `metadata["patterns"]` from OHLCV (`inside_bar`,
-`range_compression`, `hh_count`/`hl_count`, `close_location`); Kalshi attaches
-book-shape tags (`price_extreme`, `edge_sign`, crowded yes/no). These are
-`unvalidated` and must not size live.
+Pattern features (paper annotate only) live in `signals/producers/patterns.py`
+for the **existing** `Sig_orb30` / `Sig_swing_pullback` / Kalshi helpers only.
+`Sig_orb_rvol_vwap` does **not** attach pattern tags or named setups.
 
 ## Pulse movers scanner (paper)
+
+**Scope of this layer:** movers universe filter + one Sig (`Sig_orb_rvol_vwap`).
+No pattern library, no named-setup catalog, no nightly overfit job, no live
+rails. A pattern library and settle→calib→edge learn loop are the **next**
+paper layer, after the ledger has n>0.
 
 Universe filter for stocks-in-play that can print a large session range
 (~20% class). The first Pulse Sig (`Sig_orb_rvol_vwap`) aims to capture a
@@ -141,7 +144,8 @@ python -m tools.scanner_dry_run --demo --paper --fee-rate 0.001 --slippage-bps 5
 
 Fee/slippage are recorded on paper fills. `execution.replay.replay_fill_to_last_close`
 marks a fill to the last injected close and applies those haircuts. CPCV /
-deflated Sharpe is a **stub** (`risk/cpcv.py`) — annotate-only, not a live gate.
+deflated Sharpe is a **stub** (`risk/cpcv.py`) — annotate-only, not a live gate,
+and not a nightly research loop.
 
 ## Mode
 
