@@ -10,15 +10,20 @@ Default `MODE=paper`. `place_order` raises `PermissionError` unless mode is in `
 |---|---|
 | `signals/schema.py` | Unified `Signal` (+ aliases: instrument/market_id, p_model, source_node, edge) |
 | `signals/producers/` | Sig_* producers -> `Signal` (equity wrappers + Kalshi event helper) |
+| `signals/scanner.py` | Paper/research movers universe (gap% / RVOL / $vol / price floor). Offline bars only. |
 | `risk/kelly.py` | Fractional / fee-aware Kelly |
 | `risk/sizing.py` | Thin paper Kelly adapter wrapping existing helpers |
 | `risk/promotion_gate.py` | Annotates promote/hold (does **not** block paper fills) |
 | `risk/stage2.py` | Annotate-only DSR/PBO overfitting hook (placeholders; does not block paper fills) |
+| `risk/cpcv.py` | Annotate-only CPCV / deflated-Sharpe **stub** (no Bailey DSR; does not block fills) |
 | `risk/calib.py` | Thin ledger -> gate_stats read-back (settled pnls only) |
 | `risk/edge.py` | Betting/edge annotate from settled PnL (mean + hit rate; fail closed on small n) |
 | `risk/portfolio_risk.py` | Advisory PortfolioRisk stub (haircut only) |
 | `execution/paper_ledger.py` | Signals / orders / fills / **outcomes** (PnL stub + settle); optional SQLite persist |
-| `execution/pipeline.py` | Signal -> gate annotate -> stage2 annotate -> size_paper -> PortfolioRisk -> venue -> ledger |
+| `execution/pipeline.py` | Signal -> gate annotate -> stage2 annotate -> CPCV stub -> size_paper -> PortfolioRisk -> venue -> ledger |
+| `execution/friction.py` | `fee_rate` + `slippage_bps` fields; `apply_friction` for replay haircuts |
+| `execution/replay.py` | Mark paper fills to last injected close (no network) |
+| `execution/pulse.py` | Movers scan → `Sig_orb_rvol_vwap` → paper pipeline (Robinhood stub) |
 | `venues/kalshi/adapter.py` | Deterministic dry-run fills |
 | `venues/coinbase/adapter.py` | Paper stub; live refused |
 | `venues/robinhood/adapter.py` | Paper/read stub; live refused |
@@ -74,6 +79,7 @@ Producers emit unified paper `Signal` records that feed `run_paper_pipeline`
 | Producer | Source node | Venue (paper) | Input |
 |---|---|---|---|
 | `produce_orb30` | `Sig_orb30` | `robinhood` | One session of 5m OHLCV (+ optional prior_close) via `modules.validated_signals.orb30_signal` |
+| `produce_orb_rvol_vwap` | `Sig_orb_rvol_vwap` | `robinhood` | Movers universe + ORB break + RVOL + last close above session VWAP. **Unvalidated** paper research. |
 | `produce_swing_pullback` | `Sig_swing_pullback` | `robinhood` | Daily OHLCV via `swing_pullback_signal` |
 | `produce_kalshi_event` | `Sig_K.*` / caller `source_node` | `kalshi` | Supplied `p_true`, `market_price`, `market_id`: **no network, no secrets** |
 
@@ -88,6 +94,54 @@ equity producers attach `metadata["patterns"]` from OHLCV (`inside_bar`,
 `range_compression`, `hh_count`/`hl_count`, `close_location`); Kalshi attaches
 book-shape tags (`price_extreme`, `edge_sign`, crowded yes/no). These are
 `unvalidated` and must not size live.
+
+## Pulse movers scanner (paper)
+
+Universe filter for stocks-in-play that can print a large session range
+(~20% class). The first Pulse Sig (`Sig_orb_rvol_vwap`) aims to capture a
+**slice** of that move (ORB continuation still above VWAP), not the full 20%.
+
+Pure functions in `signals/scanner.py`. **Inject bars** — do not scrape Yahoo
+inside API request handlers.
+
+Default floors (override via `ScannerConfig` or CLI flags):
+
+| Filter | Default | Role |
+|---|---|---|
+| `min_gap_pct` | 3.0 | Absolute open-vs-prior-close gap |
+| `min_rvol` | 2.0 | Session volume vs prior-session average (time-adjusted to 390m) |
+| `min_price` | 5.0 | Last close floor |
+| `min_dollar_volume` | 2_000_000 | Last close × session volume |
+
+`score_symbol(symbol, bars, prior_close=..., avg_volume=...)` works offline
+with one session plus hints, or a multi-session frame (prior sessions supply
+prior close and average volume). `scan_universe` ranks `in_play` names.
+
+`produce_orb_rvol_vwap` returns `None` unless: scanner `in_play`, ORB-30
+break (gap-skip **off** — gappers *are* the universe), and last close **above**
+session VWAP. Wire-up: `execution.pulse.run_movers_paper` → risk annotate
+(gate / stage2 / edge / CPCV stub) → `RobinhoodReadAdapter` → `PaperLedger`.
+Gates stay **annotate-only**; small-n holds do not block paper fills.
+`mode=live` remains **403** on `/paper/*`. Live `place_order` is not enabled.
+
+### Scanner dry-run (no network)
+
+```bash
+# Synthetic PLAY (in-play + Sig) / DEAD / CHEAP — no Yahoo
+python -m tools.scanner_dry_run --demo
+
+# Injected bars (JSON). Shapes:
+#   {"PLAY": {"prior_close": 100, "avg_volume": 1e6, "bars": [{"ts": "...", "open": ...}]}}
+#   {"PLAY": [{"ts": "...", "open": ..., "high": ..., "low": ..., "close": ..., "volume": ...}]}
+python -m tools.scanner_dry_run --bars-json path/to/bars.json
+
+# Same, then paper pipeline (Robinhood stub, in-memory ledger)
+python -m tools.scanner_dry_run --demo --paper --fee-rate 0.001 --slippage-bps 5
+```
+
+Fee/slippage are recorded on paper fills. `execution.replay.replay_fill_to_last_close`
+marks a fill to the last injected close and applies those haircuts. CPCV /
+deflated Sharpe is a **stub** (`risk/cpcv.py`) — annotate-only, not a live gate.
 
 ## Mode
 

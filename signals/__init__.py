@@ -9,11 +9,13 @@ try:
     from signals.producers import (  # noqa: F401
         produce_kalshi_event,
         produce_orb30,
+        produce_orb_rvol_vwap,
         produce_swing_pullback,
     )
 
     __all__ += [
         "produce_orb30",
+        "produce_orb_rvol_vwap",
         "produce_swing_pullback",
         "produce_kalshi_event",
     ]

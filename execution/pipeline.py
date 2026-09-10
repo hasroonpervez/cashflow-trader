@@ -4,7 +4,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from execution.friction import friction_fields
 from execution.paper_ledger import PaperLedger
+from risk.cpcv import CpcvGateResult, cpcv_from_stats
 from risk.portfolio_risk import PortfolioRiskAdvice, advise_portfolio_risk
 from risk.promotion_gate import PromotionGateResult, gate_from_stats
 from risk.sizing import size_paper
@@ -25,6 +27,9 @@ class PaperPipelineResult:
     promoted: bool = False
     stage2: Stage2Result | None = None
     edge: EdgeModelResult | None = None
+    cpcv: CpcvGateResult | None = None
+    fee_rate: float = 0.0
+    slippage_bps: float = 0.0
 
 
 def run_paper_pipeline(
@@ -36,6 +41,7 @@ def run_paper_pipeline(
     *,
     odds_b: float = 1.0,
     fee_rate: float = 0.0,
+    slippage_bps: float = 0.0,
     kelly_fraction: float = 0.25,
     open_exposure: float = 0.0,
 ) -> PaperPipelineResult:
@@ -44,7 +50,8 @@ def run_paper_pipeline(
     Promotion gate **annotates** promote/hold and may haircut size, but does
     **not** block paper fills (avoids chicken-and-egg while n < min_n).
     Stage-2 DSR/PBO also annotates only: holds append reasons and never block
-    paper fills. The 0.25 research haircut applies only to the promotion gate.
+    paper fills. CPCV / deflated Sharpe is a stub (annotate-only). The 0.25
+    research haircut applies only to the promotion gate.
     Live placement remains refused by the venue adapter.
     """
     ledger.record_signal(signal.to_ledger_dict())
@@ -53,6 +60,8 @@ def run_paper_pipeline(
     promoted = bool(decision.ok)
     stage2 = stage2_from_stats(gate_stats)
     edge_note = edge_from_stats(gate_stats, model_edge=signal.edge)
+    cpcv_note = cpcv_from_stats(gate_stats)
+    friction = friction_fields(fee_rate=fee_rate, slippage_bps=slippage_bps)
 
     # Always size for paper; haircut when gate holds so research still accrues fills.
     sized = size_paper(
@@ -83,6 +92,9 @@ def run_paper_pipeline(
     if not edge_note.ok:
         reasons.extend(edge_note.reasons)
         reasons.append("edge: annotate-hold; paper fill still recorded")
+    if not cpcv_note.ok:
+        reasons.extend(cpcv_note.reasons)
+        reasons.append("cpcv: annotate-hold; paper fill still recorded")
     reasons.extend(f"portfolio_risk: {r}" for r in advice.reasons)
 
     if stake <= 0:
@@ -96,6 +108,9 @@ def run_paper_pipeline(
             promoted=promoted,
             stage2=stage2,
             edge=edge_note,
+            cpcv=cpcv_note,
+            fee_rate=float(fee_rate),
+            slippage_bps=float(slippage_bps),
         )
 
     order = OrderRequest(
@@ -133,6 +148,8 @@ def run_paper_pipeline(
         "mode": fill.mode.value,
         "promoted": promoted,
         "raw": dict(fill.raw or {}),
+        "fee_rate": friction["fee_rate"],
+        "slippage_bps": friction["slippage_bps"],
     }
     ledger.record_fill(fill_payload)
     # Outcome stub row so calib->gate has a write target (PnL filled later).
@@ -144,6 +161,8 @@ def run_paper_pipeline(
             "pnl": None,
             "settled": False,
             "promoted": promoted,
+            "fee_rate": friction["fee_rate"],
+            "slippage_bps": friction["slippage_bps"],
         }
     )
     return PaperPipelineResult(
@@ -156,4 +175,7 @@ def run_paper_pipeline(
         promoted=promoted,
         stage2=stage2,
         edge=edge_note,
+        cpcv=cpcv_note,
+        fee_rate=float(fee_rate),
+        slippage_bps=float(slippage_bps),
     )
