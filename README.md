@@ -18,7 +18,7 @@ The audit's summary was *"the '10x' branding is not currently honest."* It is cl
 
 ## P0 multi-venue (paper)
 
-Shared paper trading scaffold (`signals/`, `risk/`, `execution/`, `venues/`) — **dry-run / paper only**, no live orders. See [`docs/P0_MULTI_VENUE.md`](docs/P0_MULTI_VENUE.md).
+Shared paper trading scaffold (`signals/`, `risk/`, `execution/`, `venues/`) — **dry-run / paper only**, no live orders. Pulse movers scanner + `Sig_orb_rvol_vwap` is paper-only (`python -m tools.scanner_dry_run --demo`). See [`docs/P0_MULTI_VENUE.md`](docs/P0_MULTI_VENUE.md).
 
 ## Phase A ingest snapshots
 

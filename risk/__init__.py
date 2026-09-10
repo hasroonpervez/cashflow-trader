@@ -8,6 +8,7 @@ from risk.portfolio_risk import PortfolioRiskAdvice, advise_portfolio_risk
 from risk.promotion_gate import PromotionGateResult, check, gate_from_stats, promotion_gate
 from risk.sizing import PaperSize, size_paper
 from risk.stage2 import Stage2Result, evaluate_stage2, stage2_from_stats
+from risk.cpcv import CpcvGateResult, cpcv_from_stats, evaluate_cpcv
 
 __all__ = [
     "apply_settlement",
@@ -29,4 +30,7 @@ __all__ = [
     "EdgeModelResult",
     "evaluate_edge",
     "edge_from_stats",
+    "CpcvGateResult",
+    "evaluate_cpcv",
+    "cpcv_from_stats",
 ]
