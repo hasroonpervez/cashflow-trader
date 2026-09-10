@@ -882,14 +882,14 @@ bind `127.0.0.1` only, and the tunnel is the only path in.
 
 ### launchd services to add
 
-Match the existing naming convention on the box (`ai.*`, `com.hasroon.*`):
+Match the existing naming convention on the box (`ai.*`, `com.cft.*`):
 
 | Label | Runs |
 |---|---|
-| `com.hasroon.cft.api` | Granian serving Litestar on 127.0.0.1:8000 |
-| `com.hasroon.cft.web` | Bun serving SvelteKit on 127.0.0.1:3000 |
-| `com.hasroon.cft.worker` | APScheduler + Arq worker |
-| `com.hasroon.cft.tunnel` | cloudflared |
+| `com.cft.api` | Granian serving Litestar on 127.0.0.1:8000 |
+| `com.cft.web` | Bun serving SvelteKit on 127.0.0.1:3000 |
+| `com.cft.worker` | APScheduler + Arq worker |
+| `com.cft.tunnel` | cloudflared |
 
 All with `KeepAlive`, `RunAtLoad`, and stdout/stderr to `~/Library/Logs/cashflow/`. Add each
 to uptime-kuma, which is already running on `:3001`.

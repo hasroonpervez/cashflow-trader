@@ -22,7 +22,7 @@ Ranked by milliseconds removed from a single user interaction (a tap, a sort, a 
 
 **Language choice is levers 10 and 11, at the bottom, worth 0.060 ms and 0.013 ms.** Together that is 0.073 ms against a 40 ms round trip: 0.18%. A single frame at 120 Hz is 8.3 ms, so the entire language question is 1/114th of one frame.
 
-One caveat about the baseline: two specialists reported the machine identifying as Apple M4, 10 cores, 16 GB rather than M3 Pro, 11 cores, 18 GB, and I confirmed that `/Users/hasroon/cashflow-trader/.venv-ci` runs **Python 3.9.6**, not the 3.12.13 in the brief. Python 3.9 went end of life in October 2025. The margins above are 100x to 1000x, so no conclusion changes, but the baseline should be corrected before the next round of measurement.
+One caveat about the baseline: two specialists reported the machine identifying as Apple M4, 10 cores, 16 GB rather than M3 Pro, 11 cores, 18 GB, and I confirmed that the local `.venv-ci` runs **Python 3.9.6**, not the 3.12.13 in the brief. Python 3.9 went end of life in October 2025. The margins above are 100x to 1000x, so no conclusion changes, but the baseline should be corrected before the next round of measurement.
 
 # Where a different technology genuinely wins
 
@@ -174,7 +174,7 @@ The measured win is 0.060 ms per request out of a 40 ms round trip. If you want 
 
 Ordered by measured payoff per hour of effort.
 
-1. **Swap the scalar normal CDF. One afternoon.** In `/Users/hasroon/cashflow-trader/modules/options.py`, lines 41 to 45 currently do `from scipy.stats import norm; _cdf = norm.cdf`. Define the scalar `_cdf` and `_pdf` from `math.erf` and `math.exp` instead, and keep `norm` imported for anything vectorised. Measured: 35.7x to 39x on the 200-strike chain, with max absolute deviation 0.000e+00 across all six greeks, verified independently twice. Do not use the existing Abramowitz and Stegun fallback at line 49 for this: `math.erf` is exact to double precision and just as fast. Run the 852 tests. They should be untouched.
+1. **Swap the scalar normal CDF. One afternoon.** In `modules/options.py`, lines 41 to 45 currently do `from scipy.stats import norm; _cdf = norm.cdf`. Define the scalar `_cdf` and `_pdf` from `math.erf` and `math.exp` instead, and keep `norm` imported for anything vectorised. Measured: 35.7x to 39x on the 200-strike chain, with max absolute deviation 0.000e+00 across all six greeks, verified independently twice. Do not use the existing Abramowitz and Stegun fallback at line 49 for this: `math.erf` is exact to double precision and just as fast. Run the 852 tests. They should be untouched.
 
 2. **Hoist the RNG and vectorise the four chain loops. One day.** `Opt.covered_calls` and `cash_secured_puts` re-seed `np.random.default_rng(seed=42)` inside `iterrows`, so all 60 strikes redraw the identical 10,000 path array. Draw once per chain and broadcast. Then replace the `iterrows()` at lines 2480, 2509, 2546 and 2574 with zipped `.to_numpy()` columns and array math over the strike vector. Measured: 7.939 ms to 1.868 ms on 60 strikes and 18.06 ms to 0.295 ms on 200 strikes, both with max deviation 0.000e+00. Full chain goes from roughly 35 ms to under 1 ms.
 
