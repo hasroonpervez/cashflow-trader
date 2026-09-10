@@ -34,7 +34,7 @@ def test_rejects_flat_low_rvol():
 
 
 def test_rejects_price_floor():
-    bars = build_in_play_orb(prior_close=1.2, gap_pct=8.0)
+    bars = build_in_play_orb(prior_close=1.2, gap_pct=8.0, breakout=False)
     cand = score_symbol("CHEAP", bars)
     assert cand.in_play is False
     assert any("price floor" in r for r in cand.reasons)

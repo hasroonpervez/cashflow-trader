@@ -136,10 +136,12 @@ def replay_ledger(
     for ev in ledger.list_fills():
         payload = dict(ev.payload)
         market = str(payload.get("market") or payload.get("instrument") or "").upper()
-        bars = bars_by_symbol.get(market) or bars_by_symbol.get(
-            str(payload.get("market") or "")
-        )
-        if bars is None:
+        raw_mkt = str(payload.get("market") or "")
+        if market in bars_by_symbol:
+            bars = bars_by_symbol[market]
+        elif raw_mkt in bars_by_symbol:
+            bars = bars_by_symbol[raw_mkt]
+        else:
             continue
         out.append(
             replay_fill_to_last_close(

@@ -127,6 +127,7 @@ def build_demo_frames() -> tuple[dict[str, pd.DataFrame], dict[str, dict[str, An
         symbol="CHEAP",
         prior_close=1.20,
         gap_pct=8.0,
+        breakout=False,
         volume_per_bar=200_000.0,
         prior_volume=80_000.0,
     )

@@ -184,7 +184,7 @@ def score_symbol(
 
     inferred_prior = None
     if prior_sessions:
-        inferred_prior = _finite(prior_sessions[-1]["close"].iloc[-1])
+        inferred_prior = _finite(prior_sessions[-1][1]["close"].iloc[-1])
     px_prior = _finite(prior_close) if prior_close is not None else inferred_prior
 
     gap_pct = None
